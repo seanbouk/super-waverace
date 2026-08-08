@@ -10,5 +10,8 @@ game/src/*.obj
 game/src/*.ps
 game/src/main.asm
 
+# ROM copied into the web player for local testing
+web/superwaverace.sfc
+
 # local toolchain (never commit; see README for install)
 toolchain/
