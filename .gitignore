@@ -1,0 +1,14 @@
+# PVSnesLib build artifacts
+game/*.sfc
+game/*.log
+game/*.sym
+game/*.symfull
+game/linkfile
+game/hdr.asm
+game/hdr.obj
+game/src/*.obj
+game/src/*.ps
+game/src/main.asm
+
+# local toolchain (never commit; see README for install)
+toolchain/

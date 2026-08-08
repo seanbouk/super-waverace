@@ -1,0 +1,29 @@
+name: build-rom
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install PVSnesLib
+        run: |
+          curl -sSL -o /tmp/pvsneslib.zip https://github.com/alekmaul/pvsneslib/releases/download/4.6.0/pvsneslib_460_64b_linux_release.zip
+          unzip -q /tmp/pvsneslib.zip -d "$HOME"
+          chmod +x "$HOME"/pvsneslib/devkitsnes/bin/* "$HOME"/pvsneslib/devkitsnes/tools/*
+
+      - name: Build ROM
+        run: |
+          export PVSNESLIB_HOME="$HOME/pvsneslib"
+          make -C game
+
+      - name: Upload ROM
+        uses: actions/upload-artifact@v4
+        with:
+          name: superwaverace
+          path: game/superwaverace.sfc

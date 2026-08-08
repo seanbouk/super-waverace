@@ -4,7 +4,24 @@ A Mode 7 style SNES game — a wave racer where the sea itself rolls, using per-
 
 ## Status
 
-🚧 Early development — exploring the core geometry before touching hardware.
+🚧 Phase 1 — hello-world ROM builds and boots. See `docs/PLAN.md` for the roadmap
+(target: [SNES DEV Game Jam 2026](https://itch.io/jam/snes-dev-game-jam-2026)).
+
+## Building the ROM
+
+The game (in `game/`) is built with [PVSnesLib 4.6.0](https://github.com/alekmaul/pvsneslib).
+Output is `game/superwaverace.sfc` — LoROM, no SRAM, no enhancement chips, per the jam rules.
+
+**Windows (Git Bash):**
+
+```bash
+winget install ezwinports.make   # once
+./scripts/setup-windows.sh       # once: installs PVSnesLib to ~/pvsneslib + Git Bash patches
+export PVSNESLIB_HOME=$HOME/pvsneslib
+make -C game
+```
+
+**CI:** every push to `main` builds the ROM on Linux and uploads it as a workflow artifact.
 
 ## Tools
 
