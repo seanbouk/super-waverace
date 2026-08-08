@@ -4,8 +4,16 @@ A Mode 7 style SNES game — a wave racer where the sea itself rolls, using per-
 
 ## Status
 
-🚧 Phase 1 — hello-world ROM builds and boots. See `docs/PLAN.md` for the roadmap
+🌊 Phase 3 — the rolling sea works in Mode 7. See `docs/PLAN.md` for the roadmap
 (target: [SNES DEV Game Jam 2026](https://itch.io/jam/snes-dev-game-jam-2026)).
+
+![Rolling sea](docs/rolling-sea.png) ![Rolling sea, later phase](docs/rolling-sea-2.png)
+
+The sea is a per-scanline raycast baked at build time (`tools/bake_tables.py`) into
+HDMA tables: `TM` splits sky from sea, `M7A` sets perspective width, and — with the
+matrix row zeroed — `M7Y` picks the exact texture row each scanline samples, so near
+crests correctly occlude the water behind them. 32 baked phases cycle to roll the
+swell (~28KB of ROM, near-zero CPU). D-pad up/down changes the sea speed.
 
 ## Building the ROM
 

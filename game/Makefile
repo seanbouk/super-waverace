@@ -8,9 +8,30 @@ export ROMTITLE := SUPER WAVERACE
 
 include ${PVSNESLIB_HOME}/devkitsnes/snes_rules
 
-.PHONY: all cleanLogs
+PYTHON := $(shell command -v python3 2>/dev/null || command -v python 2>/dev/null)
 
-all: buildWithSummary
-buildActual: $(OBJS) $(ROMNAME).sfc
+.PHONY: all cleanLogs gen
+
+# gen must run before buildWithSummary: the inner `make buildActual` re-globs
+# sources, so files generated here are picked up on a clean build.
+all: gen buildWithSummary
+
+gen: bake.stamp sea.pc7
+
+bake.stamp: ../tools/bake_tables.py
+	@echo baking wave tables + sea texture ...
+	$(PYTHON) ../tools/bake_tables.py
+	@touch bake.stamp
+
+sea.png: bake.stamp
+
+sea.pc7: sea.png
+	@echo convert bitmap ... $(notdir $@)
+	$(GFXCONV) -p -m -M 7 -i $<
+
+data.obj: sea.pc7
+
+buildActual: $(OFILES) $(ROMNAME).sfc
 
 clean: cleanBuildRes cleanRom cleanGfx cleanLogs
+	@rm -f bake.stamp sea.png sea.pc7 sea.mp7 sea.pal wavetables.asm wavedata.c wavedata.h
