@@ -26,3 +26,4 @@ web/superwaverace.sfc
 
 # local toolchain (never commit; see README for install)
 toolchain/
+game/*.as
