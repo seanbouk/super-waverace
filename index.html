@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Super Waverace</title>
+<style>
+  :root { --bg: #12151c; --panel: #1b2028; --ink: #d8dee9; --dim: #7b8494; --accent: #58c4dd; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font: 14px/1.5 "Segoe UI", system-ui, sans-serif;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    min-height: 100vh;
+    padding: 16px;
+  }
+  h1 { font-size: 20px; margin: 8px 0 2px; font-weight: 600; }
+  p.sub { color: var(--dim); margin: 0 0 16px; }
+  p.sub a { color: var(--accent); }
+  #frame {
+    width: min(96vw, 900px);
+    aspect-ratio: 256 / 224;
+    background: #000;
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  #footer { color: var(--dim); font-size: 12px; margin-top: 14px; text-align: center; }
+  kbd {
+    background: var(--panel);
+    border: 1px solid #3d4658;
+    border-radius: 4px;
+    padding: 1px 6px;
+    font-family: inherit;
+  }
+</style>
+</head>
+<body>
+
+<h1>Super Waverace</h1>
+<p class="sub">A Mode 7 SNES game in development &mdash; <a href="https://github.com/seanbouk/super-waverace">source</a></p>
+
+<div id="frame"><div id="game"></div></div>
+
+<p id="footer">
+  Defaults: <kbd>&uarr;&darr;&larr;&rarr;</kbd> d-pad &middot; <kbd>Z</kbd>/<kbd>X</kbd>/<kbd>A</kbd>/<kbd>S</kbd> B/A/Y/X &middot;
+  <kbd>Enter</kbd> Start &middot; <kbd>Shift</kbd> Select &middot; gamepads supported<br>
+  Runs the latest ROM built from <code>main</code>. Emulation by EmulatorJS (snes9x core).
+</p>
+
+<script>
+  window.EJS_player = "#game";
+  window.EJS_core = "snes";
+  window.EJS_gameName = "Super Waverace";
+  window.EJS_gameUrl = "superwaverace.sfc";
+  window.EJS_pathtodata = "https://cdn.emulatorjs.org/4.2.3/data/";
+  window.EJS_backgroundColor = "#12151c";
+</script>
+<script src="https://cdn.emulatorjs.org/4.2.3/data/loader.js"></script>
+
+</body>
+</html>
