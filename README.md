@@ -21,7 +21,14 @@ export PVSNESLIB_HOME=$HOME/pvsneslib
 make -C game
 ```
 
-**CI:** every push to `main` builds the ROM on Linux and uploads it as a workflow artifact.
+**CI:** every push to `main` builds the ROM on Linux, uploads it as a workflow artifact,
+and deploys the web player to the `gh-pages` branch.
+
+## Play in the browser
+
+**https://seanbouk.github.io/super-waverace/** — the latest ROM from `main`, running in
+[EmulatorJS](https://emulatorjs.org/) (snes9x core). For local testing: build the ROM,
+copy it into `web/`, and serve that folder with any static file server.
 
 ## Tools
 
