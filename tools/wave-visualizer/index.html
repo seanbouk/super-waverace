@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Mode 7 Wave Lab</title>
+<style>
+  :root {
+    --bg: #12151c;
+    --panel: #1b2028;
+    --ink: #d8dee9;
+    --dim: #7b8494;
+    --accent: #58c4dd;
+    --grid: #2a3140;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font: 14px/1.4 "Segoe UI", system-ui, sans-serif;
+    padding: 16px;
+  }
+  h1 { font-size: 18px; margin: 0 0 12px; font-weight: 600; }
+  h1 span { color: var(--dim); font-weight: 400; }
+
+  #controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 24px;
+    background: var(--panel);
+    border-radius: 8px;
+    padding: 12px 16px;
+    margin-bottom: 16px;
+  }
+  .group { display: flex; flex-direction: column; gap: 6px; }
+  .group > b { font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--dim); }
+  .ctl { display: grid; grid-template-columns: 90px 140px 52px; align-items: center; gap: 8px; }
+  .ctl label { font-size: 13px; }
+  .ctl output { font-variant-numeric: tabular-nums; font-size: 13px; color: var(--accent); text-align: right; }
+  input[type=range] { width: 140px; accent-color: var(--accent); }
+  .check { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
+
+  #charts {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    max-width: 1400px;
+  }
+  .chart {
+    background: var(--panel);
+    border-radius: 8px;
+    padding: 10px 10px 6px;
+  }
+  .chart h2 { font-size: 13px; margin: 0 0 6px 4px; font-weight: 600; color: var(--ink); }
+  .chart h2 small { color: var(--dim); font-weight: 400; }
+  canvas { width: 100%; height: auto; display: block; border-radius: 4px; }
+</style>
+</head>
+<body>
+
+<h1>Mode 7 Wave Lab <span>&mdash; per-scanline raycast against a sine ocean</span></h1>
+
+<div id="controls">
+  <div class="group">
+    <b>Camera</b>
+    <div class="ctl"><label>Height</label><input type="range" id="camH" min="0" max="120" step="1" value="45"><output for="camH"></output></div>
+    <div class="ctl"><label>Pitch &deg;</label><input type="range" id="pitch" min="-45" max="45" step="0.5" value="-8"><output for="pitch"></output></div>
+    <div class="ctl"><label>FOV &deg;</label><input type="range" id="fov" min="5" max="90" step="1" value="30"><output for="fov"></output></div>
+  </div>
+  <div class="group">
+    <b>Wave</b>
+    <div class="ctl"><label>Amplitude</label><input type="range" id="amp" min="0" max="40" step="0.5" value="12"><output for="amp"></output></div>
+    <div class="ctl"><label>Wavelength</label><input type="range" id="wl" min="10" max="250" step="1" value="80"><output for="wl"></output></div>
+    <div class="ctl"><label>Phase &deg;</label><input type="range" id="phase" min="0" max="360" step="1" value="0"><output for="phase"></output></div>
+  </div>
+  <div class="group">
+    <b>Rays</b>
+    <div class="ctl"><label>Max distance</label><input type="range" id="maxD" min="100" max="1000" step="10" value="320"><output for="maxD"></output></div>
+    <div class="check"><input type="checkbox" id="animate"><label for="animate">Animate phase (roll the sea)</label></div>
+    <div class="check"><input type="checkbox" id="showWave" checked><label for="showWave">Ghost wave on ray chart</label></div>
+  </div>
+</div>
+
+<div id="charts">
+  <div class="chart">
+    <h2>1. The sea <small>&mdash; y = A&middot;sin(2&pi;x/&lambda; + &phi;), +x is into the distance (+z in game)</small></h2>
+    <canvas id="c1" width="640" height="400"></canvas>
+  </div>
+  <div class="chart">
+    <h2>2. The eye <small>&mdash; 224 rays, one per scanline. <span style="color:#e8a04c">orange</span> = pointing up, truncated where they hit</small></h2>
+    <canvas id="c2" width="640" height="400"></canvas>
+  </div>
+  <div class="chart">
+    <h2>3. First crossing <small>&mdash; per scanline: lowest x where the ray meets the wave</small></h2>
+    <canvas id="c3" width="640" height="400"></canvas>
+  </div>
+  <div class="chart">
+    <h2>4. SNES display <small>&mdash; each scanline shaded by its hit x (bright = near). Flat colour = missed</small></h2>
+    <canvas id="c4" width="640" height="400"></canvas>
+  </div>
+</div>
+
+<script>
+"use strict";
+
+const SCANLINES = 224;
+const DEG = Math.PI / 180;
+
+// ---- state, wired straight to the sliders -------------------------------
+const S = {};
+const sliders = ["camH", "pitch", "fov", "amp", "wl", "phase", "maxD"];
+for (const id of sliders) {
+  const el = document.getElementById(id);
+  const out = el.parentElement.querySelector("output");
+  const sync = () => { S[id] = parseFloat(el.value); out.value = el.value; };
+  el.addEventListener("input", () => { sync(); draw(); });
+  sync();
+}
+const animateBox = document.getElementById("animate");
+const showWaveBox = document.getElementById("showWave");
+showWaveBox.addEventListener("input", draw);
+
+// ---- the model ----------------------------------------------------------
+
+function waveY(x) {
+  return S.amp * Math.sin(2 * Math.PI * x / S.wl + S.phase * DEG);
+}
+
+// March along a ray from the camera and bisect the first sign change.
+// Returns {hit, x, y, s} where x is the world x of the first crossing.
+function castRay(angle) {
+  const ca = Math.cos(angle), sa = Math.sin(angle);
+  const above = s => (S.camH + s * sa) - waveY(s * ca);
+
+  if (above(0) <= 0) return { hit: true, s: 0, x: 0, y: S.camH };
+
+  const ds = Math.max(0.25, Math.min(S.wl / 50, 2));
+  let sPrev = 0;
+  for (let s = ds; s <= S.maxD; s += ds) {
+    if (above(s) <= 0) {
+      let lo = sPrev, hi = s;
+      for (let i = 0; i < 28; i++) {
+        const mid = (lo + hi) / 2;
+        if (above(mid) <= 0) hi = mid; else lo = mid;
+      }
+      const sh = (lo + hi) / 2;
+      return { hit: true, s: sh, x: sh * ca, y: S.camH + sh * sa };
+    }
+    sPrev = s;
+  }
+  return { hit: false };
+}
+
+// Scanline 0 is the top of the screen, so it gets the most upward ray.
+function scanlineAngle(i) {
+  const t = i / (SCANLINES - 1);
+  return (S.pitch + S.fov / 2 - t * S.fov) * DEG;
+}
+
+function castAll() {
+  const hits = new Array(SCANLINES);
+  for (let i = 0; i < SCANLINES; i++) {
+    const a = scanlineAngle(i);
+    hits[i] = { angle: a, up: Math.sin(a) > 0, ...castRay(a) };
+  }
+  return hits;
+}
+
+// ---- tiny chart helper --------------------------------------------------
+
+function chart(canvas, xMin, xMax, yMin, yMax, xLabel, yLabel) {
+  const ctx = canvas.getContext("2d");
+  const W = canvas.width, H = canvas.height;
+  const m = { l: 46, r: 12, t: 8, b: 30 };
+  const pw = W - m.l - m.r, ph = H - m.t - m.b;
+  const px = x => m.l + (x - xMin) / (xMax - xMin) * pw;
+  const py = y => m.t + (yMax - y) / (yMax - yMin) * ph;
+
+  ctx.clearRect(0, 0, W, H);
+  ctx.fillStyle = "#141922";
+  ctx.fillRect(m.l, m.t, pw, ph);
+
+  // grid + ticks
+  ctx.strokeStyle = "#2a3140";
+  ctx.fillStyle = "#7b8494";
+  ctx.font = "11px system-ui";
+  ctx.lineWidth = 1;
+  const xStep = niceStep(xMax - xMin), yStep = niceStep(yMax - yMin);
+  for (let x = Math.ceil(xMin / xStep) * xStep; x <= xMax; x += xStep) {
+    ctx.beginPath(); ctx.moveTo(px(x), m.t); ctx.lineTo(px(x), m.t + ph); ctx.stroke();
+    ctx.textAlign = "center";
+    ctx.fillText(round1(x), px(x), m.t + ph + 14);
+  }
+  for (let y = Math.ceil(yMin / yStep) * yStep; y <= yMax; y += yStep) {
+    ctx.beginPath(); ctx.moveTo(m.l, py(y)); ctx.lineTo(m.l + pw, py(y)); ctx.stroke();
+    ctx.textAlign = "right";
+    ctx.fillText(round1(y), m.l - 6, py(y) + 4);
+  }
+  // zero lines a touch brighter
+  ctx.strokeStyle = "#3d4658";
+  if (yMin < 0 && yMax > 0) { ctx.beginPath(); ctx.moveTo(m.l, py(0)); ctx.lineTo(m.l + pw, py(0)); ctx.stroke(); }
+  if (xMin < 0 && xMax > 0) { ctx.beginPath(); ctx.moveTo(px(0), m.t); ctx.lineTo(px(0), m.t + ph); ctx.stroke(); }
+
+  // axis labels
+  ctx.fillStyle = "#7b8494";
+  ctx.textAlign = "center";
+  ctx.fillText(xLabel, m.l + pw / 2, H - 6);
+  ctx.save();
+  ctx.translate(12, m.t + ph / 2);
+  ctx.rotate(-Math.PI / 2);
+  ctx.fillText(yLabel, 0, 0);
+  ctx.restore();
+
+  // clip drawing to the plot area
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(m.l, m.t, pw, ph);
+  ctx.clip();
+
+  return { ctx, px, py, done: () => ctx.restore() };
+}
+
+function niceStep(range) {
+  const raw = range / 8;
+  const mag = Math.pow(10, Math.floor(Math.log10(raw)));
+  for (const m of [1, 2, 5, 10]) if (raw <= m * mag) return m * mag;
+  return 10 * mag;
+}
+function round1(v) { return Math.abs(v) < 1e-9 ? "0" : +v.toFixed(1); }
+
+function lerpColor(a, b, t) {
+  return `rgb(${Math.round(a[0] + (b[0] - a[0]) * t)},${Math.round(a[1] + (b[1] - a[1]) * t)},${Math.round(a[2] + (b[2] - a[2]) * t)})`;
+}
+const NEAR = [140, 235, 255], FAR = [8, 40, 90], SKY = "#e8956b";
+
+// ---- the four charts ----------------------------------------------------
+
+function worldYRange() {
+  const yMax = Math.max(S.camH, S.amp) * 1.15 + 8;
+  const yMin = -S.amp * 1.3 - 8;
+  return [yMin, yMax];
+}
+
+function drawWavePath(c, xMax) {
+  c.ctx.beginPath();
+  const n = 400;
+  for (let i = 0; i <= n; i++) {
+    const x = i / n * xMax;
+    const y = waveY(x);
+    i ? c.ctx.lineTo(c.px(x), c.py(y)) : c.ctx.moveTo(c.px(x), c.py(y));
+  }
+  c.ctx.stroke();
+}
+
+function drawChart1() {
+  const [yMin, yMax] = worldYRange();
+  const c = chart(document.getElementById("c1"), 0, S.maxD, yMin, yMax, "x (distance into scene / +z)", "y (screen up)");
+  c.ctx.strokeStyle = "#58c4dd";
+  c.ctx.lineWidth = 2;
+  drawWavePath(c, S.maxD);
+  c.done();
+}
+
+function drawChart2(hits) {
+  const [yMin, yMax] = worldYRange();
+  const c = chart(document.getElementById("c2"), 0, S.maxD, yMin, yMax, "x (distance into scene / +z)", "y (screen up)");
+
+  if (showWaveBox.checked) {
+    c.ctx.strokeStyle = "rgba(88,196,221,0.25)";
+    c.ctx.lineWidth = 1.5;
+    drawWavePath(c, S.maxD);
+  }
+
+  c.ctx.lineWidth = 1;
+  for (const h of hits) {
+    c.ctx.strokeStyle = h.up ? "rgba(232,160,76,0.45)" : "rgba(216,222,233,0.30)";
+    c.ctx.beginPath();
+    c.ctx.moveTo(c.px(0), c.py(S.camH));
+    if (h.hit) {
+      c.ctx.lineTo(c.px(h.x), c.py(h.y));
+    } else {
+      c.ctx.lineTo(c.px(S.maxD * Math.cos(h.angle) * 2), c.py(S.camH + S.maxD * Math.sin(h.angle) * 2));
+    }
+    c.ctx.stroke();
+  }
+
+  // camera
+  c.ctx.fillStyle = "#fff";
+  c.ctx.beginPath();
+  c.ctx.arc(c.px(0), c.py(S.camH), 4, 0, Math.PI * 2);
+  c.ctx.fill();
+  c.done();
+}
+
+function drawChart3(hits) {
+  const c = chart(document.getElementById("c3"), 0, SCANLINES - 1, 0, S.maxD, "scanline (0 = top of screen)", "hit x");
+  for (let i = 0; i < SCANLINES; i++) {
+    const h = hits[i];
+    if (h.hit) {
+      const t = Math.min(h.x / S.maxD, 1);
+      c.ctx.fillStyle = lerpColor(NEAR, FAR, t);
+      c.ctx.fillRect(c.px(i) - 1.5, c.py(h.x) - 1.5, 3, 3);
+    } else {
+      c.ctx.fillStyle = SKY;
+      c.ctx.fillRect(c.px(i) - 1, c.py(S.maxD), 2, 5);
+    }
+  }
+  c.done();
+}
+
+function drawChart4(hits) {
+  const canvas = document.getElementById("c4");
+  const ctx = canvas.getContext("2d");
+  const W = canvas.width, H = canvas.height;
+  ctx.clearRect(0, 0, W, H);
+  // 8:7-ish SNES frame centred in the canvas
+  const fw = Math.min(W - 20, (H - 20) * (256 / 224) * 1.6);
+  const fh = H - 20;
+  const fx = (W - fw) / 2, fy = 10;
+  const rowH = fh / SCANLINES;
+  for (let i = 0; i < SCANLINES; i++) {
+    const h = hits[i];
+    if (h.hit) {
+      const t = Math.min(h.x / S.maxD, 1);
+      ctx.fillStyle = lerpColor(NEAR, FAR, t);
+    } else {
+      ctx.fillStyle = SKY;
+    }
+    ctx.fillRect(fx, fy + i * rowH, fw, rowH + 0.5);
+  }
+  ctx.strokeStyle = "#3d4658";
+  ctx.strokeRect(fx - 0.5, fy - 0.5, fw + 1, fh + 1);
+}
+
+// ---- main loop ----------------------------------------------------------
+
+function draw() {
+  const hits = castAll();
+  drawChart1();
+  drawChart2(hits);
+  drawChart3(hits);
+  drawChart4(hits);
+}
+
+let last = 0;
+function tick(now) {
+  if (animateBox.checked) {
+    const dt = last ? (now - last) / 1000 : 0;
+    const el = document.getElementById("phase");
+    el.value = (parseFloat(el.value) + dt * 90) % 360;
+    el.dispatchEvent(new Event("input"));
+  }
+  last = now;
+  requestAnimationFrame(tick);
+}
+
+draw();
+requestAnimationFrame(tick);
+</script>
+</body>
+</html>
