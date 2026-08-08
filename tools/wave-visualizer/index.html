@@ -39,6 +39,16 @@
   .ctl output { font-variant-numeric: tabular-nums; font-size: 13px; color: var(--accent); text-align: right; }
   input[type=range] { width: 140px; accent-color: var(--accent); }
   .check { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
+  button {
+    background: #2a3140;
+    color: var(--ink);
+    border: 1px solid #3d4658;
+    border-radius: 6px;
+    padding: 6px 14px;
+    font: 13px "Segoe UI", system-ui, sans-serif;
+    cursor: pointer;
+  }
+  button:hover { border-color: var(--accent); }
 
   #charts {
     display: grid;
@@ -79,6 +89,11 @@
     <div class="check"><input type="checkbox" id="animate"><label for="animate">Animate phase (roll the sea)</label></div>
     <div class="check"><input type="checkbox" id="showWave" checked><label for="showWave">Ghost wave on ray chart</label></div>
   </div>
+  <div class="group">
+    <b>Display</b>
+    <button id="imgBtn">Load image</button>
+    <input type="file" id="imgFile" accept="image/*" hidden>
+  </div>
 </div>
 
 <div id="charts">
@@ -95,7 +110,7 @@
     <canvas id="c3" width="640" height="400"></canvas>
   </div>
   <div class="chart">
-    <h2>4. SNES display <small>&mdash; each scanline shaded by its hit x (bright = near). Flat colour = missed</small></h2>
+    <h2>4. SNES display <small>&mdash; scanlines shaded by hit x (bright = near), or a loaded image projected down onto the waves. Flat colour = missed</small></h2>
     <canvas id="c4" width="640" height="400"></canvas>
   </div>
 </div>
@@ -119,6 +134,40 @@ for (const id of sliders) {
 const animateBox = document.getElementById("animate");
 const showWaveBox = document.getElementById("showWave");
 showWaveBox.addEventListener("input", draw);
+
+// ---- projected image ----------------------------------------------------
+// Image lies flat on the sea, seen from above: image x -> screen x,
+// image y -> world distance, with the top edge of the image furthest away.
+const imgBtn = document.getElementById("imgBtn");
+const imgFile = document.getElementById("imgFile");
+let waveImg = null;
+
+imgBtn.addEventListener("click", () => {
+  if (waveImg) {
+    waveImg = null;
+    imgBtn.textContent = "Load image";
+    draw();
+  } else {
+    imgFile.click();
+  }
+});
+imgFile.addEventListener("change", () => {
+  const file = imgFile.files[0];
+  imgFile.value = "";
+  if (!file) return;
+  const img = new Image();
+  img.onload = () => {
+    URL.revokeObjectURL(img.src);
+    const cv = document.createElement("canvas");
+    cv.width = img.width;
+    cv.height = img.height;
+    cv.getContext("2d").drawImage(img, 0, 0);
+    waveImg = cv;
+    imgBtn.textContent = "Unload image";
+    draw();
+  };
+  img.src = URL.createObjectURL(file);
+});
 
 // ---- the model ----------------------------------------------------------
 
@@ -318,15 +367,22 @@ function drawChart4(hits) {
   const fh = H - 20;
   const fx = (W - fw) / 2, fy = 10;
   const rowH = fh / SCANLINES;
+  ctx.imageSmoothingEnabled = false;
   for (let i = 0; i < SCANLINES; i++) {
     const h = hits[i];
-    if (h.hit) {
-      const t = Math.min(h.x / S.maxD, 1);
-      ctx.fillStyle = lerpColor(NEAR, FAR, t);
-    } else {
+    if (!h.hit) {
       ctx.fillStyle = SKY;
+      ctx.fillRect(fx, fy + i * rowH, fw, rowH + 0.5);
+      continue;
     }
-    ctx.fillRect(fx, fy + i * rowH, fw, rowH + 0.5);
+    const t = Math.min(h.x / S.maxD, 1);
+    if (waveImg) {
+      const row = Math.min(waveImg.height - 1, Math.floor((1 - t) * waveImg.height));
+      ctx.drawImage(waveImg, 0, row, waveImg.width, 1, fx, fy + i * rowH, fw, rowH + 0.5);
+    } else {
+      ctx.fillStyle = lerpColor(NEAR, FAR, t);
+      ctx.fillRect(fx, fy + i * rowH, fw, rowH + 0.5);
+    }
   }
   ctx.strokeStyle = "#3d4658";
   ctx.strokeRect(fx - 0.5, fy - 0.5, fw + 1, fh + 1);
