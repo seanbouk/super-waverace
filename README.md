@@ -22,8 +22,8 @@ The line in the sand — update this table whenever an allocation changes.
 | Entries | Owner | Notes |
 |---------|-------|-------|
 | 0 | Backdrop | Sky above the horizon (dusk orange, set at runtime) |
-| 1–7 | Water | `1..N` rotating deep stripes (N = rotCount, ≤4), `N+1` peaks, `N+2` lattice |
-| 8–15 | Water reserve | Foam / spray variants to come |
+| 1–7 | Water | `1..N` rotating deep stripes (ping-pong colours), `N+1` peaks, `N+2` lattice. N ≤ 5 fits here |
+| 8–15 | Water reserve | Foam / spray variants to come; N = 6 stripes spill peaks/lattice into 8–9 |
 | 16–127 | BG reserve | Unallocated (future sky gfx, HUD) |
 | 128–255 | Sprites | 8 OBJ palettes × 16 colours — do not touch from BG code |
 

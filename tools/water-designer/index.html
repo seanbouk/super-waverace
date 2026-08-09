@@ -57,7 +57,7 @@
       <div class="ctl"><label>Repeat Y</label><input type="range" id="ky" min="0" max="8" step="1" value="4"><output for="ky"></output></div>
       <div class="ctl"><label>Warp</label><input type="range" id="warp" min="0" max="2" step="0.1" value="0.8"><output for="warp"></output></div>
       <div class="ctl"><label>Slots</label>
-        <select id="slots"><option selected>3</option><option>4</option></select><output></output></div>
+        <select id="slots"><option>3</option><option selected>4</option><option>5</option><option>6</option></select><output></output></div>
       <div class="ctl"><label>Frames/step</label><input type="range" id="rotFrames" min="2" max="16" step="1" value="8"><output for="rotFrames"></output></div>
       <div class="check"><input type="checkbox" id="animate" checked><label for="animate">Animate rotation</label></div>
     </div>
@@ -181,7 +181,12 @@ function buildPalette() {
   pal[0] = [248,168,96]; // sky, unused by the art
   const A = hex2rgb(document.getElementById("cDeepA").value);
   const B = hex2rgb(document.getElementById("cDeepB").value);
-  for (let i = 0; i < slots; i++) pal[1+i] = lerp3(A, B, slots === 1 ? 0 : i/(slots-1));
+  // ping-pong (from -> to -> from) so rotation never jumps lightest -> darkest.
+  // Even slot counts give a clean triangle; odd ones have one twinned step.
+  for (let i = 0; i < slots; i++) {
+    const t = (1 - Math.cos(2 * Math.PI * i / slots)) / 2;
+    pal[1+i] = lerp3(A, B, t);
+  }
   pal[slots+1] = hex2rgb(document.getElementById("cPeak").value);
   pal[slots+2] = hex2rgb(document.getElementById("cLat").value);
   return pal;
@@ -206,9 +211,11 @@ function rebuild() {
         idx = slots + 1;                       // peak islands
       } else {
         // deep stripes: integer repeats => tileable by construction,
-        // warped by the independent deep-layer noise field
-        const s = Math.sin(tau * (S.kx * u + S.ky * v) + S.warp * deepAt(u, v) * tau);
-        let slot = Math.floor((s + 1) / 2 * slots);
+        // warped by the independent deep-layer noise field.
+        // Quantising the PHASE (uniform) rather than sin() (which loiters at
+        // its extremes) gives every band an equal share of the area.
+        const ph = S.kx * u + S.ky * v + S.warp * deepAt(u, v);
+        let slot = Math.floor((ph - Math.floor(ph)) * slots);
         if (slot >= slots) slot = slots - 1;
         idx = 1 + slot;
       }
