@@ -100,8 +100,9 @@ _done\@:
     sta.l camTabs + 1808,x     ; M7X = (px + d*sin) & 1023
     sec
     sbc #128
-    and #$03FF
-    sta.l camTabs + 3616,x     ; HOFS = (M7X - 128) & 1023
+    and #$1FFF                 ; HOFS = M7X - 128 as SIGNED 13-bit: mod-1024
+    sta.l camTabs + 3616,x     ; equivalence breaks under fractional M7A,
+                               ; so (HOFS - M7X) must stay exactly -128
 
     MUL16X8 camD16, camCosMag
     NEGIF camCosNeg
@@ -199,14 +200,14 @@ _cv_done:
     plb
     rep #$20
 
-    ; ---- build the 224 entries: block 1 = 127 lines, block 2 = 97 lines ----
-    lda.l camPhaseOff
+    ; ---- build the sea lines only (C precomputes the skip past sky lines):
+    ;      block 1 = camBlk1Ct lines, block 2 = 97 lines ----
+    lda.l camSrcOff
     tay                        ; Y = ROM word index
-    lda.l camBufOff
-    inc a
-    tax                        ; X = dest offset (skip $FF header byte)
+    lda.l camDstOff
+    tax                        ; X = dest offset (past header + skipped lines)
 
-    lda #127
+    lda.l camBlk1Ct
     sta.l camLineCt
 _block1:
     LINEBODY

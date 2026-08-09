@@ -63,6 +63,17 @@ background. The stripe colours ping-pong (from → to → from), so the cycle ne
 a hard lightest-to-darkest jump, and the stripe bands are quantised by phase rather
 than sine value so each band covers equal area.
 
+**The UI band.** The top 24 scanlines run in BG mode 1 (HDMA on `$2105` switches
+the whole PPU mode mid-frame, back to mode 7 below) giving 3 rows of tiled text.
+The PVSnesLib console uploads its map to a hardcoded VRAM address inside the
+Mode 7 region, so `game/src/ui.c` owns its own map buffer and DMAs it during
+vblank; the library is still used for its font and palette. Currently shows
+camera position/heading and a live profiler (scanlines per table rebuild).
+
+**Motion-coupled swell.** The wave phase advances with time *and* with forward
+motion (baked steps-per-texel constant), so driving fast genuinely skips across
+the crests, and reversing backs the swell down.
+
 **The texture.** One 1024×1024 Mode 7 map (the hardware's only option), built from a
 128×128 tileable pattern designed in `tools/water-designer/` — Perlin noise whose
 mid-band ("the stringy middles") becomes the off-white lattice, with everything
@@ -78,7 +89,8 @@ The line in the sand — update this table whenever an allocation changes.
 | 0 | Backdrop | Sky above the horizon (dusk orange, set at runtime) |
 | 1–7 | Water | `1..N` rotating deep stripes (ping-pong colours), `N+1` peaks, `N+2` lattice. N ≤ 5 fits here |
 | 8–15 | Water reserve | Foam / spray variants to come; N = 6 stripes spill peaks/lattice into 8–9 |
-| 16–127 | BG reserve | Unallocated (future sky gfx, HUD) |
+| 16–31 | UI text | Font palette for the mode-1 text band (palette row 1) |
+| 32–127 | BG reserve | Unallocated (future sky gfx) |
 | 128–255 | Sprites | 8 OBJ palettes × 16 colours — do not touch from BG code |
 
 ## Building the ROM
