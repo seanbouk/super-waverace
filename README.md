@@ -13,7 +13,10 @@ The sea is a per-scanline raycast baked at build time (`tools/bake_tables.py`) i
 HDMA tables: `TM` splits sky from sea, `M7A` sets perspective width, and — with the
 matrix row zeroed — `M7Y` picks the exact texture row each scanline samples, so near
 crests correctly occlude the water behind them. 32 baked phases cycle to roll the
-swell (~28KB of ROM, near-zero CPU). D-pad up/down changes the sea speed.
+swell (~28KB of ROM, near-zero CPU).
+
+**Controls (god-mode camera):** d-pad up/down = forward/back, left/right = turn,
+L/R = strafe. No inertia yet — free flight over the sea.
 
 ## How the effects work
 
@@ -29,12 +32,20 @@ scanline for 32 wave phases at build time and bakes the results into HDMA tables
 (~20KB of ROM). Rolling the sea is just repointing three HDMA channels at the next
 phase's tables each frame.
 
-**Putting a hit on screen.** The Mode 7 matrix is set to `B = C = D = 0`, which
-collapses the texture-row equation to "row = the M7Y register". HDMA then writes the
-raycast hit distance into `M7Y` every scanline — the sampled texture row is *exactly*
-the maths from the bake, no approximation. `M7A` (horizontal scale) gets the same
-treatment for perspective width, and `TM` flips between backdrop-only (sky) and BG1
-(sea) at the horizon line, which moves per phase.
+**Putting a hit on screen.** The Mode 7 matrix is set to `B = D = 0`, which makes
+the sampled texture position depend only on the per-scanline registers. `TM` flips
+between backdrop-only (sky) and BG1 (sea) at the horizon line, which moves per phase.
+
+**The camera.** Position and heading are free (god mode). Each frame, a 65816
+routine (`game/camera.asm`) rebuilds five HDMA tables — `M7A` = a·cos θ,
+`M7C` = −a·sin θ, `M7X` = px + d·sin θ, `M7Y` = py + d·cos θ, `HOFS` = M7X−128 —
+from the baked per-scanline distance/scale arrays, using the S-CPU hardware
+multiplier ($4202/$4203). That's ~900 multiplies per rebuild, about a frame and a
+half of CPU, double-buffered in WRAM and flipped during vblank; the main loop runs
+at ~30Hz, which matches the sea's phase cadence. One honest simplification: the
+wave field is defined in view space, so the swell always rolls toward the camera —
+turning rotates the texture but not the wave direction. (A world-fixed swell would
+need a rebake per heading; this is the trade that keeps it all baked.)
 
 **Pale crests.** A fourth HDMA channel writes the fixed-colour register (`$2132`)
 each scanline, with additive colour math enabled on the sea layer. Rows at wave tops
