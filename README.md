@@ -40,9 +40,13 @@ between backdrop-only (sky) and BG1 (sea) at the horizon line, which moves per p
 routine (`game/camera.asm`) rebuilds five HDMA tables — `M7A` = a·cos θ,
 `M7C` = −a·sin θ, `M7X` = px + d·sin θ, `M7Y` = py + d·cos θ, `HOFS` = M7X−128 —
 from the baked per-scanline distance/scale arrays, using the S-CPU hardware
-multiplier ($4202/$4203). That's ~900 multiplies per rebuild, about a frame and a
-half of CPU, double-buffered in WRAM and flipped during vblank; the main loop runs
-at ~30Hz, which matches the sea's phase cadence. One honest simplification: the
+multiplier ($4202/$4203). The build is sign-specialised (four loop variants chosen
+per call — zero branches per scanline), feeds the multiplier straight from ROM,
+keeps shared operands latched between products, and runs its scratch in a private
+direct page. Sky lines are skipped entirely. Measured cost: **262 scanlines ≈ 1
+frame** per rebuild (down from 524 unoptimised), double-buffered in WRAM and
+flipped during vblank. The main loop runs at 30Hz — build fills one frame, game
+logic gets the other (~45% of the loop currently spare). One honest simplification: the
 wave field is defined in view space, so the swell always rolls toward the camera —
 turning rotates the texture but not the wave direction. (A world-fixed swell would
 need a rebake per heading; this is the trade that keeps it all baked.)

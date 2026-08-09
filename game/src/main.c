@@ -31,8 +31,7 @@ u16 camPhaseOff, camBufOff;
 u16 camSrcOff, camDstOff, camBlk1Ct;
 s16 camSinVal, camCosVal;
 // asm internals
-u8 camSinMag, camCosMag, camSinNeg, camSinNegInv, camCosNeg;
-u16 camTmp, camTmp2, camA16, camD16, camLineCt;
+u8 camSinMag, camCosMag, camSinNeg, camCosNeg;
 // five double-buffered HDMA tables: stride 904 per register, 452 per buffer
 u8 camTabs[4520];
 
