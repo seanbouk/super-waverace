@@ -1,11 +1,11 @@
 {
   "camH": 75,
-  "pitch": -13,
+  "pitch": -8.5,
   "fovV": 32,
   "fovH": 60,
   "amp": 5,
   "wavelength": 78.77,
-  "maxX": 450,
+  "maxX": 650,
   "phases": 32,
   "framesPerPhase": 2,
   "crestGlow": 12,
