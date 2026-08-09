@@ -16,20 +16,14 @@ PYTHON := $(shell command -v python3 2>/dev/null || command -v python 2>/dev/nul
 # sources, so files generated here are picked up on a clean build.
 all: gen buildWithSummary
 
-gen: bake.stamp sea.pc7
+gen: bake.stamp
 
-bake.stamp: ../tools/bake_tables.py
+bake.stamp: ../tools/bake_tables.py ../tools/wave_params.json $(wildcard ../assets/*)
 	@echo baking wave tables + sea texture ...
 	$(PYTHON) ../tools/bake_tables.py
 	@touch bake.stamp
 
-sea.png: bake.stamp
-
-sea.pc7: sea.png
-	@echo convert bitmap ... $(notdir $@)
-	$(GFXCONV) -p -m -M 7 -i $<
-
-data.obj: sea.pc7
+data.obj: bake.stamp
 
 buildActual: $(OFILES) $(ROMNAME).sfc
 

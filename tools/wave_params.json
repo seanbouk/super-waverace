@@ -1,0 +1,13 @@
+{
+  "camH": 34,
+  "pitch": -10,
+  "fovV": 25,
+  "fovH": 60,
+  "amp": 18,
+  "wavelength": 128,
+  "maxX": 2048,
+  "phases": 32,
+  "framesPerPhase": 2,
+  "crestGlow": 12,
+  "glowGamma": 2.0
+}

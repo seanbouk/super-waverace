@@ -38,6 +38,7 @@
   .ctl label { font-size: 13px; }
   .ctl output { font-variant-numeric: tabular-nums; font-size: 13px; color: var(--accent); text-align: right; }
   input[type=range] { width: 140px; accent-color: var(--accent); }
+  select { background: #12151c; border: 1px solid #3d4658; color: var(--ink); border-radius: 4px; padding: 3px 6px; }
   .check { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
   button {
     background: #2a3140;
@@ -90,9 +91,27 @@
     <div class="check"><input type="checkbox" id="showWave" checked><label for="showWave">Ghost wave on ray chart</label></div>
   </div>
   <div class="group">
+    <b>SNES</b>
+    <div class="ctl"><label>Phases</label>
+      <select id="phases"><option>8</option><option>16</option><option selected>32</option><option>64</option></select>
+      <output></output></div>
+    <div class="ctl"><label>Frames/phase</label>
+      <select id="fpp"><option>1</option><option selected>2</option><option>4</option><option>8</option></select>
+      <output id="cycleOut"></output></div>
+    <div class="ctl"><label>FOV-H &deg;</label><input type="range" id="fovH" min="40" max="90" step="1" value="60"><output for="fovH"></output></div>
+    <div class="check"><input type="checkbox" id="quant" checked><label for="quant">Quantize to SNES phases</label></div>
+  </div>
+  <div class="group">
+    <b>Crest glow</b>
+    <div class="ctl"><label>Strength</label><input type="range" id="crestGlow" min="0" max="31" step="1" value="12"><output for="crestGlow"></output></div>
+    <div class="ctl"><label>Sharpness</label><input type="range" id="glowGamma" min="1" max="4" step="0.5" value="2"><output for="glowGamma"></output></div>
+  </div>
+  <div class="group">
     <b>Display</b>
     <button id="imgBtn">Load image</button>
     <input type="file" id="imgFile" accept="image/*" hidden>
+    <button id="exportBtn">Export wave_params.json</button>
+    <span id="exportNote" style="font-size:11px;color:var(--dim)"></span>
   </div>
 </div>
 
@@ -123,7 +142,7 @@ const DEG = Math.PI / 180;
 
 // ---- state, wired straight to the sliders -------------------------------
 const S = {};
-const sliders = ["camH", "pitch", "fov", "amp", "wl", "phase", "maxD"];
+const sliders = ["camH", "pitch", "fov", "amp", "wl", "phase", "maxD", "fovH", "crestGlow", "glowGamma"];
 for (const id of sliders) {
   const el = document.getElementById(id);
   const out = el.parentElement.querySelector("output");
@@ -134,6 +153,54 @@ for (const id of sliders) {
 const animateBox = document.getElementById("animate");
 const showWaveBox = document.getElementById("showWave");
 showWaveBox.addEventListener("input", draw);
+
+const phasesSel = document.getElementById("phases");
+const fppSel = document.getElementById("fpp");
+const quantBox = document.getElementById("quant");
+phasesSel.addEventListener("input", draw);
+fppSel.addEventListener("input", draw);
+quantBox.addEventListener("input", draw);
+
+// Effective phase in radians — snapped to the SNES phase grid when quantizing
+let PHI = 0;
+function updatePhi() {
+  let deg = S.phase;
+  if (quantBox.checked) {
+    const step = 360 / parseInt(phasesSel.value, 10);
+    deg = Math.floor(deg / step) * step;
+  }
+  PHI = deg * DEG;
+  const cycle = parseInt(phasesSel.value, 10) * parseInt(fppSel.value, 10) / 60;
+  document.getElementById("cycleOut").value = cycle.toFixed(2) + "s cycle";
+}
+
+// crest glow per hit, matching tools/bake_tables.py
+function glowAt(x) {
+  const c = Math.sin(2 * Math.PI * x / S.wl + PHI);
+  if (c <= 0 || S.crestGlow === 0) return 0;
+  return Math.min(31, Math.round(S.crestGlow * Math.pow(c, S.glowGamma)));
+}
+
+// ---- export to tools/wave_params.json -----------------------------------
+document.getElementById("exportBtn").addEventListener("click", () => {
+  const n = Math.max(1, Math.round(1024 / S.wl));
+  const params = {
+    camH: S.camH, pitch: S.pitch, fovV: S.fov, fovH: S.fovH,
+    amp: S.amp, wavelength: +(1024 / n).toFixed(2), maxX: S.maxD,
+    phases: parseInt(phasesSel.value, 10),
+    framesPerPhase: parseInt(fppSel.value, 10),
+    crestGlow: S.crestGlow, glowGamma: S.glowGamma
+  };
+  const json = JSON.stringify(params, null, 2) + "\n";
+  const blob = new Blob([json], { type: "application/json" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "wave_params.json";
+  a.click();
+  if (navigator.clipboard) navigator.clipboard.writeText(json);
+  document.getElementById("exportNote").textContent =
+    "saved (λ snapped to " + (1024 / n).toFixed(1) + ") — drop into tools/";
+});
 
 // ---- projected image ----------------------------------------------------
 // Image lies flat on the sea, seen from above: image x -> screen x,
@@ -172,7 +239,7 @@ imgFile.addEventListener("change", () => {
 // ---- the model ----------------------------------------------------------
 
 function waveY(x) {
-  return S.amp * Math.sin(2 * Math.PI * x / S.wl + S.phase * DEG);
+  return S.amp * Math.sin(2 * Math.PI * x / S.wl + PHI);
 }
 
 // March along a ray from the camera and bisect the first sign change.
@@ -383,6 +450,12 @@ function drawChart4(hits) {
       ctx.fillStyle = lerpColor(NEAR, FAR, t);
       ctx.fillRect(fx, fy + i * rowH, fw, rowH + 0.5);
     }
+    // crest glow preview (matches the SNES colour-math HDMA channel)
+    const g = glowAt(h.x);
+    if (g) {
+      ctx.fillStyle = "rgba(255,255,255," + (g / 31 * 0.85).toFixed(3) + ")";
+      ctx.fillRect(fx, fy + i * rowH, fw, rowH + 0.5);
+    }
   }
   ctx.strokeStyle = "#3d4658";
   ctx.strokeRect(fx - 0.5, fy - 0.5, fw + 1, fh + 1);
@@ -391,6 +464,7 @@ function drawChart4(hits) {
 // ---- main loop ----------------------------------------------------------
 
 function draw() {
+  updatePhi();
   const hits = castAll();
   drawChart1();
   drawChart2(hits);
@@ -398,13 +472,25 @@ function draw() {
   drawChart4(hits);
 }
 
-let last = 0;
+let last = 0, acc = 0;
 function tick(now) {
   if (animateBox.checked) {
     const dt = last ? (now - last) / 1000 : 0;
     const el = document.getElementById("phase");
-    el.value = (parseFloat(el.value) + dt * 90) % 360;
-    el.dispatchEvent(new Event("input"));
+    if (quantBox.checked) {
+      // SNES cadence: one phase step every framesPerPhase frames at 60fps
+      acc += dt;
+      const interval = parseInt(fppSel.value, 10) / 60;
+      const step = 360 / parseInt(phasesSel.value, 10);
+      while (acc >= interval) {
+        acc -= interval;
+        el.value = (parseFloat(el.value) + step) % 360;
+      }
+      el.dispatchEvent(new Event("input"));
+    } else {
+      el.value = (parseFloat(el.value) + dt * 90) % 360;
+      el.dispatchEvent(new Event("input"));
+    }
   }
   last = now;
   requestAnimationFrame(tick);

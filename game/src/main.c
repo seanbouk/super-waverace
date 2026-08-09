@@ -1,24 +1,28 @@
 /*---------------------------------------------------------------------------------
     Super Waverace — phase 3: the rolling sea
 
-    Each frame, three HDMA channels replay a pre-baked per-scanline script:
-      TM  ($212C) : backdrop-only above the horizon, BG1 below
-      M7A ($211B) : horizontal scale (perspective width) per scanline
-      M7Y ($2120) : which texture row the scanline samples — with the matrix
-                    B=C=D zeroed, the sampled row IS the M7Y value, which is
-                    the first ray/wave crossing from the bake-time raycast.
-    Cycling through the baked phase tables rolls the sea.
+    Each frame, four HDMA channels replay a pre-baked per-scanline script:
+      TM      ($212C) : backdrop-only above the horizon, BG1 below
+      M7A     ($211B) : horizontal scale (perspective width) per scanline
+      M7Y     ($2120) : which texture row the scanline samples — with the matrix
+                        B=C=D zeroed, the sampled row IS the M7Y value, which is
+                        the first ray/wave crossing from the bake-time raycast
+      COLDATA ($2132) : additive white per scanline — crest glow (each scanline
+                        is a single distance, so whole-row brightening is right)
+    Cycling through the baked phase tables rolls the sea; rotating the deep-blue
+    palette entries makes the water surface flow independently of the swell.
 ---------------------------------------------------------------------------------*/
 #include <snes.h>
 #include "wavedata.h"
 
 extern char sea_patterns, sea_patterns_end, sea_map, sea_palette;
 
-dmaMemory dmaA, dmaY, dmaTM;
+dmaMemory dmaA, dmaY, dmaTM, dmaG;
 u16 pad0;
 u16 tick;
-u16 speed;
 u16 phase;
+u8 tickShift;
+u8 rotTimer, rotOfs;
 
 //---------------------------------------------------------------------------------
 void waveHdma(u16 ph)
@@ -26,6 +30,7 @@ void waveHdma(u16 ph)
     dmaTM.mem.p = waveTM[ph];
     dmaA.mem.p = waveA[ph];
     dmaY.mem.p = waveY[ph];
+    dmaG.mem.p = waveG[ph];
 
     REG_HDMAEN = 0;
 
@@ -63,7 +68,13 @@ void waveHdma(u16 ph)
     REG_A1T3LH = dmaY.mem.c.addr;
     REG_A1B3 = dmaY.mem.c.bank;
 
-    REG_HDMAEN = 0x0E; // channels 1+2+3
+    // Channel 4: COLDATA — crest glow (1 byte to $2132)
+    REG_DMAP4 = 0x00;
+    REG_BBAD4 = 0x32;
+    REG_A1T4LH = dmaG.mem.c.addr;
+    REG_A1B4 = dmaG.mem.c.bank;
+
+    REG_HDMAEN = 0x1E; // channels 1+2+3+4
 }
 
 //---------------------------------------------------------------------------------
@@ -80,10 +91,16 @@ int main(void)
     // Backdrop above the horizon: dusk sky (palette index 0 is unused by the art)
     setPaletteColor(0, RGB8(248, 168, 96));
 
+    // Additive colour math on BG1 with the fixed colour = crest glow
+    REG_CGWSEL = 0x00;  // fixed colour operand, math always on
+    REG_CGADSUB = 0x01; // add, BG1 only
+
     setScreenOn();
 
     tick = 0;
-    speed = 2;
+    tickShift = WAVE_TICK_SHIFT;
+    rotTimer = 0;
+    rotOfs = 0;
 
     while (1)
     {
@@ -91,17 +108,30 @@ int main(void)
 
         // Up = choppy fast sea, down = lazy swell
         if (pad0 & KEY_UP)
-            speed = 4;
+            tickShift = WAVE_TICK_SHIFT > 0 ? WAVE_TICK_SHIFT - 1 : 0;
         else if (pad0 & KEY_DOWN)
-            speed = 1;
+            tickShift = WAVE_TICK_SHIFT + 1;
         else
-            speed = 2;
+            tickShift = WAVE_TICK_SHIFT;
 
-        tick += speed;
-        phase = (tick >> 2) & (WAVE_PHASES - 1);
+        tick++;
+        phase = (tick >> tickShift) & (WAVE_PHASES - 1);
 
         waveHdma(phase);
         WaitForVBlank();
+
+        // Palette rotation for surface flow (vblank-safe: right after NMI)
+#if WAVE_ROT_FRAMES > 0
+        rotTimer++;
+        if (rotTimer >= WAVE_ROT_FRAMES)
+        {
+            rotTimer = 0;
+            rotOfs++;
+            if (rotOfs >= WAVE_ROT_COUNT)
+                rotOfs = 0;
+            waveRotateStep(rotOfs);
+        }
+#endif
     }
     return 0;
 }

@@ -54,3 +54,17 @@ Four charts:
 Controls for camera height/pitch/FOV, wave amplitude/wavelength/phase, ray distance, and an animated rolling-sea mode.
 
 **Simplification (deliberate):** the hit's x value is used for both "which part of the wave" and "how far away it is". True texture position (arc length) and true distance (ray length) differ slightly, but occlusion — the effect that matters — comes entirely from the first-crossing rule and stays exact.
+
+**Tuning workflow:** the lab's controls mirror `tools/bake_tables.py` exactly (texel units,
+32-phase quantisation, crest glow). Tune the feel, hit **Export wave_params.json**, drop the
+file into `tools/`, and `make` — the ROM now matches what the lab showed.
+
+### Water Tile Designer (`tools/water-designer/`)
+
+Designs the sea texture: tileable Perlin noise split into a Wind Waker-style off-white
+lattice (the "stringy middles" of the noise) over deep-blue layers, with directional
+stripes assigned to rotating palette slots — the SNES rotates those CGRAM entries at
+runtime so the water surface flows independently of the swell (fake parallax, one layer).
+Live-previews the rotation, counts unique 8×8 tiles (max 256) and colours. Exports
+`sea_pattern.png` + `water_params.json` into `assets/`, which the bake script prefers
+over its built-in procedural texture.

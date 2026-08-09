@@ -1,64 +1,91 @@
 #!/usr/bin/env python3
 """Bake-time generator for the Mode 7 rolling sea.
 
-Ports the raycast from tools/wave-visualizer into pre-computed HDMA tables:
-for each wave phase, each of the 224 scanlines gets
-  - M7A  : horizontal texel-per-pixel scale (8.8 fixed) ~ perspective width
-  - M7Y  : which texture row that scanline samples = first ray/wave crossing
-           (with M7B=M7C=M7D=0 the sampled row is EXACTLY the M7Y value)
-  - TM   : main-screen designation - backdrop-only for sky lines, BG1 for sea
+Reads wave feel parameters from tools/wave_params.json (exported from the
+wave-visualizer web tool) and bakes, for each wave phase, per-scanline HDMA
+tables:
+  - TM      ($212C): backdrop-only for sky lines, BG1 for sea
+  - M7A     ($211B): horizontal texel-per-pixel scale (8.8) ~ perspective
+  - M7Y     ($2120): sampled texture row = first ray/wave crossing
+            (with M7B=M7C=M7D=0 the sampled row is EXACTLY the M7Y value)
+  - COLDATA ($2132): additive white per scanline - crest glow
 
-Also generates the (original, procedural) sea texture as an indexed PNG for
-gfx4snes to convert to Mode 7 tiles/map/palette.
+Also produces the Mode 7 background data directly (sea.pc7 tiles, sea.mp7
+map, sea.pal palette) - either from the procedural default texture or from
+assets/sea_pattern.png + assets/water_params.json exported by the
+water-designer web tool. Emitting these ourselves (instead of via gfx4snes)
+keeps palette INDICES stable, which the runtime palette rotation relies on.
 
-Outputs (into game/): sea.png, wavetables.asm, wavedata.c, wavedata.h
-
-World units are texels of the 1024x1024 Mode 7 map.
+Outputs into game/: sea.pc7 sea.mp7 sea.pal sea.png (preview)
+                    wavetables.asm wavedata.c wavedata.h
 """
 
+import json
 import math
 import os
 import struct
 import zlib
 
-OUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "game")
+TOOLS_DIR = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.normpath(os.path.join(TOOLS_DIR, ".."))
+OUT_DIR = os.path.join(ROOT, "game")
+ASSETS = os.path.join(ROOT, "assets")
 
-# ---- tunables -----------------------------------------------------------
 SCANLINES = 224
-PHASES = 32          # baked wave phase steps per full cycle
-CAM_H = 34.0         # camera height above mean sea level (texels)
-PITCH = -10.0        # camera pitch, degrees (negative = looking down)
-FOV_V = 25.0         # vertical fov, degrees (ray fan across 224 scanlines)
-FOV_H = 60.0         # horizontal fov, degrees (sets M7A scale)
-AMP = 18.0           # wave amplitude (texels)
-WAVELEN = 128.0      # wavelength (texels) - MUST divide 1024 for clean wrap
-MAX_X = 2048.0       # cap on ray distance (world x); beyond this = sky
 SKY_TM = 0x10        # sky lines: sprites + backdrop only
 SEA_TM = 0x11        # sea lines: BG1 + sprites
 SKY_RGB = (248, 168, 96)  # backdrop / palette index 0 (dusk orange)
 
-TAN_HALF_H = math.tan(math.radians(FOV_H) / 2)
+DEFAULTS = {
+    "camH": 34.0, "pitch": -10.0, "fovV": 25.0, "fovH": 60.0,
+    "amp": 18.0, "wavelength": 128.0, "maxX": 2048.0,
+    "phases": 32, "framesPerPhase": 2,
+    "crestGlow": 12, "glowGamma": 2.0,
+    # rotation defaults (overridden by assets/water_params.json if present)
+    "rotStart": 1, "rotCount": 3, "rotFrames": 8,
+}
+
+
+def load_params():
+    p = dict(DEFAULTS)
+    path = os.path.join(TOOLS_DIR, "wave_params.json")
+    if os.path.exists(path):
+        with open(path) as f:
+            p.update(json.load(f))
+    wp = os.path.join(ASSETS, "water_params.json")
+    if os.path.exists(wp):
+        with open(wp) as f:
+            p.update(json.load(f))
+    # wavelength must give a whole number of waves per 1024-texel map
+    n = max(1, round(1024.0 / float(p["wavelength"])))
+    p["wavelength"] = 1024.0 / n
+    assert p["phases"] & (p["phases"] - 1) == 0, "phases must be a power of two"
+    assert p["framesPerPhase"] in (1, 2, 4, 8), "framesPerPhase must be 1/2/4/8"
+    return p
+
+
+P = load_params()
+TAN_HALF_H = math.tan(math.radians(P["fovH"]) / 2)
+K_WAVE = 2 * math.pi / P["wavelength"]
 
 
 # ---- raycast (same math as the web visualizer) --------------------------
 
 def wave_y(x, phi):
-    return AMP * math.sin(2 * math.pi * x / WAVELEN + phi)
+    return P["amp"] * math.sin(K_WAVE * x + phi)
 
 
 def cast(angle, phi):
-    """First crossing of ray y = CAM_H + x*tan(angle) with the wave.
-    Returns world x of the hit, or None (sky)."""
     t = math.tan(angle)
 
     def above(x):
-        return (CAM_H + x * t) - wave_y(x, phi)
+        return (P["camH"] + x * t) - wave_y(x, phi)
 
     if above(0.0) <= 0.0:
         return 0.0
     x_prev = 0.0
     x = 0.25
-    while x <= MAX_X:
+    while x <= P["maxX"]:
         if above(x) <= 0.0:
             lo, hi = x_prev, x
             for _ in range(30):
@@ -69,30 +96,26 @@ def cast(angle, phi):
                     lo = mid
             return (lo + hi) / 2
         x_prev = x
-        x += max(0.25, x * 0.01)  # adaptive step: fine near, coarse far
+        x += max(0.25, x * 0.01)
     return None
 
 
 def raycast_phase(phi):
-    """224 scanline hits, top to bottom. Returns (n_sky, [x per sea line])."""
     hits = []
     for i in range(SCANLINES):
         frac = i / (SCANLINES - 1)
-        ang = math.radians(PITCH + FOV_V / 2 - frac * FOV_V)
+        ang = math.radians(P["pitch"] + P["fovV"] / 2 - frac * P["fovV"])
         hits.append(cast(ang, phi))
-    # Misses are geometrically a contiguous top block; enforce it for safety.
     n_sky = 0
     while n_sky < SCANLINES and hits[n_sky] is None:
         n_sky += 1
-    sea = [h if h is not None else MAX_X for h in hits[n_sky:]]
+    sea = [h if h is not None else P["maxX"] for h in hits[n_sky:]]
     return n_sky, sea
 
 
 # ---- HDMA table encoding -------------------------------------------------
 
 def hdma_table(n_repeat, repeat_bytes, line_entries):
-    """Build an HDMA table: n_repeat lines holding repeat_bytes (repeat mode),
-    then per-line data (continuous mode) from line_entries. Terminated."""
     out = bytearray()
     n = n_repeat
     while n > 0:
@@ -114,58 +137,154 @@ def hdma_table(n_repeat, repeat_bytes, line_entries):
 def phase_tables(phi):
     n_sky, sea_x = raycast_phase(phi)
 
-    a_entries, y_entries = [], []
+    a_entries, y_entries, g_entries = [], [], []
     for x in sea_x:
         a = max(1, min(0x7FFF, round(x * TAN_HALF_H / 128.0 * 256.0)))
         v = round(x) & 0x03FF
         a_entries.append((a & 0xFF, a >> 8))
         y_entries.append((v & 0xFF, (v >> 8) & 0x1F))
+        # crest glow: sin() is 1 exactly at wave tops, fades down the flanks
+        c = math.sin(K_WAVE * x + phi)
+        b = round(P["crestGlow"] * max(0.0, c) ** P["glowGamma"]) if c > 0 else 0
+        g_entries.append((0xE0 | min(31, b),))
 
-    tab_a = hdma_table(n_sky, (0, 1), a_entries)   # sky value: scale 1, unseen
+    tab_a = hdma_table(n_sky, (0, 1), a_entries)
     tab_y = hdma_table(n_sky, (0, 0), y_entries)
-    # TM only needs one data entry after the sky block - it holds after that.
     tab_tm = hdma_table(n_sky, (SKY_TM,), [(SEA_TM,)])
-    return tab_a, tab_y, tab_tm
+    tab_g = hdma_table(n_sky, (0xE0,), g_entries)   # sky: add zero
+    return tab_a, tab_y, tab_tm, tab_g
 
 
 # ---- sea texture ----------------------------------------------------------
 
-def build_texture():
-    """1024x1024 indexed image from a 64x64 periodic ripple pattern
-    (max 64 unique 8x8 tiles - well within Mode 7's 256)."""
-    P = 64
-    pat = [[0] * P for _ in range(P)]
+def procedural_pattern():
+    """Default 64x64 periodic pattern. Indices:
+    0 sky (unused in art), 1-3 deep blues (rotation stripes),
+    4 mid, 5 light, 6 crest, 7 foam."""
+    size = 64
     tau = 2 * math.pi
-    for y in range(P):
-        for x in range(P):
-            # periodic ripple field (all frequencies divide the tile size)
+    pat = [[0] * size for _ in range(size)]
+    for y in range(size):
+        for x in range(size):
             v = (math.sin(tau * x / 64 + 1.8 * math.sin(tau * y / 32))
                  + 0.7 * math.sin(tau * (x + y) / 32)
                  + 0.5 * math.sin(tau * y / 64 + 1.2 * math.sin(tau * x / 16)))
-            # v in roughly [-2.2, 2.2] -> water indices 1..4
             if v < -0.9:
-                c = 1
+                # deep water: directional stripes across 3 rotating indices
+                s = math.sin(tau * (x + 2 * y) / 32)
+                c = 1 if s < -0.33 else (2 if s < 0.33 else 3)
             elif v < 0.3:
-                c = 2
-            elif v < 1.3:
-                c = 3
-            else:
                 c = 4
-            # sparse foam flecks on the brightest ridges
-            if v > 1.9 and (x * 7 + y * 13) % 5 == 0:
+            elif v < 1.3:
                 c = 5
+            else:
+                c = 6
+            if v > 1.9 and (x * 7 + y * 13) % 5 == 0:
+                c = 7
             pat[y][x] = c
 
-    rows = [bytes(pat[y % P][x % P] for x in range(1024)) for y in range(1024)]
-
     palette = [(0, 0, 0)] * 256
-    palette[0] = SKY_RGB              # backdrop = sky (never used in the art)
-    palette[1] = (8, 40, 96)          # deep
-    palette[2] = (16, 72, 144)        # mid
-    palette[3] = (40, 112, 192)       # light
-    palette[4] = (88, 168, 224)       # crest
-    palette[5] = (232, 248, 255)      # foam
-    return rows, palette
+    palette[0] = SKY_RGB
+    palette[1] = (14, 44, 96)     # deep stripe A
+    palette[2] = (8, 32, 80)      # deep stripe B
+    palette[3] = (20, 56, 112)    # deep stripe C
+    palette[4] = (28, 84, 156)    # mid
+    palette[5] = (56, 124, 196)   # light
+    palette[6] = (112, 172, 224)  # crest
+    palette[7] = (236, 250, 255)  # foam
+    return pat, palette
+
+
+def decode_png(path):
+    """Minimal indexed-PNG reader (bit depth 8, colour type 3, filters 0-4)."""
+    with open(path, "rb") as f:
+        data = f.read()
+    assert data[:8] == b"\x89PNG\r\n\x1a\n", "not a PNG"
+    pos, w, h, plte, idat = 8, 0, 0, [], b""
+    while pos < len(data):
+        ln, tag = struct.unpack(">I4s", data[pos:pos + 8])
+        body = data[pos + 8:pos + 8 + ln]
+        pos += 12 + ln
+        if tag == b"IHDR":
+            w, h, depth, ctype = struct.unpack(">IIBB", body[:10])
+            assert depth == 8 and ctype == 3, "need 8-bit indexed PNG"
+        elif tag == b"PLTE":
+            plte = [tuple(body[i:i + 3]) for i in range(0, len(body), 3)]
+        elif tag == b"IDAT":
+            idat += body
+    raw = zlib.decompress(idat)
+    rows, prev = [], bytearray(w)
+    for y in range(h):
+        flt = raw[y * (w + 1)]
+        line = bytearray(raw[y * (w + 1) + 1:(y + 1) * (w + 1)])
+        for x in range(w):
+            a = line[x - 1] if x else 0
+            b = prev[x]
+            cc = prev[x - 1] if x else 0
+            if flt == 1:
+                line[x] = (line[x] + a) & 255
+            elif flt == 2:
+                line[x] = (line[x] + b) & 255
+            elif flt == 3:
+                line[x] = (line[x] + ((a + b) >> 1)) & 255
+            elif flt == 4:
+                pp = a + b - cc
+                pa, pb, pc = abs(pp - a), abs(pp - b), abs(pp - cc)
+                pr = a if (pa <= pb and pa <= pc) else (b if pb <= pc else cc)
+                line[x] = (line[x] + pr) & 255
+        rows.append(bytes(line))
+        prev = line
+    pal = [(0, 0, 0)] * 256
+    for i, c in enumerate(plte[:256]):
+        pal[i] = c
+    return [list(r) for r in rows], pal
+
+
+def load_pattern():
+    src = os.path.join(ASSETS, "sea_pattern.png")
+    if os.path.exists(src):
+        pat, palette = decode_png(src)
+        size = len(pat)
+        assert size == len(pat[0]), "pattern must be square"
+        assert 1024 % size == 0 and size % 8 == 0, \
+            "pattern size must divide 1024 and be a multiple of 8"
+        print("using designed pattern: assets/sea_pattern.png ({0}x{0})".format(size))
+        return pat, palette
+    return procedural_pattern()
+
+
+def build_mode7_data(pat, palette):
+    """Tile the pattern across the 128x128 map, dedupe 8x8 tiles.
+    Returns (pc7 tile bytes, mp7 map bytes, pal bytes)."""
+    size = len(pat)
+    tiles_across = size // 8
+    tile_index = {}
+    tiles = bytearray()
+    small_map = []  # tile number for each pattern tile
+    for ty in range(tiles_across):
+        row = []
+        for tx in range(tiles_across):
+            t = bytes(pat[ty * 8 + py][tx * 8 + px]
+                      for py in range(8) for px in range(8))
+            if t not in tile_index:
+                assert len(tile_index) < 256, "more than 256 unique 8x8 tiles!"
+                tile_index[t] = len(tile_index)
+                tiles += t
+            row.append(tile_index[t])
+        small_map.append(row)
+
+    mp7 = bytearray(128 * 128)
+    for my in range(128):
+        for mx in range(128):
+            mp7[my * 128 + mx] = small_map[my % tiles_across][mx % tiles_across]
+
+    pal = bytearray()
+    for r, g, b in palette:
+        bgr = ((b >> 3) << 10) | ((g >> 3) << 5) | (r >> 3)
+        pal += struct.pack("<H", bgr)
+
+    print("texture: {0} unique tiles, {1} bytes".format(len(tile_index), len(tiles)))
+    return bytes(tiles), bytes(mp7), bytes(pal)
 
 
 def write_png(path, rows, palette):
@@ -176,7 +295,7 @@ def write_png(path, rows, palette):
     w, h = len(rows[0]), len(rows)
     ihdr = struct.pack(">IIBBBBB", w, h, 8, 3, 0, 0, 0)
     plte = b"".join(bytes(c) for c in palette)
-    raw = b"".join(b"\x00" + r for r in rows)
+    raw = b"".join(b"\x00" + bytes(r) for r in rows)
     png = (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", ihdr) + chunk(b"PLTE", plte)
            + chunk(b"IDAT", zlib.compress(raw, 9)) + chunk(b"IEND", b""))
     with open(path, "wb") as f:
@@ -194,32 +313,49 @@ def db_lines(data):
 
 def main():
     os.makedirs(OUT_DIR, exist_ok=True)
+    phases = P["phases"]
 
-    rows, palette = build_texture()
-    write_png(os.path.join(OUT_DIR, "sea.png"), rows, palette)
+    # -- texture --
+    pat, palette = load_pattern()
+    pc7, mp7, pal = build_mode7_data(pat, palette)
+    with open(os.path.join(OUT_DIR, "sea.pc7"), "wb") as f:
+        f.write(pc7)
+    with open(os.path.join(OUT_DIR, "sea.mp7"), "wb") as f:
+        f.write(mp7)
+    with open(os.path.join(OUT_DIR, "sea.pal"), "wb") as f:
+        f.write(pal)
+    write_png(os.path.join(OUT_DIR, "sea.png"), pat, palette)  # preview only
 
+    # -- HDMA tables --
     asm = ['.include "hdr.asm"', ""]
-    externs, inits_a, inits_y, inits_tm = [], [], [], []
+    externs, inits = [], {"a": [], "y": [], "tm": [], "g": []}
+    arr_name = {"a": "waveA", "y": "waveY", "tm": "waveTM", "g": "waveG"}
     total = 0
-    for p in range(PHASES):
-        phi = 2 * math.pi * p / PHASES
-        tab_a, tab_y, tab_tm = phase_tables(phi)
-        total += len(tab_a) + len(tab_y) + len(tab_tm)
+    for p in range(phases):
+        phi = 2 * math.pi * p / phases
+        tabs = dict(zip(("a", "y", "tm", "g"), phase_tables(phi)))
         asm.append('.section ".wave{0}" superfree'.format(p))
-        for name, tab in (("a", tab_a), ("y", tab_y), ("tm", tab_tm)):
+        for name in ("a", "y", "tm", "g"):
             label = "wave_{0}_p{1}".format(name, p)
+            total += len(tabs[name])
             asm.append(label + ":")
-            asm.append(db_lines(tab))
+            asm.append(db_lines(tabs[name]))
+            externs.append("extern char {0};".format(label))
+            inits[name].append("    {0}[{1}] = (u8 *)&{2};".format(arr_name[name], p, label))
         asm.append(".ends")
         asm.append("")
-        for name, lst in (("a", inits_a), ("y", inits_y), ("tm", inits_tm)):
-            label = "wave_{0}_p{1}".format(name, p)
-            externs.append("extern char {0};".format(label))
-            lst.append("    wave{0}[{1}] = (u8 *)&{2};"
-                       .format(name.upper() if name != "tm" else "TM", p, label))
 
     with open(os.path.join(OUT_DIR, "wavetables.asm"), "w", newline="\n") as f:
         f.write("\n".join(asm))
+
+    # -- rotation: unrolled palette writes with literal colours (no far reads) --
+    rot_start, rot_count, rot_frames = P["rotStart"], P["rotCount"], P["rotFrames"]
+    rot_colors = []
+    for i in range(rot_count):
+        r, g, b = palette[rot_start + i]
+        rot_colors.append(((b >> 3) << 10) | ((g >> 3) << 5) | (r >> 3))
+
+    tick_shift = {1: 0, 2: 1, 4: 2, 8: 3}[P["framesPerPhase"]]
 
     with open(os.path.join(OUT_DIR, "wavedata.h"), "w", newline="\n") as f:
         f.write("""#ifndef WAVEDATA_H
@@ -228,30 +364,46 @@ def main():
 #include <snes.h>
 
 #define WAVE_PHASES {0}
+#define WAVE_TICK_SHIFT {1}
+#define WAVE_ROT_COUNT {2}
+#define WAVE_ROT_FRAMES {3}
 
 extern u8 *waveA[WAVE_PHASES];
 extern u8 *waveY[WAVE_PHASES];
 extern u8 *waveTM[WAVE_PHASES];
+extern u8 *waveG[WAVE_PHASES];
 
 void waveTablesInit(void);
+void waveRotateStep(u8 offset);
 
 #endif
-""".format(PHASES))
+""".format(phases, tick_shift, rot_count, rot_frames))
 
     with open(os.path.join(OUT_DIR, "wavedata.c"), "w", newline="\n") as f:
         f.write("/* generated by tools/bake_tables.py - do not edit */\n")
         f.write('#include "wavedata.h"\n\n')
         f.write("\n".join(externs) + "\n\n")
-        f.write("u8 *waveA[WAVE_PHASES];\nu8 *waveY[WAVE_PHASES];\nu8 *waveTM[WAVE_PHASES];\n\n")
+        f.write("u8 *waveA[WAVE_PHASES];\nu8 *waveY[WAVE_PHASES];\n")
+        f.write("u8 *waveTM[WAVE_PHASES];\nu8 *waveG[WAVE_PHASES];\n\n")
         f.write("void waveTablesInit(void)\n{\n")
-        f.write("\n".join(inits_a) + "\n")
-        f.write("\n".join(inits_y) + "\n")
-        f.write("\n".join(inits_tm) + "\n")
-        f.write("}\n")
+        for name in ("a", "y", "tm", "g"):
+            f.write("\n".join(inits[name]) + "\n")
+        f.write("}\n\n")
+        f.write("void waveRotateStep(u8 offset)\n{\n    switch (offset)\n    {\n")
+        for o in range(rot_count):
+            f.write("    case {0}:\n".format(o))
+            for i in range(rot_count):
+                col = rot_colors[(i + o) % rot_count]
+                f.write("        setPaletteColor({0}, 0x{1:04X});\n"
+                        .format(rot_start + i, col))
+            f.write("        break;\n")
+        f.write("    }\n}\n")
 
     n_sky0 = raycast_phase(0.0)[0]
-    print("baked {0} phases, {1} bytes of HDMA tables, sky lines at phase 0: {2}"
-          .format(PHASES, total, n_sky0))
+    cycle = phases * P["framesPerPhase"] / 60.0
+    print("baked {0} phases ({1} bytes), wavelength {2:.1f}, cycle {3:.2f}s, "
+          "sky lines at phase 0: {4}".format(phases, total, P["wavelength"],
+                                             cycle, n_sky0))
 
 
 if __name__ == "__main__":
