@@ -42,8 +42,10 @@
         <select id="size"><option>64</option><option selected>128</option></select><output></output></div>
       <div class="ctl"><label>Seed</label><input type="number" id="seed" value="7"><button id="dice" style="padding:2px 8px">🎲</button></div>
       <div class="ctl"><label>Cells</label><input type="range" id="cells" min="2" max="12" step="1" value="5"><output for="cells"></output></div>
-      <div class="ctl"><label>Octaves</label><input type="range" id="oct" min="1" max="4" step="1" value="2"><output for="oct"></output></div>
-      <div class="ctl"><label>Persistence</label><input type="range" id="pers" min="0.3" max="0.8" step="0.05" value="0.5"><output for="pers"></output></div>
+      <div class="ctl"><label>Surf octaves</label><input type="range" id="oct" min="1" max="4" step="1" value="2"><output for="oct"></output></div>
+      <div class="ctl"><label>Surf persist</label><input type="range" id="pers" min="0.3" max="0.8" step="0.05" value="0.5"><output for="pers"></output></div>
+      <div class="ctl"><label>Deep octaves</label><input type="range" id="octD" min="1" max="4" step="1" value="2"><output for="octD"></output></div>
+      <div class="ctl"><label>Deep persist</label><input type="range" id="persD" min="0.3" max="0.8" step="0.05" value="0.5"><output for="persD"></output></div>
     </div>
     <div class="group"><b>Layers</b>
       <div class="ctl"><label>Lattice centre</label><input type="range" id="lc" min="-0.5" max="0.5" step="0.01" value="0"><output for="lc"></output></div>
@@ -88,7 +90,7 @@
 
 // ---- state ---------------------------------------------------------------
 const S = {};
-const ids = ["cells","oct","pers","lc","lw","kx","ky","warp","rotFrames"];
+const ids = ["cells","oct","pers","octD","persD","lc","lw","kx","ky","warp","rotFrames"];
 for (const id of ids) {
   const el = document.getElementById(id);
   const out = el.parentElement.querySelector("output");
@@ -148,16 +150,22 @@ function perlin(u, v, cells) {
   return (n00 + fx * (n10 - n00)) + fy * ((n01 + fx * (n11 - n01)) - (n00 + fx * (n10 - n00)));
 }
 
-function fbm(u, v) {
+function fbm(u, v, octaves, persistence) {
   let sum = 0, amp = 1, norm = 0, cells = S.cells;
-  for (let o = 0; o < S.oct; o++) {
+  for (let o = 0; o < octaves; o++) {
     sum += amp * perlin(u, v, cells);
     norm += amp;
-    amp *= S.pers;
+    amp *= persistence;
     cells *= 2;
   }
   return sum / norm * 1.4; // roughly [-1, 1]
 }
+
+// surface field: defines the lattice + peaks
+function surfaceAt(u, v) { return fbm(u, v, S.oct, S.pers); }
+// deep field: warps the stripes; offset so it decorrelates from the surface
+// (any constant offset keeps the wrap seamless)
+function deepAt(u, v) { return fbm(u + 0.43, v + 0.19, S.octD, S.persD); }
 
 // ---- pattern build ---------------------------------------------------------
 // palette indices: 0 sky (reserved), 1..slots deep stripes, slots+1 peaks, slots+2 lattice
@@ -190,15 +198,16 @@ function rebuild() {
   for (let y = 0; y < size; y++) {
     for (let x = 0; x < size; x++) {
       const u = x / size, v = y / size;
-      const n = fbm(u, v);
+      const n = surfaceAt(u, v);
       let idx;
       if (Math.abs(n - S.lc) < S.lw) {
         idx = slots + 2;                       // off-white lattice
       } else if (sep && n >= S.lc + S.lw) {
         idx = slots + 1;                       // peak islands
       } else {
-        // deep stripes: integer repeats => tileable by construction
-        const s = Math.sin(tau * (S.kx * u + S.ky * v) + S.warp * n * tau);
+        // deep stripes: integer repeats => tileable by construction,
+        // warped by the independent deep-layer noise field
+        const s = Math.sin(tau * (S.kx * u + S.ky * v) + S.warp * deepAt(u, v) * tau);
         let slot = Math.floor((s + 1) / 2 * slots);
         if (slot >= slots) slot = slots - 1;
         idx = 1 + slot;

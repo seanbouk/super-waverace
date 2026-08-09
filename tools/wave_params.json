@@ -1,13 +1,13 @@
 {
-  "camH": 34,
-  "pitch": -10,
-  "fovV": 25,
+  "camH": 75,
+  "pitch": -13,
+  "fovV": 32,
   "fovH": 60,
-  "amp": 18,
-  "wavelength": 128,
-  "maxX": 2048,
+  "amp": 5,
+  "wavelength": 78.77,
+  "maxX": 450,
   "phases": 32,
   "framesPerPhase": 2,
   "crestGlow": 12,
-  "glowGamma": 2.0
+  "glowGamma": 2
 }

@@ -15,6 +15,18 @@ matrix row zeroed — `M7Y` picks the exact texture row each scanline samples, s
 crests correctly occlude the water behind them. 32 baked phases cycle to roll the
 swell (~28KB of ROM, near-zero CPU). D-pad up/down changes the sea speed.
 
+## Colour map (CGRAM)
+
+The line in the sand — update this table whenever an allocation changes.
+
+| Entries | Owner | Notes |
+|---------|-------|-------|
+| 0 | Backdrop | Sky above the horizon (dusk orange, set at runtime) |
+| 1–7 | Water | `1..N` rotating deep stripes (N = rotCount, ≤4), `N+1` peaks, `N+2` lattice |
+| 8–15 | Water reserve | Foam / spray variants to come |
+| 16–127 | BG reserve | Unallocated (future sky gfx, HUD) |
+| 128–255 | Sprites | 8 OBJ palettes × 16 colours — do not touch from BG code |
+
 ## Building the ROM
 
 The game (in `game/`) is built with [PVSnesLib 4.6.0](https://github.com/alekmaul/pvsneslib).
