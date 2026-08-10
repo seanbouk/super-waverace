@@ -50,7 +50,7 @@ u8 skiLean;       // 0 straight, 1 leaning
 u8 skiFlip;       // lean direction (hflip)
 
 #define TURN_SPEED 2
-#define THRUST 48
+#define THRUST 72
 #define GRAV 48       // 8.8 texels/loop^2 — snappy hops, not moon gravity
 #define DIP 128       // rest waterline: 0.5 texel below surface
 #define MAX_VV 768    // vertical speed clamp (3 texels/loop)
@@ -288,8 +288,8 @@ int main(void)
                 skiVY += (THRUST * camCosVal) >> 7;
             }
             // water drag
-            skiVX -= skiVX >> 4;
-            skiVY -= skiVY >> 4;
+            skiVX -= skiVX >> 5;
+            skiVY -= skiVY >> 5;
         }
         else
         {
