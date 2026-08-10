@@ -334,12 +334,40 @@ int main(void)
         skiWY = camPY + ((WAVE_SKI_DIST * camCosVal) >> 7);
         collOfs = ((skiWY >> 5) & 127) * 128 + ((skiWX >> 5) & 127);
         collProbe();
-        collHere = collVal; // already embedded: waive blocking to escape
+        collHere = collVal;
+        if (collHere)
+        {
+            // embedded (rounding creep while grinding a wall while turning):
+            // push toward the nearest water neighbour and damp the drive -
+            // recovers in a few loops instead of roaming the land
+            skiVX -= skiVX >> 1;
+            skiVY -= skiVY >> 1;
+            collOfs = (((u16)(skiWY - 32) >> 5) & 127) * 128 + ((skiWX >> 5) & 127);
+            collProbe();
+            if (!collVal)
+                camPY -= 4;
+            else
+            {
+                collOfs = (((u16)(skiWY + 32) >> 5) & 127) * 128 + ((skiWX >> 5) & 127);
+                collProbe();
+                if (!collVal)
+                    camPY += 4;
+                else
+                {
+                    collOfs = ((skiWY >> 5) & 127) * 128 + (((u16)(skiWX - 32) >> 5) & 127);
+                    collProbe();
+                    if (!collVal)
+                        camPX -= 4;
+                    else
+                        camPX += 4; // east, or keep pushing until a gap opens
+                }
+            }
+        }
 
         fracX += skiVX;
         stepX = fracX >> 8;
         fracX &= 0x00FF;
-        if (stepX && !collHere)
+        if (stepX)
         {
             collOfs = ((skiWY >> 5) & 127) * 128
                       + (((u16)(skiWX + stepX) >> 5) & 127);
@@ -355,7 +383,7 @@ int main(void)
         fracY += skiVY;
         stepY = fracY >> 8;
         fracY &= 0x00FF;
-        if (stepY && !collHere)
+        if (stepY)
         {
             collOfs = (((u16)(skiWY + stepY) >> 5) & 127) * 128
                       + (((u16)(skiWX + stepX) >> 5) & 127);
