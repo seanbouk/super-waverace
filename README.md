@@ -15,8 +15,10 @@ matrix row zeroed — `M7Y` picks the exact texture row each scanline samples, s
 crests correctly occlude the water behind them. 32 baked phases cycle to roll the
 swell (~28KB of ROM, near-zero CPU).
 
-**Controls (god-mode camera):** d-pad up/down = forward/back, left/right = turn,
-L/R = strafe. No inertia yet — free flight over the sea.
+**Controls:** hold **B** to accelerate (thrust only bites while the hull is in the
+water — hovercraft scrabble), d-pad **left/right** to steer. The jet ski floats on
+a buoyancy spring: sitting still it bobs with the swell; at speed it skims from
+crest to crest, catching air where thrust and steering stop working.
 
 ## How the effects work
 
@@ -67,6 +69,18 @@ background. The stripe colours ping-pong (from → to → from), so the cycle ne
 a hard lightest-to-darkest jump, and the stripe bands are quantised by phase rather
 than sine value so each band covers equal area.
 
+**The jet ski and its waterline.** The ski floats at a fixed distance ahead of the
+camera; the bake exports, per wave phase, the screen row where the rendered surface
+sits at that distance and the wave height there. Runtime physics is a buoyancy
+spring toward "10% under the surface" (plus gravity when airborne), and the sprite's
+screen position is the surface row offset by the ski's height error. The submersion
+feedback is a PPU **window** driven by HDMA: below the surface row, window 1 opens
+full-width and masks OBJ on the main screen, so the hull is clipped per pixel-row —
+the waterline visibly rides up and down the sprite as it bobs, and nearer water
+correctly swallows it. (Freeing that eighth HDMA channel required merging the five
+matrix streams into four paired-register mode-3 channels — B, D and VOFS ride along
+as permanently-zero words.)
+
 **The UI band.** The top 24 scanlines run in BG mode 1 (HDMA on `$2105` switches
 the whole PPU mode mid-frame, back to mode 7 below) giving 3 rows of tiled text.
 The PVSnesLib console uploads its map to a hardcoded VRAM address inside the
@@ -95,7 +109,8 @@ The line in the sand — update this table whenever an allocation changes.
 | 8–15 | Water reserve | Foam / spray variants to come; N = 6 stripes spill peaks/lattice into 8–9 |
 | 16–31 | UI text | Font palette for the mode-1 text band (palette row 1) |
 | 32–127 | BG reserve | Unallocated (future sky gfx) |
-| 128–255 | Sprites | 8 OBJ palettes × 16 colours — do not touch from BG code |
+| 128–143 | Jet ski | OBJ palette 0 (12 colours used) |
+| 144–255 | Sprites reserve | OBJ palettes 1–7 — do not touch from BG code |
 
 ## Building the ROM
 

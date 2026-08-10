@@ -1,27 +1,29 @@
 /*---------------------------------------------------------------------------------
-    Super Waverace — god-mode camera over the rolling sea
+    Super Waverace — jet ski on the rolling sea
 
     HDMA channels per frame:
-      ch0 BG mode ($2105) : mode 1 UI band on top, mode 7 below   (static ROM)
-      ch1 TM      ($212C) : UI band / sky / sea split             (baked ROM)
-      ch2 COLDATA ($2132) : crest glow                            (baked ROM)
-      ch3 M7A, ch4 M7C, ch5 M7X, ch6 M7Y, ch7 HOFS               (built, WRAM)
+      ch0 BG mode ($2105)  : mode 1 UI band on top, mode 7 below   (static ROM)
+      ch1 TM      ($212C)  : UI band / sky / sea split             (baked ROM)
+      ch2 COLDATA ($2132)  : crest glow                            (baked ROM)
+      ch3 M7A+B, ch4 M7C+D, ch5 M7X+Y, ch6 HOFS+VOFS : paired-register
+          mode-3 streams built each frame by camera.asm (B/D/VOFS ride along
+          as pre-zeroed words)
+      ch7 WH0+WH1 ($2126)  : window waterline — clips the ski sprite below
+          the water surface row, so the hull visibly sinks and bobs
+          (note: the vblank ISR's OAM DMA uses ch7's registers; waveHdma
+          reprograms them right after WaitForVBlank, before render starts)
 
-    buildCamTables (camera.asm) rebuilds ch3-7 from the baked per-phase
-    distance/scale arrays using the hardware multiplier — sky lines skipped,
-    double-buffered, pointers flipped in vblank.
-
-    The wave phase advances with time AND with forward/backward motion, so
-    driving at speed skips over the waves.
-
-    Controls: d-pad up/down = forward/back, left/right = turn,
-              L/R shoulders = strafe.
+    Jet ski physics: buoyancy spring toward (surface - dip) while in water,
+    gravity when airborne. Thrust (B) only bites in the water; the heading
+    can always change. Wave phase advances with time and with forward
+    speed — driving fast skips across crests.
 ---------------------------------------------------------------------------------*/
 #include <snes.h>
 #include "wavedata.h"
 #include "ui.h"
 
 extern char sea_patterns, sea_patterns_end, sea_map, sea_palette;
+extern char ski_tiles, ski_pal;
 extern void buildCamTables(void);
 
 // ---- camera state shared with camera.asm (accessed via long addressing) ----
@@ -32,12 +34,26 @@ u16 camSrcOff, camDstOff, camBlk1Ct;
 s16 camSinVal, camCosVal;
 // asm internals
 u8 camSinMag, camCosMag, camSinNeg, camCosNeg;
-// five double-buffered HDMA tables: stride 904 per register, 452 per buffer
-u8 camTabs[4520];
+// four double-buffered paired-register HDMA tables, 4 bytes per scanline:
+// stride 1800 per table (2 x 900), bases 0 / 1800 / 3600 / 5400
+u8 camTabs[7200];
+
+// ---- window waterline table (built each loop, tiny) ----
+u8 winTab[10];
+
+// ---- jet ski state (8.8 fixed unless noted) ----
+s16 skiY;         // height above mean sea level
+s16 skiVv;        // vertical velocity
+s16 skiVX, skiVY; // world-space velocity
+s16 fracX, fracY; // sub-texel position accumulators
+u8 skiLean;       // 0 straight, 1 leaning
+u8 skiFlip;       // lean direction (hflip)
 
 #define TURN_SPEED 2
-#define MOVE_SPEED 6
-#define STRAFE_SPEED 4
+#define THRUST 36
+#define GRAV 20
+#define DIP 128 // rest waterline: 0.5 texel below surface
+#define SKI_X 112
 
 #ifndef REG_SLHV
 #define REG_SLHV (*(vuint8 *)0x2137)
@@ -45,16 +61,19 @@ u8 camTabs[4520];
 #ifndef REG_OPVCT
 #define REG_OPVCT (*(vuint8 *)0x213D)
 #endif
+#define REG_WOBJSEL (*(vuint8 *)0x2125)
+#define REG_TMW (*(vuint8 *)0x212E)
 
 dmaMemory dmaTM, dmaG, dmaT;
 u16 pad0;
 u16 tick;
 u16 phase;
 u16 phaseAcc;
-s16 fwdVel;
+s16 vAlong;
+s16 surf88, diff88;
+s16 sprTop;
 u8 rotTimer, rotOfs;
-u8 skip;
-// profiling: scanlines + frames consumed by the last table build
+u8 skip, waterRow, inWater;
 u16 profStartLine, profLines, profFrames;
 u16 vbl0;
 
@@ -62,8 +81,8 @@ u16 vbl0;
 static u16 scanline(void)
 {
     u8 lo, hi;
-    (void)REG_STAT78; // reset the OPVCT byte toggle
-    (void)REG_SLHV;   // latch H/V counters
+    (void)REG_STAT78;
+    (void)REG_SLHV;
     lo = REG_OPVCT;
     hi = REG_OPVCT & 1;
     return ((u16)hi << 8) | lo;
@@ -73,19 +92,38 @@ static u16 scanline(void)
 static void camTabsInitHeaders(void)
 {
     u16 t, b, o, i;
-    // zero everything first: BSS is not cleared, and the never-rebuilt
-    // sky/UI-band entries must be benign ($210D doubles as the UI band's
-    // BG1 scroll, so junk there shears the text)
+    // zero everything: BSS is not cleared, the skipped sky/UI lines must be
+    // benign, and the B/D/VOFS words of the paired entries must stay 0
     for (i = 0; i < sizeof(camTabs); i++)
         camTabs[i] = 0;
-    for (t = 0; t < 5; t++)
+    for (t = 0; t < 4; t++)
         for (b = 0; b < 2; b++)
         {
-            o = t * 904 + b * 452;
-            camTabs[o] = 0xFF;       // 127 per-line entries
-            camTabs[o + 255] = 0xE1; // 97 per-line entries
-            camTabs[o + 450] = 0x00; // end
+            o = t * 1800 + b * 900;
+            camTabs[o] = 0xFF;       // 127 four-byte entries
+            camTabs[o + 509] = 0xE1; // 97 four-byte entries
+            camTabs[o + 898] = 0x00; // end
         }
+}
+
+//---------------------------------------------------------------------------------
+static void buildWinTab(u8 row)
+{
+    u8 *w = winTab;
+    if (row > 127)
+    {
+        *w++ = 127;
+        *w++ = 0xFF; // empty window (left > right): sprite visible
+        *w++ = 0x00;
+        row -= 127;
+    }
+    *w++ = row;
+    *w++ = 0xFF;
+    *w++ = 0x00;
+    *w++ = 1; // from the waterline down: full-width window = sprite clipped
+    *w++ = 0x00;
+    *w++ = 0xFF;
+    *w = 0x00;
 }
 
 //---------------------------------------------------------------------------------
@@ -95,14 +133,6 @@ static void waveHdma(u16 ph, u16 bufOff)
     dmaG.mem.p = waveG[ph];
 
     REG_HDMAEN = 0;
-
-    // Static matrix parts: B = D = 0 (so rows come from M7Y alone), VOFS = 0
-    REG_M7B = 0;
-    REG_M7B = 0;
-    REG_M7D = 0;
-    REG_M7D = 0;
-    REG_M7VOFS = 0;
-    REG_M7VOFS = 0;
 
     // ch0: BG mode split for the text UI band
     uiHdma();
@@ -119,38 +149,39 @@ static void waveHdma(u16 ph, u16 bufOff)
     REG_A1T2LH = dmaG.mem.c.addr;
     REG_A1B2 = dmaG.mem.c.bank;
 
-    // ch3-7: the five built tables (write-twice registers)
+    // ch3-6: paired-register streams (mode 3: p,p,p+1,p+1)
     dmaT.mem.p = camTabs + bufOff;
-    REG_DMAP3 = 0x02;
-    REG_BBAD3 = 0x1B; // M7A
+    REG_DMAP3 = 0x03;
+    REG_BBAD3 = 0x1B; // M7A + M7B
     REG_A1T3LH = dmaT.mem.c.addr;
     REG_A1B3 = dmaT.mem.c.bank;
 
-    dmaT.mem.p = camTabs + 904 + bufOff;
-    REG_DMAP4 = 0x02;
-    REG_BBAD4 = 0x1D; // M7C
+    dmaT.mem.p = camTabs + 1800 + bufOff;
+    REG_DMAP4 = 0x03;
+    REG_BBAD4 = 0x1D; // M7C + M7D
     REG_A1T4LH = dmaT.mem.c.addr;
     REG_A1B4 = dmaT.mem.c.bank;
 
-    dmaT.mem.p = camTabs + 1808 + bufOff;
-    REG_DMAP5 = 0x02;
-    REG_BBAD5 = 0x1F; // M7X
+    dmaT.mem.p = camTabs + 3600 + bufOff;
+    REG_DMAP5 = 0x03;
+    REG_BBAD5 = 0x1F; // M7X + M7Y
     REG_A1T5LH = dmaT.mem.c.addr;
     REG_A1B5 = dmaT.mem.c.bank;
 
-    dmaT.mem.p = camTabs + 2712 + bufOff;
-    REG_DMAP6 = 0x02;
-    REG_BBAD6 = 0x20; // M7Y
+    dmaT.mem.p = camTabs + 5400 + bufOff;
+    REG_DMAP6 = 0x03;
+    REG_BBAD6 = 0x0D; // M7HOFS + M7VOFS
     REG_A1T6LH = dmaT.mem.c.addr;
     REG_A1B6 = dmaT.mem.c.bank;
 
-    dmaT.mem.p = camTabs + 3616 + bufOff;
-    REG_DMAP7 = 0x02;
-    REG_BBAD7 = 0x0D; // M7HOFS
+    // ch7: window waterline (mode 1: WH0 then WH1)
+    dmaT.mem.p = winTab;
+    REG_DMAP7 = 0x01;
+    REG_BBAD7 = 0x26;
     REG_A1T7LH = dmaT.mem.c.addr;
     REG_A1B7 = dmaT.mem.c.bank;
 
-    REG_HDMAEN = 0xFF; // all eight channels
+    REG_HDMAEN = 0xFF;
 }
 
 //---------------------------------------------------------------------------------
@@ -165,11 +196,21 @@ int main(void)
     setMode7(0);
     uiInit();
 
+    // jet ski sprite: 64 tiles at VRAM 0x6000, OBJ palette 0 (CGRAM 128+)
+    oamInitGfxSet(&ski_tiles, 2048, &ski_pal, 32, 0, 0x6000, OBJ_SIZE16_L32);
+    oamSet(0, SKI_X, 140, 3, 0, 0, 0, 0);
+    oamSetEx(0, OBJ_LARGE, OBJ_SHOW);
+
     setPaletteColor(0, RGB8(248, 168, 96));
 
     // Additive colour math on BG1 with the fixed colour = crest glow
     REG_CGWSEL = 0x00;
     REG_CGADSUB = 0x01;
+
+    // Window 1 masks OBJ on the main screen; HDMA moves the window edges so
+    // the region below the waterline swallows the sprite
+    REG_WOBJSEL = 0x02;
+    REG_TMW = 0x10;
 
     setScreenOn();
 
@@ -180,56 +221,83 @@ int main(void)
     camPY = 0;
     camSinVal = 0;
     camCosVal = 127;
+    skiY = -DIP;
+    skiVv = 0;
+    skiVX = 0;
+    skiVY = 0;
+    fracX = 0;
+    fracY = 0;
     rotTimer = 0;
     rotOfs = 0;
-    profLines = 0;
-    profFrames = 0;
+    buildWinTab(200);
 
-// build-time debug: camera drives itself (verifies the engine in the
-// emulator test runner, where scripted input is unavailable)
+// build-time debug: drive itself (the emulator test runner has no input)
 #define AUTOPILOT 0
 
     while (1)
     {
         pad0 = padsCurrent(0);
 #if AUTOPILOT
-        pad0 |= KEY_RIGHT | KEY_UP;
+        pad0 |= KEY_B;
 #endif
 
+        // ---- steering: heading always turns; lean is cosmetic feedback ----
+        skiLean = 0;
         if (pad0 & KEY_LEFT)
+        {
             camTheta -= TURN_SPEED;
+            skiLean = 1;
+            skiFlip = 1;
+        }
         if (pad0 & KEY_RIGHT)
+        {
             camTheta += TURN_SPEED;
-
-        fwdVel = 0;
-        if (pad0 & KEY_UP)
-            fwdVel = MOVE_SPEED;
-        if (pad0 & KEY_DOWN)
-            fwdVel = -MOVE_SPEED;
-        if (fwdVel)
-        {
-            camPX += (fwdVel * camSinVal) >> 7;
-            camPY += (fwdVel * camCosVal) >> 7;
-        }
-        if (pad0 & KEY_R)
-        {
-            camPX += (STRAFE_SPEED * camCosVal) >> 7;
-            camPY -= (STRAFE_SPEED * camSinVal) >> 7;
-        }
-        if (pad0 & KEY_L)
-        {
-            camPX -= (STRAFE_SPEED * camCosVal) >> 7;
-            camPY += (STRAFE_SPEED * camSinVal) >> 7;
+            skiLean = 1;
+            skiFlip = 0;
         }
 
-        // Wave phase: rolls with time, and with forward motion — driving
-        // fast means skipping over the crests
-        phaseAcc = (phaseAcc + WAVE_BASE_ROLL + fwdVel * WAVE_STEPS_PER_TEXEL)
+        // ---- buoyancy / flight ----
+        surf88 = ((s16)waveSurfH[phase]) << 8;
+        inWater = (skiY <= surf88);
+        if (inWater)
+        {
+            // spring toward floating a dip under the surface, water-damped
+            skiVv += (surf88 - DIP - skiY) >> 3;
+            skiVv -= skiVv >> 2;
+            // hovercraft scrabble: thrust only bites in the water
+            if (pad0 & KEY_B)
+            {
+                skiVX += (THRUST * camSinVal) >> 7;
+                skiVY += (THRUST * camCosVal) >> 7;
+            }
+            // water drag
+            skiVX -= skiVX >> 4;
+            skiVY -= skiVY >> 4;
+        }
+        else
+        {
+            skiVv -= GRAV; // airborne: ballistic, thrust spins the fan in vain
+        }
+        skiY += skiVv;
+
+        // ---- move the world ----
+        fracX += skiVX;
+        camPX += fracX >> 8;
+        fracX &= 0x00FF;
+        fracY += skiVY;
+        camPY += fracY >> 8;
+        fracY &= 0x00FF;
+
+        // forward speed (along the view axis) drives the wave phase:
+        // fast = skipping over crests, still = lazy swell
+        vAlong = ((skiVX >> 4) * camSinVal + (skiVY >> 4) * camCosVal) >> 3;
+        phaseAcc = (phaseAcc + WAVE_BASE_ROLL
+                    + (((vAlong >> 4) * WAVE_STEPS_PER_TEXEL) >> 4))
                    & WAVE_PHASE_MASK;
         phase = phaseAcc >> 8;
 
         camPhaseOff = phase * WAVE_RAW_STRIDE;
-        camBufOff = (tick & 1) ? 452 : 0;
+        camBufOff = (tick & 1) ? 900 : 0;
         tick++;
 
         // skip building the sky lines — their table entries are never shown
@@ -238,13 +306,27 @@ int main(void)
             skip = 126;
         camBlk1Ct = 127 - skip;
         camSrcOff = camPhaseOff + 2 * skip;
-        camDstOff = camBufOff + 1 + 2 * skip;
+        camDstOff = camBufOff + 1 + 4 * skip;
 
         vbl0 = snes_vblank_count;
         profStartLine = scanline();
         buildCamTables();
         profFrames = snes_vblank_count - vbl0;
         profLines = profFrames * 262 + scanline() - profStartLine;
+
+        // ---- place the ski sprite + waterline window ----
+        waterRow = waveSkiRow[phase];
+        diff88 = skiY - surf88; // positive = above the surface
+        sprTop = (s16)waterRow - WAVE_SKI_REST_ROW
+                 - (((diff88 >> 4) * WAVE_SKI_PPT_Q4) >> 8);
+        if (sprTop < 24)
+            sprTop = 24;
+        if (sprTop > 190)
+            sprTop = 190;
+        buildWinTab(waterRow);
+        // sprite updates BEFORE WaitForVBlank: the ISR's OAM DMA (ch7 regs)
+        // fires on that vblank, and waveHdma restores ch7 right after
+        oamSet(0, SKI_X, (u16)sprTop, 3, skiFlip, 0, skiLean ? 4 : 0, 0);
 
         if ((tick & 3) == 0)
         {
@@ -254,12 +336,13 @@ int main(void)
             uiPrintNum(7, 0, camPY & 1023, 4);
             uiPrint(12, 0, "H");
             uiPrintNum(13, 0, camTheta, 3);
+            uiPrint(17, 0, "V");
+            uiPrintNum(18, 0, vAlong >= 0 ? vAlong : -vAlong, 4);
             uiPrint(0, 1, "BUILD");
             uiPrintNum(5, 1, profLines, 4);
-            uiPrint(9, 1, "LN");
-            uiPrintNum(12, 1, profFrames, 1);
-            uiPrint(13, 1, "F PH");
-            uiPrintNum(17, 1, phase, 2);
+            uiPrint(9, 1, "LN PH");
+            uiPrintNum(14, 1, phase, 2);
+            uiPrint(17, 1, inWater ? "WET" : "AIR");
         }
 
         WaitForVBlank();
@@ -268,7 +351,7 @@ int main(void)
 
 #if WAVE_ROT_FRAMES > 0
         rotTimer++;
-        if (rotTimer >= WAVE_ROT_FRAMES / 2) // loop runs ~every 2 frames
+        if (rotTimer >= WAVE_ROT_FRAMES / 2)
         {
             rotTimer = 0;
             rotOfs++;

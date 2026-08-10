@@ -94,19 +94,21 @@ camDP dsb 16
 ; one scanline; args \1..\4 = negate A / C / dx / dy (0 or 1)
 .MACRO OPTLINE
     ; pair A (a_i): M7A = a*cos, M7C = -a*sin
+    ; table entries are 4 bytes (paired-register HDMA mode 3); the second
+    ; word of the A, C and HOFS entries is B / D / VOFS = 0, pre-zeroed
     PRODLO wave_rawa, DP_COSM2
     .IF \1 == 1
     eor #$FFFF
     inc a
     .ENDIF
-    sta.l camTabs + 0,x        ; M7A
+    sta.l camTabs + 0,x        ; M7A (M7B word stays 0)
 
     PRODHI wave_rawa, DP_SINM2
     .IF \2 == 1
     eor #$FFFF
     inc a
     .ENDIF
-    sta.l camTabs + 904,x      ; M7C
+    sta.l camTabs + 1800,x     ; M7C (M7D word stays 0)
 
     ; pair D (d_i): M7X/HOFS from d*sin, M7Y from d*cos
     PRODLO wave_rawd, DP_SINM2
@@ -117,11 +119,11 @@ camDP dsb 16
     clc
     adc.b DP_PX
     and #$03FF
-    sta.l camTabs + 1808,x     ; M7X
+    sta.l camTabs + 3600,x     ; M7X
     sec
     sbc #128
     and #$1FFF                 ; signed 13-bit: (HOFS - M7X) must stay -128
-    sta.l camTabs + 3616,x     ; HOFS
+    sta.l camTabs + 5400,x     ; HOFS (VOFS word stays 0)
 
     PRODHI wave_rawd, DP_COSM2
     .IF \4 == 1
@@ -131,7 +133,7 @@ camDP dsb 16
     clc
     adc.b DP_PY
     and #$03FF
-    sta.l camTabs + 2712,x     ; M7Y
+    sta.l camTabs + 3602,x     ; M7Y (second word of the X entry)
 .ENDM
 
 ; full dual-block build loop for one sign combination
@@ -140,6 +142,8 @@ _l1\@:
     OPTLINE \1, \2, \3, \4
     iny
     iny
+    inx
+    inx
     inx
     inx
     dec.b DP_CT
@@ -153,6 +157,8 @@ _l2\@:
     OPTLINE \1, \2, \3, \4
     iny
     iny
+    inx
+    inx
     inx
     inx
     dec.b DP_CT

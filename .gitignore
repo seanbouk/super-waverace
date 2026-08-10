@@ -28,3 +28,4 @@ web/superwaverace.sfc
 toolchain/
 game/*.as
 __pycache__/
+game/ski.png
