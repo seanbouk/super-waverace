@@ -66,6 +66,9 @@ u8 skiFlip;       // lean direction (hflip)
 #define REG_OPVCT (*(vuint8 *)0x213D)
 #endif
 #define REG_WOBJSEL (*(vuint8 *)0x2125)
+#ifndef REG_SETINI
+#define REG_SETINI (*(vuint8 *)0x2133)
+#endif
 #define REG_TMW (*(vuint8 *)0x212E)
 
 dmaMemory dmaTM, dmaG, dmaT;
@@ -200,6 +203,10 @@ int main(void)
                       (&sea_patterns_end - &sea_patterns), 0x0000);
 
     setMode7(0);
+    // EXTBG spike: BG2 duplicates the mode 7 image with pixel bit 7 as a
+    // priority flag; course pixels (bit 7 set) render via BG2-high, above
+    // BG1 and OUTSIDE its colour math - crest glow no longer touches sand
+    REG_SETINI = 0x40;
     uiInit();
 
     // jet ski sprite: 64 tiles at VRAM 0x6000, OBJ palette 0 (CGRAM 128+)

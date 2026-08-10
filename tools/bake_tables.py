@@ -33,7 +33,7 @@ ASSETS = os.path.join(ROOT, "assets")
 
 SCANLINES = 224
 SKY_TM = 0x10        # sky lines: sprites + backdrop only
-SEA_TM = 0x11        # sea lines: BG1 + sprites
+SEA_TM = 0x13        # sea lines: BG1 + BG2 (EXTBG) + sprites
 UI_LINES = 24        # top band: BG mode 1 text UI (3 tile rows)
 SKY_RGB = (248, 168, 96)  # backdrop / palette index 0 (dusk orange)
 
@@ -163,7 +163,7 @@ def phase_tables(phi):
         g_entries.append((0xE0 | min(31, b),))
 
     # TM: UI band shows BG1 (mode-1 text), then backdrop sky, then BG1 sea
-    tab_tm = bytes(repeat_blocks(UI_LINES, SEA_TM)
+    tab_tm = bytes(repeat_blocks(UI_LINES, 0x11)
                    + repeat_blocks(n_sky - UI_LINES, SKY_TM)
                    + bytearray((0x81, SEA_TM, 0x00)))
     tab_g = hdma_table(n_sky, (0xE0,), g_entries)   # UI band + sky: add zero
@@ -555,7 +555,7 @@ def quantize_tiles(tiles, counts, palette, classes, limit=256):
                 r = g = b = 0
                 for py in range(2):
                     for px in range(2):
-                        cr, cg, cb = palette[t[(qy * 2 + py) * 8 + qx * 2 + px]]
+                        cr, cg, cb = palette[t[(qy * 2 + py) * 8 + qx * 2 + px] & 0x7F]
                         r += cr
                         g += cg
                         b += cb
@@ -624,7 +624,7 @@ def build_mode7_data(canvas, palette):
     raw_unique = len(tiles)
     if raw_unique > 256:
         # class 1 = contains course colours (shore foam, sand, ropes, floats)
-        classes = [1 if any(8 <= px <= 14 for px in t) else 0 for t in tiles]
+        classes = [1 if any(px & 0x80 for px in t) else 0 for t in tiles]
         alive, resolve, merges = quantize_tiles(tiles, counts, palette, classes)
         final = {old: new for new, old in enumerate(alive)}
         mp7 = bytearray(128 * 128)
@@ -692,6 +692,13 @@ def main():
     if course:
         print("course: assets/course.json ({0} ropes)".format(len(course[1])))
     canvas = compose_canvas(pat, course)
+    # EXTBG: set bit 7 on course pixels -> they render via BG2-high (above
+    # BG1, colour-math-free); colour comes from the low 7 bits so the
+    # palette layout is untouched
+    for row in canvas:
+        for x in range(1024):
+            if 8 <= row[x] <= 14:
+                row[x] |= 0x80
     pc7, mp7, pal = build_mode7_data(canvas, palette)
     # preview reflects the QUANTISED data the SNES will actually show
     for ty in range(128):
@@ -707,7 +714,9 @@ def main():
         f.write(mp7)
     with open(os.path.join(OUT_DIR, "sea.pal"), "wb") as f:
         f.write(pal)
-    write_png(os.path.join(OUT_DIR, "sea.png"), canvas, palette)  # preview only
+    write_png(os.path.join(OUT_DIR, "sea.png"),
+              [bytes(px & 0x7F for px in row) for row in canvas],
+              palette)  # preview only (priority bit masked)
 
     # -- HDMA tables (camera-independent) + raw arrays for the runtime builder --
     asm = ['.include "hdr.asm"', ""]
