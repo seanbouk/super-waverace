@@ -28,6 +28,7 @@ extern void buildCamTables(void);
 
 // ---- camera state shared with camera.asm (accessed via long addressing) ----
 u8 camTheta;
+u16 camTheta16; // 8.8 heading: turn rate scales smoothly with speed
 u16 camPX, camPY;
 u16 camPhaseOff, camBufOff;
 u16 camSrcOff, camDstOff, camBlk1Ct;
@@ -73,6 +74,7 @@ u16 tick;
 u16 phase;
 u16 phaseAcc;
 s16 vAlong, vSide;
+s16 turnRate;
 s16 surf88, diff88;
 s16 sprTop;
 u8 rotTimer, rotOfs;
@@ -221,6 +223,7 @@ int main(void)
     tick = 0;
     phaseAcc = 0;
     camTheta = 0;
+    camTheta16 = 0;
     camPX = 512;
     camPY = 0;
     camSinVal = 0;
@@ -248,20 +251,27 @@ int main(void)
         pad0 |= KEY_B;
 #endif
 
-        // ---- steering: heading always turns; lean is cosmetic feedback ----
+        // ---- steering: turn authority scales with speed (no speed, no
+        // rudder bite); full rate from ~20% of top speed upward ----
+        turnRate = vAlong < 0 ? -vAlong : vAlong;
+        if (turnRate > 512)
+            turnRate = 512; // 512 in 8.8 heading units = the old full rate
         skiLean = 0;
         if (pad0 & KEY_LEFT)
         {
-            camTheta -= TURN_SPEED;
-            skiLean = 1;
+            camTheta16 -= turnRate;
+            if (turnRate >= 32)
+                skiLean = 1;
             skiFlip = 1;
         }
         if (pad0 & KEY_RIGHT)
         {
-            camTheta += TURN_SPEED;
-            skiLean = 1;
+            camTheta16 += turnRate;
+            if (turnRate >= 32)
+                skiLean = 1;
             skiFlip = 0;
         }
+        camTheta = camTheta16 >> 8;
 
         // ---- buoyancy / flight ----
         surf88 = ((s16)waveSurfH[phase]) << 8;
