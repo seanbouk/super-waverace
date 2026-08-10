@@ -180,7 +180,8 @@ def phase_raw(phi):
     for x in xs:
         assert x < 4096, "maxX must stay below 4096 for the 16x8 multiplier"
         d_words.append(round(x) & 0xFFFF)
-        a_words.append(max(1, min(0x7FFF, round(x * TAN_HALF_H / 128.0 * 256.0))))
+        # /4: one texture texel spans four world units (the world-scale)
+        a_words.append(max(1, min(0x7FFF, round(x * TAN_HALF_H / 128.0 * 64.0))))
     return d_words, a_words
 
 
@@ -477,14 +478,13 @@ def compose_canvas(pat, course):
             for t in range(steps + 1):
                 x = round(x0 + (x1 - x0) * t / steps) & 1023
                 y = round(y0 + (y1 - y0) * t / steps) & 1023
-                canvas[y][x] = WET_SAND          # the rope cord
-                canvas[(y + 1) & 1023][x] = WET_SAND
-                acc += 1
+                canvas[y][x] = WET_SAND          # the rope cord (1px:
+                acc += 1                         # texels render 4x magnified)
                 if acc % 14 == 0:                # a float every 14 texels
                     col = FLOAT_A if (acc // 14) & 1 else FLOAT_B
-                    for dy in range(-2, 3):
-                        for dx in range(-2, 3):
-                            if dx * dx + dy * dy <= 5:
+                    for dy in range(-1, 2):
+                        for dx in range(-1, 2):
+                            if dx * dx + dy * dy <= 2:
                                 canvas[(y + dy) & 1023][(x + dx) & 1023] = col
     return canvas
 

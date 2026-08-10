@@ -224,8 +224,8 @@ int main(void)
     phaseAcc = 0;
     camTheta = 0;
     camTheta16 = 0;
-    camPX = 512;
-    camPY = 0;
+    camPX = 2048; // world units: 1 texel = 4 world; map spans 4096
+    camPY = 768;  // south of the demo island, ring ahead
     camSinVal = 0;
     camCosVal = 127;
     skiY = -1536; // spawn below any wave: wet from frame one, bobs up
@@ -383,9 +383,9 @@ int main(void)
         if ((tick & 3) == 0)
         {
             uiPrint(0, 0, "X");
-            uiPrintNum(1, 0, camPX & 1023, 4);
+            uiPrintNum(1, 0, camPX & 4095, 4);
             uiPrint(6, 0, "Y");
-            uiPrintNum(7, 0, camPY & 1023, 4);
+            uiPrintNum(7, 0, camPY & 4095, 4);
             uiPrint(12, 0, "H");
             uiPrintNum(13, 0, camTheta, 3);
             uiPrint(17, 0, "V");

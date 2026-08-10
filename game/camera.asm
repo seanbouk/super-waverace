@@ -118,7 +118,9 @@ camDP dsb 16
     .ENDIF
     clc
     adc.b DP_PX
-    and #$03FF
+    and #$0FFF                 ; world wraps every 4096 units...
+    lsr a
+    lsr a                      ; ...and one texture texel = 4 world units
     sta.l camTabs + 3600,x     ; M7X
     sec
     sbc #128
@@ -132,7 +134,9 @@ camDP dsb 16
     .ENDIF
     clc
     adc.b DP_PY
-    and #$03FF
+    and #$0FFF
+    lsr a
+    lsr a
     sta.l camTabs + 3602,x     ; M7Y (second word of the X entry)
 .ENDM
 
