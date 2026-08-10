@@ -701,9 +701,13 @@ def main():
     # EXTBG: set bit 7 on course pixels -> they render via BG2-high (above
     # BG1, colour-math-free); colour comes from the low 7 bits so the
     # palette layout is untouched
+    # per-PIXEL exemption: anything sand-coloured (beach, wet-sand line,
+    # sandy shallows) plus the rope cord and floats escape the glow; foam,
+    # pale shallows, calm wake and open water keep the crest highlights
+    exempt = (SAND, SAND_SH, WET_SAND, FLOAT_A, SHAL_SAND)
     for row in canvas:
         for x in range(1024):
-            if row[x] == SAND or row[x] == SAND_SH:
+            if row[x] in exempt:
                 row[x] |= 0x80
     pc7, mp7, pal = build_mode7_data(canvas, palette)
     # preview reflects the QUANTISED data the SNES will actually show
