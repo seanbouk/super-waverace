@@ -402,11 +402,12 @@ def load_pattern():
 
 # ---- course: sand islands, shorelines, rope float-lines ----------------------
 # palette indices 8-13 (the course block in the colour map)
-SAND, SAND_SH, FOAM, WET_SAND, FLOAT_A, FLOAT_B = 8, 9, 10, 11, 12, 13
+SAND, SAND_SH, FOAM, WET_SAND, FLOAT_A, FLOAT_B, CALM = 8, 9, 10, 11, 12, 13, 14
 COURSE_COLORS = {
     SAND: (232, 214, 164), SAND_SH: (212, 190, 142),
     FOAM: (250, 250, 244), WET_SAND: (186, 164, 118),
     FLOAT_A: (226, 62, 48), FLOAT_B: (246, 246, 240),
+    CALM: (22, 62, 122),  # flat wake band under ropes (non-rotating)
 }
 
 
@@ -469,29 +470,50 @@ def compose_canvas(pat, course):
                         c = WET_SAND
                     canvas[y][x] = c
 
+    # Ropes are CELL-CANONICAL to keep the tile budget flat: each crossed
+    # 8x8 cell gets a flat calm-water background (the rope's wake) and one
+    # of 8 canonical centre-lines matching the local direction, so a rope
+    # costs ~24 unique tiles no matter how long it is.
+    octants = [(1, 0), (1, 1), (0, 1), (-1, 1), (-1, 0), (-1, -1), (0, -1), (1, -1)]
     for rope in ropes:
-        acc = 0
+        cells = []  # (cy, cx, octant)
         for i in range(len(rope) - 1):
             x0, y0 = rope[i]
             x1, y1 = rope[i + 1]
             steps = max(abs(x1 - x0), abs(y1 - y0), 1)
+            dx, dy = x1 - x0, y1 - y0
+            ang = math.atan2(dy, dx)
+            oct_i = round(ang / (math.pi / 4)) % 8
             for t in range(steps + 1):
-                x = round(x0 + (x1 - x0) * t / steps) & 1023
-                y = round(y0 + (y1 - y0) * t / steps) & 1023
-                canvas[y][x] = WET_SAND          # the rope cord (1px:
-                acc += 1                         # texels render 4x magnified)
-                if acc % 14 == 0:                # a float every 14 texels
-                    col = FLOAT_A if (acc // 14) & 1 else FLOAT_B
-                    for dy in range(-1, 2):
-                        for dx in range(-1, 2):
-                            if dx * dx + dy * dy <= 2:
-                                canvas[(y + dy) & 1023][(x + dx) & 1023] = col
+                cx = (round(x0 + dx * t / steps) >> 3) & 127
+                cy = (round(y0 + dy * t / steps) >> 3) & 127
+                if not cells or cells[-1][:2] != (cy, cx):
+                    cells.append((cy, cx, oct_i))
+        for i, (cy, cx, oct_i) in enumerate(cells):
+            ox, oy = octants[oct_i]
+            for py in range(8):
+                for px in range(8):
+                    canvas[cy * 8 + py][cx * 8 + px] = CALM
+            # canonical rope line through the cell centre
+            for s in range(-4, 5):
+                x = (cx * 8 + 3 + ox * s) & 1023
+                y = (cy * 8 + 3 + oy * s) & 1023
+                if (x >> 3) == cx and (y >> 3) == cy:
+                    canvas[y][x] = WET_SAND
+            if i % 2 == 1:  # a float every other cell
+                col = FLOAT_A if (i >> 1) & 1 else FLOAT_B
+                for fy in range(-2, 3):
+                    for fx in range(-2, 3):
+                        if fx * fx + fy * fy <= 4:
+                            canvas[cy * 8 + 3 + fy][cx * 8 + 3 + fx] = col
     return canvas
 
 
-def quantize_tiles(tiles, counts, palette, limit=256):
+def quantize_tiles(tiles, counts, palette, classes, limit=256):
     """Greedy-merge the most similar tiles (RGB distance on 2x2-quadrant
-    signatures) until the count fits. Keeps the more-used tile's pixels."""
+    signatures) until the count fits. Keeps the more-used tile's pixels.
+    Tiles only merge within their class, so rare course features (shoreline
+    foam, rope floats) can never be absorbed into water or plain sand."""
     def signature(t):
         sig = []
         for qy in range(4):
@@ -517,12 +539,18 @@ def quantize_tiles(tiles, counts, palette, limit=256):
             sa = sigs[a]
             for jj in range(ii + 1, len(alive)):
                 b = alive[jj]
+                if classes[a] != classes[b]:
+                    continue
                 sb = sigs[b]
                 d = 0
                 for k in range(48):
                     d += abs(sa[k] - sb[k])
                     if best and d >= best[0]:
                         break
+                # course tiles (shore, ropes, floats) are precious: make
+                # merging them 8x more expensive than softening water
+                if classes[a] == 1:
+                    d *= 8
                 if best is None or d < best[0]:
                     best = (d, a, b)
         _, a, b = best
@@ -561,7 +589,9 @@ def build_mode7_data(canvas, palette):
 
     raw_unique = len(tiles)
     if raw_unique > 256:
-        alive, resolve, merges = quantize_tiles(tiles, counts, palette)
+        # class 1 = contains course colours (shore foam, sand, ropes, floats)
+        classes = [1 if any(8 <= px <= 14 for px in t) else 0 for t in tiles]
+        alive, resolve, merges = quantize_tiles(tiles, counts, palette, classes)
         final = {old: new for new, old in enumerate(alive)}
         mp7 = bytearray(128 * 128)
         for my in range(128):
@@ -629,6 +659,14 @@ def main():
         print("course: assets/course.json ({0} ropes)".format(len(course[1])))
     canvas = compose_canvas(pat, course)
     pc7, mp7, pal = build_mode7_data(canvas, palette)
+    # preview reflects the QUANTISED data the SNES will actually show
+    for ty in range(128):
+        for tx in range(128):
+            base = mp7[ty * 128 + tx] * 64
+            for py in range(8):
+                row = canvas[ty * 8 + py]
+                for px in range(8):
+                    row[tx * 8 + px] = pc7[base + py * 8 + px]
     with open(os.path.join(OUT_DIR, "sea.pc7"), "wb") as f:
         f.write(pc7)
     with open(os.path.join(OUT_DIR, "sea.mp7"), "wb") as f:

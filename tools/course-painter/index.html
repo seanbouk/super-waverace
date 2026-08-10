@@ -139,7 +139,7 @@ function stats() {
   document.getElementById("stats").innerHTML =
     "sand tiles: <b>" + sand + "</b><br>shore tiles: <b>" + shore +
     "</b> (~16 unique after bake)<br>rope length: <b>" + Math.round(ropeLen) +
-    "</b> texels (~" + Math.round(ropeLen / 8) + " tiles touched)<br>ropes: <b>" +
+    "</b> texels (cell-canonical: ~24 unique tiles total)<br>ropes: <b>" +
     ropes.length + (current ? " +1 open" : "") + "</b>";
 }
 
