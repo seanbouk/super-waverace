@@ -225,7 +225,7 @@ int main(void)
     camPY = 0;
     camSinVal = 0;
     camCosVal = 127;
-    skiY = (((s16)waveSurfH[0]) << 8) - DIP; // start settled on the water
+    skiY = -1536; // spawn below any wave: wet from frame one, bobs up
     skiVv = 0;
     skiVX = 0;
     skiVY = 0;
@@ -319,7 +319,7 @@ int main(void)
             // gravel grip: kill a chunk of the slip each loop, and let the
             // rudder convert some of it into forward drive (momentum keeps)
             vAlong += (vSide < 0 ? -vSide : vSide) >> 3;
-            vSide -= vSide >> 2;
+            vSide -= vSide >> 3;
             skiVX = ((vAlong >> 4) * camSinVal + (vSide >> 4) * camCosVal) >> 3;
             skiVY = ((vAlong >> 4) * camCosVal - (vSide >> 4) * camSinVal) >> 3;
         }
