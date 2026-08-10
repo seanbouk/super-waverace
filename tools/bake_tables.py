@@ -427,8 +427,10 @@ def load_course():
 
 def compose_canvas(pat, course):
     """Full 1024x1024 index canvas: tiled water pattern, then sand zones,
-    auto-shore foam (on the sand side), and rope float-lines."""
+    auto-shore foam (on the sand side), and rope float-lines.
+    Also returns the 128x128 collision byte-map (0 water, 1 sand, 2 rope)."""
     size = len(pat)
+    coll = bytearray(128 * 128)
     canvas = [bytearray(1024) for _ in range(1024)]
     for y in range(1024):
         row = canvas[y]
@@ -436,7 +438,7 @@ def compose_canvas(pat, course):
         for x in range(1024):
             row[x] = prow[x % size]
     if not course:
-        return canvas
+        return canvas, coll
 
     zones, ropes = course
 
@@ -483,6 +485,7 @@ def compose_canvas(pat, course):
         for cx in range(128):
             if zrow[cx] != "s":
                 continue
+            coll[cy * 128 + cx] = 1
             n, s_, w, e = water(cy - 1, cx), water(cy + 1, cx), \
                 water(cy, cx - 1), water(cy, cx + 1)
             for py in range(8):
@@ -527,6 +530,7 @@ def compose_canvas(pat, course):
                 if not cells or cells[-1][:2] != (cy, cx):
                     cells.append((cy, cx, oct_i))
         for i, (cy, cx, oct_i) in enumerate(cells):
+            coll[cy * 128 + cx] = 2
             ox, oy = octants[oct_i]
             for py in range(8):
                 for px in range(8):
@@ -543,7 +547,7 @@ def compose_canvas(pat, course):
                 for fx in range(-2, 3):
                     if fx * fx + fy * fy <= 4:
                         canvas[cy * 8 + 3 + fy][cx * 8 + 3 + fx] = FLOAT_A
-    return canvas
+    return canvas, coll
 
 
 def quantize_tiles(tiles, counts, palette, classes, limit=256):
@@ -697,7 +701,7 @@ def main():
     course = load_course()
     if course:
         print("course: assets/course.json ({0} ropes)".format(len(course[1])))
-    canvas = compose_canvas(pat, course)
+    canvas, coll = compose_canvas(pat, course)
     # EXTBG: set bit 7 on course pixels -> they render via BG2-high (above
     # BG1, colour-math-free); colour comes from the low 7 bits so the
     # palette layout is untouched
@@ -780,6 +784,13 @@ def main():
     asm.append(".ends")
     asm.append("")
 
+    # collision byte-map (128x128 cells, 0 water / 1 sand / 2 rope)
+    asm.append('.section ".wave_coll" superfree')
+    asm.append("wave_coll:")
+    asm.append(db_lines(coll))
+    asm.append(".ends")
+    asm.append("")
+
     # jet ski sprite sheet (4bpp OBJ tiles) + palette
     ski_tiles, ski_pal, ski_sheet = build_ski_sheet()
     write_png(os.path.join(OUT_DIR, "ski.png"),
@@ -815,6 +826,7 @@ def main():
 #define WAVE_ROT_COUNT {2}
 #define WAVE_ROT_FRAMES {3}
 #define WAVE_RAW_STRIDE 448
+#define WAVE_PC7_SIZE {{PC7SIZE}}
 #define WAVE_UI_LINES {4}
 #define WAVE_BASE_ROLL 64
 #define WAVE_STEPS_PER_TEXEL {5}
@@ -833,7 +845,7 @@ void waveTablesInit(void);
 void waveRotateStep(u8 offset);
 
 #endif
-""".format(phases, tick_shift, rot_count, rot_frames, UI_LINES,
+""".replace("{{PC7SIZE}}", str(len(pc7))).format(phases, tick_shift, rot_count, rot_frames, UI_LINES,
            round(256.0 * phases / P["wavelength"]), phases * 256 - 1,
            # screen px per world texel at the ski's distance, x2 for drama,
            # in 4.4 fixed point

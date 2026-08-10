@@ -5,7 +5,6 @@
 
 sea_patterns:
 .incbin "sea.pc7"
-sea_patterns_end:
 
 .ends
 

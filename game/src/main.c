@@ -22,9 +22,10 @@
 #include "wavedata.h"
 #include "ui.h"
 
-extern char sea_patterns, sea_patterns_end, sea_map, sea_palette;
+extern char sea_patterns, sea_map, sea_palette;
 extern char ski_tiles, ski_pal;
 extern void buildCamTables(void);
+extern void collProbe(void); // camera.asm: reads the collision byte-map
 
 // ---- camera state shared with camera.asm (accessed via long addressing) ----
 u8 camTheta;
@@ -85,6 +86,11 @@ u8 skip, waterRow, inWater, wasInWater;
 s16 prevSin, prevCos;
 u16 profStartLine, profLines, profFrames;
 u16 vbl0;
+// collision
+u16 collOfs;
+u8 collVal, collHere;
+u16 skiWX, skiWY;
+s16 stepX, stepY;
 
 //---------------------------------------------------------------------------------
 static u16 scanline(void)
@@ -200,7 +206,7 @@ int main(void)
     camTabsInitHeaders();
 
     bgInitMapTileSet7(&sea_patterns, &sea_map, &sea_palette,
-                      (&sea_patterns_end - &sea_patterns), 0x0000);
+                      WAVE_PC7_SIZE, 0x0000);
 
     setMode7(0);
     // EXTBG spike: BG2 duplicates the mode 7 image with pixel bit 7 as a
@@ -320,13 +326,47 @@ int main(void)
         skiY += skiVv;
         wasInWater = inWater;
 
-        // ---- move the world ----
+        // ---- move the world; sand and ropes block, sliding along ----
+        // collide at the SKI's position (200 world units ahead of camera),
+        // one axis at a time: the blocked axis stops, the other keeps its
+        // momentum, so oblique hits scrape along instead of snagging
+        skiWX = camPX + ((WAVE_SKI_DIST * camSinVal) >> 7);
+        skiWY = camPY + ((WAVE_SKI_DIST * camCosVal) >> 7);
+        collOfs = ((skiWY >> 5) & 127) * 128 + ((skiWX >> 5) & 127);
+        collProbe();
+        collHere = collVal; // already embedded: waive blocking to escape
+
         fracX += skiVX;
-        camPX += fracX >> 8;
+        stepX = fracX >> 8;
         fracX &= 0x00FF;
+        if (stepX && !collHere)
+        {
+            collOfs = ((skiWY >> 5) & 127) * 128
+                      + (((u16)(skiWX + stepX) >> 5) & 127);
+            collProbe();
+            if (collVal)
+            {
+                stepX = 0;
+                skiVX = 0;
+            }
+        }
+        camPX += stepX;
+
         fracY += skiVY;
-        camPY += fracY >> 8;
+        stepY = fracY >> 8;
         fracY &= 0x00FF;
+        if (stepY && !collHere)
+        {
+            collOfs = (((u16)(skiWY + stepY) >> 5) & 127) * 128
+                      + (((u16)(skiWX + stepX) >> 5) & 127);
+            collProbe();
+            if (collVal)
+            {
+                stepY = 0;
+                skiVY = 0;
+            }
+        }
+        camPY += stepY;
 
         // split velocity into forward/side components along the heading
         vAlong = ((skiVX >> 4) * camSinVal + (skiVY >> 4) * camCosVal) >> 3;

@@ -319,4 +319,21 @@ buildDone:
     plp
     rtl
 
+;----------------------------------------------------------------------------
+; collProbe — read the course collision byte-map (C cannot do far ROM reads)
+; in: collOfs = cellY*128 + cellX; out: collVal = 0 water / 1 sand / 2 rope
+collProbe:
+    php
+    rep #$30
+    phx
+    lda.l collOfs
+    tax
+    sep #$20
+    lda.l wave_coll,x
+    sta.l collVal
+    rep #$30
+    plx
+    plp
+    rtl
+
 .ENDS

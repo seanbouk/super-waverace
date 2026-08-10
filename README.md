@@ -81,13 +81,18 @@ correctly swallows it. (Freeing that eighth HDMA channel required merging the fi
 matrix streams into four paired-register mode-3 channels â€” B, D and VOFS ride along
 as permanently-zero words.)
 
-**Glow-free land (EXTBG spike).** The crest glow is colour math on BG1, and sand
+**Glow-free land (EXTBG).** The crest glow is colour math on BG1, and sand
 is BG1 — so Mode 7's hidden second layer is used to exempt it: with EXTBG enabled,
 BG2 duplicates the image treating pixel bit 7 as a per-pixel priority flag. Course
 pixels are baked with bit 7 set, so they win via BG2-high (above BG1, per the mode 7
 priority order S3 S2 2H S1 BG1 S0 2L) and escape BG1's colour math entirely — the
-surf keeps its texture, the beach stays clean, the water keeps its glow. Currently a
-spike pending real-hardware verification.
+surf keeps its texture, the beach stays clean, the water keeps its glow. Verified on real hardware.
+
+**Collision.** The course painter's zones double as physics: the bake exports a
+128×128 collision byte-map (water / sand / rope; one cell = 32 world units), a tiny
+asm probe reads it, and movement is resolved one axis at a time at the ski's
+position — the blocked axis stops, the other keeps its momentum, so oblique
+contact slides along shores and rope lines instead of snagging.
 
 **The UI band.** The top 24 scanlines run in BG mode 1 (HDMA on `$2105` switches
 the whole PPU mode mid-frame, back to mode 7 below) giving 3 rows of tiled text.
