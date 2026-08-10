@@ -50,10 +50,11 @@ u8 skiLean;       // 0 straight, 1 leaning
 u8 skiFlip;       // lean direction (hflip)
 
 #define TURN_SPEED 2
-#define THRUST 72
+#define THRUST 144
 #define GRAV 48       // 8.8 texels/loop^2 — snappy hops, not moon gravity
 #define DIP 128       // rest waterline: 0.5 texel below surface
-#define MAX_VV 768    // vertical speed clamp (3 texels/loop)
+#define MAX_VV_UP 320   // launch clamp: small crisp hops
+#define MAX_VV_DOWN 768 // falls can be faster than launches
 #define MAX_DEPTH 768 // the water is thick: hard floor 3 texels under
 #define SKI_X 112
 
@@ -71,7 +72,7 @@ u16 pad0;
 u16 tick;
 u16 phase;
 u16 phaseAcc;
-s16 vAlong;
+s16 vAlong, vSide;
 s16 surf88, diff88;
 s16 sprTop;
 u8 rotTimer, rotOfs;
@@ -224,7 +225,7 @@ int main(void)
     camPY = 0;
     camSinVal = 0;
     camCosVal = 127;
-    skiY = -DIP;
+    skiY = (((s16)waveSurfH[0]) << 8) - DIP; // start settled on the water
     skiVv = 0;
     skiVX = 0;
     skiVY = 0;
@@ -288,17 +289,17 @@ int main(void)
                 skiVY += (THRUST * camCosVal) >> 7;
             }
             // water drag
-            skiVX -= skiVX >> 5;
-            skiVY -= skiVY >> 5;
+            skiVX -= skiVX >> 4;
+            skiVY -= skiVY >> 4;
         }
         else
         {
             skiVv -= GRAV; // airborne: ballistic, thrust spins the fan in vain
         }
-        if (skiVv > MAX_VV)
-            skiVv = MAX_VV;
-        if (skiVv < -MAX_VV)
-            skiVv = -MAX_VV;
+        if (skiVv > MAX_VV_UP)
+            skiVv = MAX_VV_UP;
+        if (skiVv < -MAX_VV_DOWN)
+            skiVv = -MAX_VV_DOWN;
         skiY += skiVv;
         wasInWater = inWater;
 
@@ -310,9 +311,18 @@ int main(void)
         camPY += fracY >> 8;
         fracY &= 0x00FF;
 
-        // forward speed (along the view axis) drives the wave phase:
-        // fast = skipping over crests, still = lazy swell
+        // split velocity into forward/side components along the heading
         vAlong = ((skiVX >> 4) * camSinVal + (skiVY >> 4) * camCosVal) >> 3;
+        vSide = ((skiVX >> 4) * camCosVal - (skiVY >> 4) * camSinVal) >> 3;
+        if (inWater)
+        {
+            // gravel grip: kill a chunk of the slip each loop, and let the
+            // rudder convert some of it into forward drive (momentum keeps)
+            vAlong += (vSide < 0 ? -vSide : vSide) >> 3;
+            vSide -= vSide >> 2;
+            skiVX = ((vAlong >> 4) * camSinVal + (vSide >> 4) * camCosVal) >> 3;
+            skiVY = ((vAlong >> 4) * camCosVal - (vSide >> 4) * camSinVal) >> 3;
+        }
         phaseAcc = (phaseAcc + WAVE_BASE_ROLL
                     + (((vAlong >> 4) * WAVE_STEPS_PER_TEXEL) >> 4))
                    & WAVE_PHASE_MASK;
