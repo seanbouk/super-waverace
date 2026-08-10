@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Course Painter</title>
+<style>
+  :root { --bg:#12151c; --panel:#1b2028; --ink:#d8dee9; --dim:#7b8494; --accent:#58c4dd; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:14px/1.4 "Segoe UI",system-ui,sans-serif; padding:16px; }
+  h1 { font-size:18px; margin:0 0 12px; font-weight:600; }
+  h1 span { color:var(--dim); font-weight:400; }
+  #layout { display:flex; gap:16px; flex-wrap:wrap; }
+  #controls { display:flex; flex-direction:column; gap:14px; background:var(--panel); border-radius:8px; padding:14px 16px; width:270px; }
+  .group > b { font-size:12px; text-transform:uppercase; letter-spacing:.08em; color:var(--dim); display:block; margin-bottom:6px; }
+  .ctl { display:grid; grid-template-columns:80px 120px 40px; align-items:center; gap:8px; margin-bottom:4px; }
+  .ctl output { font-size:13px; color:var(--accent); text-align:right; }
+  input[type=range] { width:120px; accent-color:var(--accent); }
+  label.radio { display:flex; align-items:center; gap:6px; margin-bottom:4px; cursor:pointer; }
+  button { background:#2a3140; color:var(--ink); border:1px solid #3d4658; border-radius:6px; padding:6px 12px; font:13px "Segoe UI",system-ui,sans-serif; cursor:pointer; margin:2px 0; }
+  button:hover { border-color:var(--accent); }
+  button.active { border-color:var(--accent); background:#20404a; }
+  #stats { font-size:12px; color:var(--dim); line-height:1.6; }
+  #view { background:var(--panel); border-radius:8px; padding:14px; }
+  #view h2 { font-size:13px; margin:0 0 8px; color:var(--dim); font-weight:400; }
+  canvas { image-rendering:pixelated; border-radius:4px; display:block; cursor:crosshair; }
+  #mini { margin-top:10px; }
+</style>
+</head>
+<body>
+
+<h1>Course Painter <span>&mdash; islands, shorelines and float lines for the Mode 7 sea (map wraps at the edges!)</span></h1>
+
+<div id="layout">
+  <div id="controls">
+    <div class="group"><b>Tool</b>
+      <label class="radio"><input type="radio" name="tool" value="water" checked> Water brush</label>
+      <label class="radio"><input type="radio" name="tool" value="sand"> Sand brush</label>
+      <label class="radio"><input type="radio" name="tool" value="fill"> Fill (click a region)</label>
+      <label class="radio"><input type="radio" name="tool" value="rope"> Rope (click points)</label>
+      <div class="ctl"><label>Brush size</label><input type="range" id="bsize" min="1" max="12" step="1" value="4"><output for="bsize"></output></div>
+      <button id="endRope">End current rope</button>
+      <button id="undoRope">Delete last rope</button>
+      <button id="clearAll">Clear to water</button>
+    </div>
+    <div class="group"><b>File</b>
+      <button id="exportBtn">Export course.json</button>
+      <button id="importBtn">Import course.json</button>
+      <input type="file" id="importFile" accept=".json" hidden>
+    </div>
+    <div class="group"><b>Budget</b>
+      <div id="stats"></div>
+      <div style="font-size:11px;color:var(--dim);margin-top:6px">
+        Exact tile count comes from the bake; its quantiser merges the most
+        similar tiles if the total tops 256, softening the water first.
+      </div>
+    </div>
+  </div>
+
+  <div id="view">
+    <h2>1024&times;1024 texels &middot; painted at 8-texel tiles &middot; drag to paint</h2>
+    <canvas id="cv" width="512" height="512"></canvas>
+    <h2 id="mini">Tiled 2&times;2 (the world repeats — seams show here)</h2>
+    <canvas id="mv" width="256" height="256"></canvas>
+  </div>
+</div>
+
+<script>
+"use strict";
+const N = 128; // tile grid
+const cv = document.getElementById("cv"), ctx = cv.getContext("2d");
+const mv = document.getElementById("mv"), mtx = mv.getContext("2d");
+const CELL = 4; // canvas px per tile
+
+let zones = Array.from({length: N}, () => Array(N).fill("w"));
+let ropes = [];       // finished ropes: arrays of [x,y] texel coords
+let current = null;   // rope being drawn
+let painting = false;
+
+const COL = { w: "#1d4f94", s: "#e0d2a2" };
+
+document.getElementById("bsize").addEventListener("input", e => {
+  e.target.parentElement.querySelector("output").value = e.target.value;
+});
+document.getElementById("bsize").dispatchEvent(new Event("input"));
+
+function tool() { return document.querySelector('input[name="tool"]:checked').value; }
+
+function render() {
+  for (let y = 0; y < N; y++)
+    for (let x = 0; x < N; x++) {
+      ctx.fillStyle = COL[zones[y][x]];
+      ctx.fillRect(x * CELL, y * CELL, CELL, CELL);
+    }
+  // shore hint
+  ctx.fillStyle = "#f4f2e6";
+  for (let y = 0; y < N; y++)
+    for (let x = 0; x < N; x++) {
+      if (zones[y][x] !== "s") continue;
+      const wat = (yy, xx) => zones[(yy + N) % N][(xx + N) % N] === "w";
+      if (wat(y-1,x) || wat(y+1,x) || wat(y,x-1) || wat(y,x+1))
+        ctx.fillRect(x * CELL, y * CELL, CELL, 1);
+    }
+  // ropes
+  const drawRope = (pts, open) => {
+    if (pts.length < 1) return;
+    ctx.strokeStyle = open ? "#ffd24a" : "#e04a3c";
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(pts[0][0] / 2, pts[0][1] / 2);
+    for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0] / 2, pts[i][1] / 2);
+    ctx.stroke();
+    ctx.fillStyle = "#fff";
+    for (const p of pts) ctx.fillRect(p[0] / 2 - 1, p[1] / 2 - 1, 3, 3);
+  };
+  for (const r of ropes) drawRope(r, false);
+  if (current) drawRope(current, true);
+
+  mtx.imageSmoothingEnabled = false;
+  for (let ty = 0; ty < 2; ty++)
+    for (let tx = 0; tx < 2; tx++)
+      mtx.drawImage(cv, tx * 128, ty * 128, 128, 128);
+
+  stats();
+}
+
+function stats() {
+  let sand = 0, shore = 0;
+  const wat = (yy, xx) => zones[(yy + N) % N][(xx + N) % N] === "w";
+  for (let y = 0; y < N; y++)
+    for (let x = 0; x < N; x++)
+      if (zones[y][x] === "s") {
+        sand++;
+        if (wat(y-1,x) || wat(y+1,x) || wat(y,x-1) || wat(y,x+1)) shore++;
+      }
+  let ropeLen = 0;
+  for (const r of ropes)
+    for (let i = 1; i < r.length; i++)
+      ropeLen += Math.hypot(r[i][0]-r[i-1][0], r[i][1]-r[i-1][1]);
+  document.getElementById("stats").innerHTML =
+    "sand tiles: <b>" + sand + "</b><br>shore tiles: <b>" + shore +
+    "</b> (~16 unique after bake)<br>rope length: <b>" + Math.round(ropeLen) +
+    "</b> texels (~" + Math.round(ropeLen / 8) + " tiles touched)<br>ropes: <b>" +
+    ropes.length + (current ? " +1 open" : "") + "</b>";
+}
+
+function cellAt(ev) {
+  const r = cv.getBoundingClientRect();
+  const x = Math.floor((ev.clientX - r.left) / CELL);
+  const y = Math.floor((ev.clientY - r.top) / CELL);
+  return [Math.max(0, Math.min(N-1, x)), Math.max(0, Math.min(N-1, y))];
+}
+
+function paint(ev) {
+  const [cx, cy] = cellAt(ev);
+  const t = tool();
+  const b = parseInt(document.getElementById("bsize").value, 10);
+  const v = t === "sand" ? "s" : "w";
+  const h = b >> 1;
+  for (let dy = 0; dy < b; dy++)
+    for (let dx = 0; dx < b; dx++) {
+      const y = (cy - h + dy + N) % N, x = (cx - h + dx + N) % N;
+      zones[y][x] = v;
+    }
+  render();
+}
+
+function fill(ev) {
+  const [cx, cy] = cellAt(ev);
+  const from = zones[cy][cx], to = from === "w" ? "s" : "w";
+  const stack = [[cx, cy]];
+  const seen = new Set();
+  while (stack.length) {
+    const [x, y] = stack.pop();
+    const k = y * N + x;
+    if (seen.has(k) || zones[y][x] !== from) continue;
+    seen.add(k);
+    zones[y][x] = to;
+    if (x > 0) stack.push([x-1, y]);
+    if (x < N-1) stack.push([x+1, y]);
+    if (y > 0) stack.push([x, y-1]);
+    if (y < N-1) stack.push([x, y+1]);
+  }
+  render();
+}
+
+cv.addEventListener("mousedown", ev => {
+  const t = tool();
+  if (t === "rope") {
+    const r = cv.getBoundingClientRect();
+    const x = Math.round((ev.clientX - r.left) * 2);
+    const y = Math.round((ev.clientY - r.top) * 2);
+    if (!current) current = [];
+    current.push([x, y]);
+    render();
+  } else if (t === "fill") {
+    fill(ev);
+  } else {
+    painting = true;
+    paint(ev);
+  }
+});
+cv.addEventListener("mousemove", ev => { if (painting) paint(ev); });
+window.addEventListener("mouseup", () => { painting = false; });
+
+document.getElementById("endRope").addEventListener("click", () => {
+  if (current && current.length >= 2) ropes.push(current);
+  current = null;
+  render();
+});
+document.getElementById("undoRope").addEventListener("click", () => {
+  if (current) current = null;
+  else ropes.pop();
+  render();
+});
+document.getElementById("clearAll").addEventListener("click", () => {
+  if (!confirm("Clear the whole map to water?")) return;
+  zones = Array.from({length: N}, () => Array(N).fill("w"));
+  ropes = [];
+  current = null;
+  render();
+});
+
+document.getElementById("exportBtn").addEventListener("click", () => {
+  const json = JSON.stringify({
+    zones: zones.map(r => r.join("")),
+    ropes: ropes
+  }) + "\n";
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([json], { type: "application/json" }));
+  a.download = "course.json";
+  a.click();
+});
+document.getElementById("importBtn").addEventListener("click", () =>
+  document.getElementById("importFile").click());
+document.getElementById("importFile").addEventListener("change", ev => {
+  const f = ev.target.files[0];
+  if (!f) return;
+  f.text().then(txt => {
+    const c = JSON.parse(txt);
+    zones = c.zones.map(r => r.split(""));
+    ropes = c.ropes || [];
+    current = null;
+    render();
+  });
+  ev.target.value = "";
+});
+
+render();
+</script>
+</body>
+</html>

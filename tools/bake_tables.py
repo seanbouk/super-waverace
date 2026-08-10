@@ -399,38 +399,190 @@ def load_pattern():
     return procedural_pattern()
 
 
-def build_mode7_data(pat, palette):
-    """Tile the pattern across the 128x128 map, dedupe 8x8 tiles.
-    Returns (pc7 tile bytes, mp7 map bytes, pal bytes)."""
-    size = len(pat)
-    tiles_across = size // 8
-    tile_index = {}
-    tiles = bytearray()
-    small_map = []  # tile number for each pattern tile
-    for ty in range(tiles_across):
-        row = []
-        for tx in range(tiles_across):
-            t = bytes(pat[ty * 8 + py][tx * 8 + px]
-                      for py in range(8) for px in range(8))
-            if t not in tile_index:
-                assert len(tile_index) < 256, "more than 256 unique 8x8 tiles!"
-                tile_index[t] = len(tile_index)
-                tiles += t
-            row.append(tile_index[t])
-        small_map.append(row)
+# ---- course: sand islands, shorelines, rope float-lines ----------------------
+# palette indices 8-13 (the course block in the colour map)
+SAND, SAND_SH, FOAM, WET_SAND, FLOAT_A, FLOAT_B = 8, 9, 10, 11, 12, 13
+COURSE_COLORS = {
+    SAND: (232, 214, 164), SAND_SH: (212, 190, 142),
+    FOAM: (250, 250, 244), WET_SAND: (186, 164, 118),
+    FLOAT_A: (226, 62, 48), FLOAT_B: (246, 246, 240),
+}
 
-    mp7 = bytearray(128 * 128)
-    for my in range(128):
-        for mx in range(128):
-            mp7[my * 128 + mx] = small_map[my % tiles_across][mx % tiles_across]
+
+def load_course():
+    path = os.path.join(ASSETS, "course.json")
+    if not os.path.exists(path):
+        return None
+    with open(path) as f:
+        c = json.load(f)
+    zones = c["zones"]
+    assert len(zones) == 128 and all(len(r) == 128 for r in zones), \
+        "course zones must be 128x128"
+    return zones, c.get("ropes", [])
+
+
+def compose_canvas(pat, course):
+    """Full 1024x1024 index canvas: tiled water pattern, then sand zones,
+    auto-shore foam (on the sand side), and rope float-lines."""
+    size = len(pat)
+    canvas = [bytearray(1024) for _ in range(1024)]
+    for y in range(1024):
+        row = canvas[y]
+        prow = pat[y % size]
+        for x in range(1024):
+            row[x] = prow[x % size]
+    if not course:
+        return canvas
+
+    zones, ropes = course
+
+    def water(cy, cx):
+        return zones[cy % 128][cx % 128] == "w"
+
+    for cy in range(128):
+        zrow = zones[cy]
+        for cx in range(128):
+            if zrow[cx] != "s":
+                continue
+            n, s_, w, e = water(cy - 1, cx), water(cy + 1, cx), \
+                water(cy, cx - 1), water(cy, cx + 1)
+            for py in range(8):
+                y = cy * 8 + py
+                for px in range(8):
+                    x = cx * 8 + px
+                    # flat pale sand with a sparse speckle
+                    c = SAND_SH if ((x & 31) * 7 + (y & 31) * 13) % 29 == 0 else SAND
+                    # foam fringe on edges that face water
+                    d = 9
+                    if n:
+                        d = min(d, py)
+                    if s_:
+                        d = min(d, 7 - py)
+                    if w:
+                        d = min(d, px)
+                    if e:
+                        d = min(d, 7 - px)
+                    if d <= 1:
+                        c = FOAM
+                    elif d == 2:
+                        c = WET_SAND
+                    canvas[y][x] = c
+
+    for rope in ropes:
+        acc = 0
+        for i in range(len(rope) - 1):
+            x0, y0 = rope[i]
+            x1, y1 = rope[i + 1]
+            steps = max(abs(x1 - x0), abs(y1 - y0), 1)
+            for t in range(steps + 1):
+                x = round(x0 + (x1 - x0) * t / steps) & 1023
+                y = round(y0 + (y1 - y0) * t / steps) & 1023
+                canvas[y][x] = WET_SAND          # the rope cord
+                canvas[(y + 1) & 1023][x] = WET_SAND
+                acc += 1
+                if acc % 14 == 0:                # a float every 14 texels
+                    col = FLOAT_A if (acc // 14) & 1 else FLOAT_B
+                    for dy in range(-2, 3):
+                        for dx in range(-2, 3):
+                            if dx * dx + dy * dy <= 5:
+                                canvas[(y + dy) & 1023][(x + dx) & 1023] = col
+    return canvas
+
+
+def quantize_tiles(tiles, counts, palette, limit=256):
+    """Greedy-merge the most similar tiles (RGB distance on 2x2-quadrant
+    signatures) until the count fits. Keeps the more-used tile's pixels."""
+    def signature(t):
+        sig = []
+        for qy in range(4):
+            for qx in range(4):
+                r = g = b = 0
+                for py in range(2):
+                    for px in range(2):
+                        cr, cg, cb = palette[t[(qy * 2 + py) * 8 + qx * 2 + px]]
+                        r += cr
+                        g += cg
+                        b += cb
+                sig += [r >> 2, g >> 2, b >> 2]
+        return sig
+
+    sigs = [signature(t) for t in tiles]
+    alive = list(range(len(tiles)))
+    remap = {}
+    merges = 0
+    while len(alive) > limit:
+        best = None
+        for ii in range(len(alive)):
+            a = alive[ii]
+            sa = sigs[a]
+            for jj in range(ii + 1, len(alive)):
+                b = alive[jj]
+                sb = sigs[b]
+                d = 0
+                for k in range(48):
+                    d += abs(sa[k] - sb[k])
+                    if best and d >= best[0]:
+                        break
+                if best is None or d < best[0]:
+                    best = (d, a, b)
+        _, a, b = best
+        # keep the more-used tile
+        keep, drop = (a, b) if counts[a] >= counts[b] else (b, a)
+        counts[keep] += counts[drop]
+        remap[drop] = keep
+        alive.remove(drop)
+        merges += 1
+    # resolve chains
+    def resolve(i):
+        while i in remap:
+            i = remap[i]
+        return i
+    return alive, resolve, merges
+
+
+def build_mode7_data(canvas, palette):
+    """Dedupe the full 1024x1024 canvas into <=256 tiles (quantising the most
+    similar together if needed). Returns (pc7, mp7, pal)."""
+    tile_index = {}
+    tiles = []
+    counts = []
+    cell_ids = [[0] * 128 for _ in range(128)]
+    for ty in range(128):
+        for tx in range(128):
+            t = bytes(canvas[ty * 8 + py][tx * 8 + px]
+                      for py in range(8) for px in range(8))
+            i = tile_index.get(t)
+            if i is None:
+                i = tile_index[t] = len(tiles)
+                tiles.append(t)
+                counts.append(0)
+            counts[i] += 1
+            cell_ids[ty][tx] = i
+
+    raw_unique = len(tiles)
+    if raw_unique > 256:
+        alive, resolve, merges = quantize_tiles(tiles, counts, palette)
+        final = {old: new for new, old in enumerate(alive)}
+        mp7 = bytearray(128 * 128)
+        for my in range(128):
+            for mx in range(128):
+                mp7[my * 128 + mx] = final[resolve(cell_ids[my][mx])]
+        pc7 = b"".join(tiles[i] for i in alive)
+        print("texture: {0} unique tiles, quantised to 256 ({1} merges)"
+              .format(raw_unique, merges))
+    else:
+        mp7 = bytearray(128 * 128)
+        for my in range(128):
+            for mx in range(128):
+                mp7[my * 128 + mx] = cell_ids[my][mx]
+        pc7 = b"".join(tiles)
+        print("texture: {0} unique tiles".format(raw_unique))
 
     pal = bytearray()
     for r, g, b in palette:
         bgr = ((b >> 3) << 10) | ((g >> 3) << 5) | (r >> 3)
         pal += struct.pack("<H", bgr)
-
-    print("texture: {0} unique tiles, {1} bytes".format(len(tile_index), len(tiles)))
-    return bytes(tiles), bytes(mp7), bytes(pal)
+    return bytes(pc7), bytes(mp7), bytes(pal)
 
 
 def write_png(path, rows, palette):
@@ -468,16 +620,22 @@ def main():
     os.makedirs(OUT_DIR, exist_ok=True)
     phases = P["phases"]
 
-    # -- texture --
+    # -- texture + course --
     pat, palette = load_pattern()
-    pc7, mp7, pal = build_mode7_data(pat, palette)
+    for idx, rgb in COURSE_COLORS.items():
+        palette[idx] = rgb
+    course = load_course()
+    if course:
+        print("course: assets/course.json ({0} ropes)".format(len(course[1])))
+    canvas = compose_canvas(pat, course)
+    pc7, mp7, pal = build_mode7_data(canvas, palette)
     with open(os.path.join(OUT_DIR, "sea.pc7"), "wb") as f:
         f.write(pc7)
     with open(os.path.join(OUT_DIR, "sea.mp7"), "wb") as f:
         f.write(mp7)
     with open(os.path.join(OUT_DIR, "sea.pal"), "wb") as f:
         f.write(pal)
-    write_png(os.path.join(OUT_DIR, "sea.png"), pat, palette)  # preview only
+    write_png(os.path.join(OUT_DIR, "sea.png"), canvas, palette)  # preview only
 
     # -- HDMA tables (camera-independent) + raw arrays for the runtime builder --
     asm = ['.include "hdr.asm"', ""]
