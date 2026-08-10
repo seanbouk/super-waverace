@@ -441,6 +441,40 @@ def compose_canvas(pat, course):
     def water(cy, cx):
         return zones[cy % 128][cx % 128] == "w"
 
+    # surf wings: white water up to 3 cells out from every shore, painted
+    # with strictly 8-periodic patterns over flat calm blue so each band
+    # costs ~one unique tile
+    dist = [[9] * 128 for _ in range(128)]
+    frontier = []
+    for cy in range(128):
+        for cx in range(128):
+            if zones[cy][cx] == "s":
+                dist[cy][cx] = 0
+                frontier.append((cy, cx))
+    for step in (1, 2, 3):
+        nxt = []
+        for cy, cx in frontier:
+            for dy in (-1, 0, 1):
+                for dx in (-1, 0, 1):
+                    ny, nx = (cy + dy) & 127, (cx + dx) & 127
+                    if dist[ny][nx] == 9 and zones[ny][nx] == "w":
+                        dist[ny][nx] = step
+                        nxt.append((ny, nx))
+        frontier = nxt
+    SURF_CUT = {1: 13, 2: 8, 3: 4}  # foam density per band
+    for cy in range(128):
+        for cx in range(128):
+            d = dist[cy][cx]
+            if d < 1 or d > 3:
+                continue
+            cut = SURF_CUT[d]
+            for py in range(8):
+                y = cy * 8 + py
+                for px in range(8):
+                    x = cx * 8 + px
+                    n = ((x & 7) * 13 + (y & 7) * 29 + ((x & 7) * (y & 7))) % 17
+                    canvas[y][x] = FOAM if n < cut else CALM
+
     for cy in range(128):
         zrow = zones[cy]
         for cx in range(128):
@@ -500,12 +534,12 @@ def compose_canvas(pat, course):
                 y = (cy * 8 + 3 + oy * s) & 1023
                 if (x >> 3) == cx and (y >> 3) == cy:
                     canvas[y][x] = WET_SAND
-            if i % 2 == 1:  # a float every other cell
-                col = FLOAT_A if (i >> 1) & 1 else FLOAT_B
-                for fy in range(-2, 3):
-                    for fx in range(-2, 3):
-                        if fx * fx + fy * fy <= 4:
-                            canvas[cy * 8 + 3 + fy][cx * 8 + 3 + fx] = col
+            # a red float on every cell: reads as a bead chain, and the
+            # blob covering the centre makes corner cells identical too
+            for fy in range(-2, 3):
+                for fx in range(-2, 3):
+                    if fx * fx + fy * fy <= 4:
+                        canvas[cy * 8 + 3 + fy][cx * 8 + 3 + fx] = FLOAT_A
     return canvas
 
 
