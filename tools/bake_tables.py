@@ -402,12 +402,14 @@ def load_pattern():
 
 # ---- course: sand islands, shorelines, rope float-lines ----------------------
 # palette indices 8-13 (the course block in the colour map)
-SAND, SAND_SH, FOAM, WET_SAND, FLOAT_A, FLOAT_B, CALM = 8, 9, 10, 11, 12, 13, 14
+SAND, SAND_SH, FOAM, WET_SAND, FLOAT_A, SHAL_BLUE, CALM, SHAL_SAND =     8, 9, 10, 11, 12, 13, 14, 15
 COURSE_COLORS = {
     SAND: (232, 214, 164), SAND_SH: (212, 190, 142),
     FOAM: (250, 250, 244), WET_SAND: (186, 164, 118),
-    FLOAT_A: (226, 62, 48), FLOAT_B: (246, 246, 240),
-    CALM: (22, 62, 122),  # flat wake band under ropes (non-rotating)
+    FLOAT_A: (226, 62, 48),
+    CALM: (22, 62, 122),   # flat wake band under ropes (non-rotating)
+    # SHAL_BLUE is set at bake time to the lightest deep-water rotation
+    # colour (fixed copy, so the shallows don't flow); SHAL_SAND to sand
 }
 
 
@@ -451,7 +453,7 @@ def compose_canvas(pat, course):
             if zones[cy][cx] == "s":
                 dist[cy][cx] = 0
                 frontier.append((cy, cx))
-    for step in (1, 2, 3):
+    for step in (1, 2):
         nxt = []
         for cy, cx in frontier:
             for dy in (-1, 0, 1):
@@ -461,19 +463,20 @@ def compose_canvas(pat, course):
                         dist[ny][nx] = step
                         nxt.append((ny, nx))
         frontier = nxt
-    SURF_CUT = {1: 13, 2: 8, 3: 4}  # foam density per band
+    SURF_CUT = {1: 12, 2: 6}  # foam density per band
     for cy in range(128):
         for cx in range(128):
             d = dist[cy][cx]
-            if d < 1 or d > 3:
+            if d < 1 or d > 2:
                 continue
             cut = SURF_CUT[d]
+            gap = SHAL_SAND if d == 1 else SHAL_BLUE  # super-shallow water
             for py in range(8):
                 y = cy * 8 + py
                 for px in range(8):
                     x = cx * 8 + px
                     n = ((x & 7) * 13 + (y & 7) * 29 + ((x & 7) * (y & 7))) % 17
-                    canvas[y][x] = FOAM if n < cut else CALM
+                    canvas[y][x] = FOAM if n < cut else gap
 
     for cy in range(128):
         zrow = zones[cy]
@@ -624,7 +627,7 @@ def build_mode7_data(canvas, palette):
     raw_unique = len(tiles)
     if raw_unique > 256:
         # class 1 = contains course colours (shore foam, sand, ropes, floats)
-        classes = [1 if any(px & 0x80 for px in t) else 0 for t in tiles]
+        classes = [1 if any(8 <= (px & 0x7F) <= 15 for px in t) else 0 for t in tiles]
         alive, resolve, merges = quantize_tiles(tiles, counts, palette, classes)
         final = {old: new for new, old in enumerate(alive)}
         mp7 = bytearray(128 * 128)
@@ -688,6 +691,9 @@ def main():
     pat, palette = load_pattern()
     for idx, rgb in COURSE_COLORS.items():
         palette[idx] = rgb
+    palette[SHAL_SAND] = palette[SAND]
+    rs, rc = int(P["rotStart"]), int(P["rotCount"])
+    palette[SHAL_BLUE] = max((palette[rs + i] for i in range(rc)), key=sum)
     course = load_course()
     if course:
         print("course: assets/course.json ({0} ropes)".format(len(course[1])))
@@ -697,7 +703,7 @@ def main():
     # palette layout is untouched
     for row in canvas:
         for x in range(1024):
-            if 8 <= row[x] <= 14:
+            if row[x] == SAND or row[x] == SAND_SH:
                 row[x] |= 0x80
     pc7, mp7, pal = build_mode7_data(canvas, palette)
     # preview reflects the QUANTISED data the SNES will actually show
