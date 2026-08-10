@@ -50,9 +50,11 @@ u8 skiLean;       // 0 straight, 1 leaning
 u8 skiFlip;       // lean direction (hflip)
 
 #define TURN_SPEED 2
-#define THRUST 36
-#define GRAV 20
-#define DIP 128 // rest waterline: 0.5 texel below surface
+#define THRUST 48
+#define GRAV 48       // 8.8 texels/loop^2 — snappy hops, not moon gravity
+#define DIP 128       // rest waterline: 0.5 texel below surface
+#define MAX_VV 768    // vertical speed clamp (3 texels/loop)
+#define MAX_DEPTH 768 // the water is thick: hard floor 3 texels under
 #define SKI_X 112
 
 #ifndef REG_SLHV
@@ -73,7 +75,8 @@ s16 vAlong;
 s16 surf88, diff88;
 s16 sprTop;
 u8 rotTimer, rotOfs;
-u8 skip, waterRow, inWater;
+u8 skip, waterRow, inWater, wasInWater;
+s16 prevSin, prevCos;
 u16 profStartLine, profLines, profFrames;
 u16 vbl0;
 
@@ -227,6 +230,9 @@ int main(void)
     skiVY = 0;
     fracX = 0;
     fracY = 0;
+    wasInWater = 1;
+    prevSin = 0;
+    prevCos = 127;
     rotTimer = 0;
     rotOfs = 0;
     buildWinTab(200);
@@ -261,9 +267,20 @@ int main(void)
         inWater = (skiY <= surf88);
         if (inWater)
         {
-            // spring toward floating a dip under the surface, water-damped
-            skiVv += (surf88 - DIP - skiY) >> 3;
-            skiVv -= skiVv >> 2;
+            // splash: hitting the water kills most vertical speed — this is
+            // what stops the buoyancy spring from pogo-ing off every wave
+            if (!wasInWater)
+                skiVv >>= 2;
+            // gentle spring toward floating a dip under, heavily water-damped
+            skiVv += (surf88 - DIP - skiY) >> 4;
+            skiVv -= skiVv >> 1;
+            // the water is thick: hard depth floor
+            if (skiY < surf88 - MAX_DEPTH)
+            {
+                skiY = surf88 - MAX_DEPTH;
+                if (skiVv < 0)
+                    skiVv = 0;
+            }
             // hovercraft scrabble: thrust only bites in the water
             if (pad0 & KEY_B)
             {
@@ -278,7 +295,12 @@ int main(void)
         {
             skiVv -= GRAV; // airborne: ballistic, thrust spins the fan in vain
         }
+        if (skiVv > MAX_VV)
+            skiVv = MAX_VV;
+        if (skiVv < -MAX_VV)
+            skiVv = -MAX_VV;
         skiY += skiVv;
+        wasInWater = inWater;
 
         // ---- move the world ----
         fracX += skiVX;
@@ -314,6 +336,16 @@ int main(void)
         profFrames = snes_vblank_count - vbl0;
         profLines = profFrames * 262 + scanline() - profStartLine;
 
+        // pivot around the SKI, not the camera: when the heading changed,
+        // orbit the camera so the ski's world position stays fixed
+        if (camSinVal != prevSin || camCosVal != prevCos)
+        {
+            camPX += (WAVE_SKI_DIST * (prevSin - camSinVal)) >> 7;
+            camPY += (WAVE_SKI_DIST * (prevCos - camCosVal)) >> 7;
+        }
+        prevSin = camSinVal;
+        prevCos = camCosVal;
+
         // ---- place the ski sprite + waterline window ----
         waterRow = waveSkiRow[phase];
         diff88 = skiY - surf88; // positive = above the surface
@@ -343,6 +375,16 @@ int main(void)
             uiPrint(9, 1, "LN PH");
             uiPrintNum(14, 1, phase, 2);
             uiPrint(17, 1, inWater ? "WET" : "AIR");
+            // physics state, in 16ths of a texel: K = ski height,
+            // S = water surface, V = vertical speed (8.8 raw)
+            uiPrint(0, 2, "K");
+            uiPrintS16(1, 2, skiY >> 4, 4);
+            uiPrint(7, 2, "S");
+            uiPrintS16(8, 2, surf88 >> 4, 4);
+            uiPrint(14, 2, "V");
+            uiPrintS16(15, 2, skiVv, 4);
+            uiPrint(21, 2, "W");
+            uiPrintNum(22, 2, waterRow, 3);
         }
 
         WaitForVBlank();

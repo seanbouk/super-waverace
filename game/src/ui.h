@@ -22,6 +22,7 @@ void uiHdma(void);
 // write text / a right-aligned decimal into the band (rows 0..UI_ROWS-1)
 void uiPrint(u16 x, u16 y, char *s);
 void uiPrintNum(u16 x, u16 y, u16 val, u16 width);
+void uiPrintS16(u16 x, u16 y, s16 val, u16 width); // sign char + number
 
 // push the buffer to VRAM — call in vblank, BEFORE waveHdma (the DMA uses
 // channel 0, whose registers waveHdma reprograms for HDMA afterwards)

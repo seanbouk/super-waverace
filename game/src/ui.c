@@ -68,6 +68,20 @@ void uiPrintNum(u16 x, u16 y, u16 val, u16 width)
     }
 }
 
+void uiPrintS16(u16 x, u16 y, s16 val, u16 width)
+{
+    if (val < 0)
+    {
+        uiPrint(x, y, "-");
+        uiPrintNum(x + 1, y, (u16)(-val), width);
+    }
+    else
+    {
+        uiPrint(x, y, "+");
+        uiPrintNum(x + 1, y, (u16)val, width);
+    }
+}
+
 void uiFlush(void)
 {
     dmaCopyVram((u8 *)uiMap, 0x6800, UI_COLS * UI_ROWS * 2);
