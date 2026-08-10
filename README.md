@@ -106,7 +106,7 @@ The line in the sand — update this table whenever an allocation changes.
 |---------|-------|-------|
 | 0 | Backdrop | Sky above the horizon (dusk orange, set at runtime) |
 | 1–7 | Water | `1..N` rotating deep stripes (ping-pong colours), `N+1` peaks, `N+2` lattice. N ≤ 5 fits here |
-| 8–15 | Water reserve | Foam / spray variants to come; N = 6 stripes spill peaks/lattice into 8–9 |
+| 8–15 | Course | 8 sand, 9 sand shade, 10 foam, 11 wet sand/rope, 12–13 float red/white; 14–15 free |
 | 16–31 | UI text | Font palette for the mode-1 text band (palette row 1) |
 | 32–127 | BG reserve | Unallocated (future sky gfx) |
 | 128–143 | Jet ski | OBJ palette 0 (12 colours used) |
