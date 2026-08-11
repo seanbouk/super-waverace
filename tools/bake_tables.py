@@ -290,64 +290,84 @@ LETTER_L = ["10000","10000","10000","10000","10000","10000","11111"]
 LETTER_R = ["11110","10001","10001","11110","10100","10010","10001"]
 
 
+MINI_L = ["100", "100", "100", "100", "111"]
+MINI_R = ["110", "101", "110", "101", "101"]
+
+
 def buoy_grid(size, right):
-    """Conical buoy, bottom-aligned: yellow/L or red/R (letter from 16px up)."""
+    """Flat-bottomed circle (stable silhouette across scales), letter always."""
     g = [[0] * size for _ in range(size)]
     body, shade = (10, 11) if right else (2, 3)
     letter_col = 8 if right else 1
-    top = size // 8
-    for y in range(top, size):
-        f = (y - top) / max(1, size - 1 - top)
-        w = max(1, round(2 + f * (size // 2 - 2)))
-        c = size // 2
-        for x in range(c - w, c + w):
-            g[y][x] = shade if (x > c + w - 3 or y > size - size // 6 - 1) else body
-        g[y][c - w] = 1
-        g[y][min(size - 1, c + w)] = 1
-    for x in range(size // 2 - 2, size // 2 + 2):
-        g[top][x] = 1
-    if size >= 16:
-        letter = LETTER_R if right else LETTER_L
-        s = 2 if size == 32 else 1
-        ly0 = size // 2 - (7 * s) // 2 + size // 8
-        lx0 = size // 2 - (5 * s) // 2
-        for ly, rowbits in enumerate(letter):
-            for lx, bit in enumerate(rowbits):
-                if bit == "1":
-                    for dy in range(s):
-                        for dx in range(s):
-                            yy, xx = ly0 + ly * s + dy, lx0 + lx * s + dx
-                            if 0 <= yy < size and 0 <= xx < size:
-                                g[yy][xx] = letter_col
+    c = (size - 1) / 2.0
+    r = c - 0.2
+    cut = max(1, size // 6)
+    flat = size - 1 - cut
+    import math as _m
+    widths = []
+    for y in range(size):
+        dy = y - c
+        w2 = r * r - dy * dy
+        widths.append(_m.sqrt(w2) if w2 > 0 else -1)
+    for y in range(size):
+        yy = min(y, flat)          # rows below 'flat' reuse the flat row width
+        w = widths[yy]
+        if w < 0:
+            continue
+        if y > flat + cut:
+            continue
+        x0, x1 = int(_m.ceil(c - w)), int(_m.floor(c + w))
+        for x in range(x0, x1 + 1):
+            edge = (x == x0 or x == x1 or y == flat + cut or
+                    (yy == y and widths[y - 1] < 0))
+            if edge:
+                g[y][x] = 1
+            else:
+                g[y][x] = shade if (x - c) + (y - c) > r * 0.5 else body
+    letter = (LETTER_R if right else LETTER_L) if size >= 12 else         (MINI_R if right else MINI_L)
+    s = 2 if size >= 24 else 1
+    lh, lw = len(letter) * s, len(letter[0]) * s
+    ly0 = int(c) - lh // 2
+    lx0 = int(c) - lw // 2 + 1
+    for ly, rowbits in enumerate(letter):
+        for lx, bit in enumerate(rowbits):
+            if bit == "1":
+                for dy in range(s):
+                    for dx in range(s):
+                        yy2, xx2 = ly0 + ly * s + dy, lx0 + lx * s + dx
+                        if 0 <= yy2 < size and 0 <= xx2 < size and g[yy2][xx2]:
+                            g[yy2][xx2] = letter_col
     return g
 
 
 def build_ski_sheet():
     """128x32 sheet: frame 0 = straight, frame 1 = lean (hflip for other side).
     128px wide = 16 tiles/row, matching OAM's name-row stride exactly."""
-    sheet = [[0] * 128 for _ in range(48)]
+    sheet = [[0] * 128 for _ in range(64)]
     for f, shear in enumerate((0.0, 0.14)):
         grid = ski_frame(shear)
         for y in range(32):
             for x in range(32):
                 sheet[y][f * 32 + x] = grid[y][x]
-    # buoys: near 32px at names 8/12; mid 16px at 64/66; far 8px at 68/70
-    for r, bx in ((0, 64), (1, 96)):
-        g = buoy_grid(32, r)
-        for y in range(32):
-            for x in range(32):
-                sheet[y][bx + x] = g[y][x]
-    for r, bx in ((0, 0), (1, 16)):
-        g = buoy_grid(16, r)
-        for y in range(16):
-            for x in range(16):
-                sheet[32 + y][bx + x] = g[y][x]
-    for r, bx in ((0, 32), (1, 48)):
-        g = buoy_grid(8, r)
-        for y in range(8):
-            for x in range(8):
-                sheet[40 + y][bx + x] = g[y][x]  # bottom half of the 16px cell
-    tiles = encode_4bpp(sheet, 16, 6)
+
+    def blit(size, right, sx, sy, slot):
+        g = buoy_grid(size, right)
+        oy = slot - 2 - size  # bottom-aligned, 2px margin: stable baseline
+        for y in range(size):
+            for x in range(size):
+                sheet[sy + oy + y][sx + (slot - size) // 2 + x] = g[y][x]
+
+    blit(32, 0, 64, 0, 32)   # name 8
+    blit(32, 1, 96, 0, 32)   # name 12
+    blit(24, 0, 0, 32, 32)   # name 64
+    blit(24, 1, 32, 32, 32)  # name 68
+    blit(16, 0, 64, 32, 16)  # name 72
+    blit(16, 1, 80, 32, 16)  # name 74
+    blit(12, 0, 96, 32, 16)  # name 76
+    blit(12, 1, 112, 32, 16) # name 78
+    blit(8, 0, 64, 48, 16)   # name 104
+    blit(8, 1, 80, 48, 16)   # name 106
+    tiles = encode_4bpp(sheet, 16, 8)
     pal = bytearray()
     for r, g, b in SKI_PALETTE:
         pal += struct.pack("<H", ((b >> 3) << 10) | ((g >> 3) << 5) | (r >> 3))

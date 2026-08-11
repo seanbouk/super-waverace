@@ -99,7 +99,7 @@ placed in the painter and live twice: a collision cell plus a painted base rippl
 in the texture, and a sprite projected each frame — the distance table gives the
 screen row (which also makes wave crests occlude them for free) and the S-CPU
 hardware divider gives the column. The SNES cannot scale sprites, so each buoy is
-authored at three sizes (8/16/32 px) switched by distance. Rope floats are magenta
+authored at five sizes (8/12/16/24/32 px, flat-bottomed circles, letter at every scale, bottom-anchored so scale swaps never read as movement). Rope floats are magenta
 so they never read as R buoys.
 
 **The UI band.** The top 24 scanlines run in BG mode 1 (HDMA on `$2105` switches

@@ -226,7 +226,7 @@ int main(void)
     uiInit();
 
     // ski + buoy sheet: 96 tiles at VRAM 0x6000, OBJ palette 0 (CGRAM 128+)
-    oamInitGfxSet(&ski_tiles, 3072, &ski_pal, 32, 0, 0x6000, OBJ_SIZE16_L32);
+    oamInitGfxSet(&ski_tiles, 4096, &ski_pal, 32, 0, 0x6000, OBJ_SIZE16_L32);
     oamSet(0, SKI_X, 140, 3, 0, 0, 0, 0);
     oamSetEx(0, OBJ_LARGE, OBJ_SHOW);
     for (bi = 1; bi < 12; bi++)
@@ -519,22 +519,36 @@ int main(void)
             bq = bu < 0 ? 128 - bq : 128 + bq;
             if (bq < 12 || bq > 232)
                 goto hide;
-            if (bv < 260) // near: 32px
+            // five scales, all bottom-anchored to the surface row so a
+            // scale change never reads as movement
+            if (bv < 240)
             {
                 oamSet((1 + bi) << 2, bq - 16, rdRow - 30, 3, 0, 0,
                        buoyType[bi] ? 12 : 8, 0);
                 oamSetEx((1 + bi) << 2, OBJ_LARGE, OBJ_SHOW);
             }
-            else if (bv < 430) // mid: 16px
+            else if (bv < 320)
             {
-                oamSet((1 + bi) << 2, bq - 8, rdRow - 15, 3, 0, 0,
-                       buoyType[bi] ? 66 : 64, 0);
+                oamSet((1 + bi) << 2, bq - 16, rdRow - 30, 3, 0, 0,
+                       buoyType[bi] ? 68 : 64, 0);
+                oamSetEx((1 + bi) << 2, OBJ_LARGE, OBJ_SHOW);
+            }
+            else if (bv < 410)
+            {
+                oamSet((1 + bi) << 2, bq - 8, rdRow - 14, 3, 0, 0,
+                       buoyType[bi] ? 74 : 72, 0);
                 oamSetEx((1 + bi) << 2, OBJ_SMALL, OBJ_SHOW);
             }
-            else // far: 8px art in the lower half of a 16px cell
+            else if (bv < 510)
             {
-                oamSet((1 + bi) << 2, bq - 8, rdRow - 15, 3, 0, 0,
-                       buoyType[bi] ? 70 : 68, 0);
+                oamSet((1 + bi) << 2, bq - 8, rdRow - 14, 3, 0, 0,
+                       buoyType[bi] ? 78 : 76, 0);
+                oamSetEx((1 + bi) << 2, OBJ_SMALL, OBJ_SHOW);
+            }
+            else
+            {
+                oamSet((1 + bi) << 2, bq - 8, rdRow - 14, 3, 0, 0,
+                       buoyType[bi] ? 106 : 104, 0);
                 oamSetEx((1 + bi) << 2, OBJ_SMALL, OBJ_SHOW);
             }
             if (rdRow > winRow)
