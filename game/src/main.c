@@ -26,6 +26,7 @@ extern char sea_patterns, sea_map, sea_palette;
 extern char ski_tiles, ski_pal;
 extern void buildCamTables(void);
 extern void collProbe(void); // camera.asm: reads the collision byte-map
+extern void rowDepth(void);  // camera.asm: screen row for a view depth
 
 // ---- camera state shared with camera.asm (accessed via long addressing) ----
 u8 camTheta;
@@ -67,6 +68,10 @@ u8 skiFlip;       // lean direction (hflip)
 #define REG_OPVCT (*(vuint8 *)0x213D)
 #endif
 #define REG_WOBJSEL (*(vuint8 *)0x2125)
+#define REG_WRDIVL (*(vuint8 *)0x4204)
+#define REG_WRDIVH (*(vuint8 *)0x4205)
+#define REG_WRDIVB (*(vuint8 *)0x4206)
+#define REG_RDDIV (*(vuint16 *)0x4214)
 #ifndef REG_SETINI
 #define REG_SETINI (*(vuint8 *)0x2133)
 #endif
@@ -91,6 +96,11 @@ u16 collOfs;
 u8 collVal, collHere;
 u16 skiWX, skiWY;
 s16 stepX, stepY;
+// buoys
+u16 rdV, rdRow, rdD;
+s16 bdx, bdy, bv, bu, bau;
+u16 bq, winRow, dly;
+u8 bi;
 
 //---------------------------------------------------------------------------------
 static u16 scanline(void)
@@ -215,10 +225,12 @@ int main(void)
     REG_SETINI = 0x40;
     uiInit();
 
-    // jet ski sprite: 64 tiles at VRAM 0x6000, OBJ palette 0 (CGRAM 128+)
-    oamInitGfxSet(&ski_tiles, 2048, &ski_pal, 32, 0, 0x6000, OBJ_SIZE16_L32);
+    // ski + buoy sheet: 96 tiles at VRAM 0x6000, OBJ palette 0 (CGRAM 128+)
+    oamInitGfxSet(&ski_tiles, 3072, &ski_pal, 32, 0, 0x6000, OBJ_SIZE16_L32);
     oamSet(0, SKI_X, 140, 3, 0, 0, 0, 0);
     oamSetEx(0, OBJ_LARGE, OBJ_SHOW);
+    for (bi = 1; bi < 12; bi++)
+        oamSetVisible(bi << 2, OBJ_HIDE); // NB: OAM ids are byte offsets (x4)
 
     setPaletteColor(0, RGB8(248, 168, 96));
 
@@ -450,10 +462,75 @@ int main(void)
             sprTop = 24;
         if (sprTop > 190)
             sprTop = 190;
-        buildWinTab(waterRow);
         // sprite updates BEFORE WaitForVBlank: the ISR's OAM DMA (ch7 regs)
         // fires on that vblank, and waveHdma restores ch7 right after
         oamSet(0, SKI_X, (u16)sprTop, 3, skiFlip, 0, skiLean ? 4 : 0, 0);
+
+        // ---- buoys: project into view space, pick scale, ride the water ----
+        winRow = waterRow;
+#if WAVE_BUOY_COUNT > 0
+        for (bi = 0; bi < WAVE_BUOY_COUNT; bi++)
+        {
+            bdx = (s16)((buoyX[bi] - camPX) & 4095);
+            if (bdx > 2048)
+                bdx -= 4096;
+            bdy = (s16)((buoyY[bi] - camPY) & 4095);
+            if (bdy > 2048)
+                bdy -= 4096;
+            if (bdx > 700 || bdx < -700 || bdy > 700 || bdy < -700)
+                goto hide;
+            bv = ((bdx >> 4) * camSinVal + (bdy >> 4) * camCosVal) >> 3;
+            if (bv < 176 || bv > 620)
+                goto hide;
+            bu = ((bdx >> 4) * camCosVal - (bdy >> 4) * camSinVal) >> 3;
+            bau = bu < 0 ? -bu : bu;
+            if (bau > 480)
+                goto hide;
+            rdV = (u16)bv;
+            rowDepth(); // surface row for this depth, and what's shown there
+            if (rdRow == 0xFFFF)
+                goto hide;
+            if (rdD - rdV > 48)
+                goto hide; // behind a wave crest
+            // screen column: px = u * 221 / v via the hardware divider
+            bq = (u16)bau << 6;
+            REG_WRDIVL = bq & 0xFF;
+            REG_WRDIVH = bq >> 8;
+            REG_WRDIVB = (u8)(((u16)bv * 74) >> 8);
+            dly = tick + phase; // cover the 16-cycle divide latency
+            dly += winRow;
+            bq = REG_RDDIV;
+            if (bq > 140)
+                goto hide;
+            bq = bu < 0 ? 128 - bq : 128 + bq;
+            if (bq < 12 || bq > 232)
+                goto hide;
+            if (bv < 260) // near: 32px
+            {
+                oamSet((1 + bi) << 2, bq - 16, rdRow - 30, 3, 0, 0,
+                       buoyType[bi] ? 12 : 8, 0);
+                oamSetEx((1 + bi) << 2, OBJ_LARGE, OBJ_SHOW);
+            }
+            else if (bv < 430) // mid: 16px
+            {
+                oamSet((1 + bi) << 2, bq - 8, rdRow - 15, 3, 0, 0,
+                       buoyType[bi] ? 66 : 64, 0);
+                oamSetEx((1 + bi) << 2, OBJ_SMALL, OBJ_SHOW);
+            }
+            else // far: 8px art in the lower half of a 16px cell
+            {
+                oamSet((1 + bi) << 2, bq - 8, rdRow - 15, 3, 0, 0,
+                       buoyType[bi] ? 70 : 68, 0);
+                oamSetEx((1 + bi) << 2, OBJ_SMALL, OBJ_SHOW);
+            }
+            if (rdRow > winRow)
+                winRow = (u16)rdRow;
+            continue;
+        hide:
+            oamSetVisible((1 + bi) << 2, OBJ_HIDE);
+        }
+#endif
+        buildWinTab((u8)winRow);
 
         if ((tick & 3) == 0)
         {

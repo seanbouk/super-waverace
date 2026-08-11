@@ -320,6 +320,42 @@ buildDone:
     rtl
 
 ;----------------------------------------------------------------------------
+;----------------------------------------------------------------------------
+; rowDepth — find the lowest screen row whose surface distance >= rdV
+; (d is non-increasing downward). in: rdV, camPhaseOff; out: rdRow (0xFFFF
+; if none), rdD = distance actually shown at that row (occlusion check).
+rowDepth:
+    php
+    rep #$30
+    phx
+    lda.l camPhaseOff
+    clc
+    adc #446
+    tax
+    lda #223
+    sta.l rdRow
+_rd_loop:
+    lda.l wave_rawd,x
+    cmp.l rdV
+    bcs _rd_found
+    dex
+    dex
+    lda.l rdRow
+    dec a
+    sta.l rdRow
+    bpl _rd_loop
+    lda #$FFFF
+    sta.l rdRow
+    bra _rd_done
+_rd_found:
+    lda.l wave_rawd,x
+    sta.l rdD
+_rd_done:
+    plx
+    plp
+    rtl
+
+;----------------------------------------------------------------------------
 ; collProbe — read the course collision byte-map (C cannot do far ROM reads)
 ; in: collOfs = cellY*128 + cellX; out: collVal = 0 water / 1 sand / 2 rope
 collProbe:

@@ -37,9 +37,12 @@
       <label class="radio"><input type="radio" name="tool" value="sand"> Sand brush</label>
       <label class="radio"><input type="radio" name="tool" value="fill"> Fill (click a region)</label>
       <label class="radio"><input type="radio" name="tool" value="rope"> Rope (click points)</label>
+      <label class="radio"><input type="radio" name="tool" value="buoyL"> Buoy L (yellow, pass left)</label>
+      <label class="radio"><input type="radio" name="tool" value="buoyR"> Buoy R (red, pass right)</label>
       <div class="ctl"><label>Brush size</label><input type="range" id="bsize" min="1" max="12" step="1" value="4"><output for="bsize"></output></div>
       <button id="endRope">End current rope</button>
       <button id="undoRope">Delete last rope</button>
+      <button id="undoBuoy">Delete last buoy</button>
       <button id="clearAll">Clear to water</button>
     </div>
     <div class="group"><b>File</b>
@@ -73,6 +76,7 @@ const CELL = 4; // canvas px per tile
 
 let zones = Array.from({length: N}, () => Array(N).fill("w"));
 let ropes = [];       // finished ropes: arrays of [x,y] texel coords
+let buoys = [];       // [x, y, "L"/"R"] texel coords
 let current = null;   // rope being drawn
 let painting = false;
 
@@ -114,6 +118,15 @@ function render() {
   };
   for (const r of ropes) drawRope(r, false);
   if (current) drawRope(current, true);
+  for (const b of buoys) {
+    ctx.fillStyle = b[2] === "R" ? "#e04a3c" : "#ffd24a";
+    ctx.beginPath();
+    ctx.arc(b[0] / 2, b[1] / 2, 4, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#000";
+    ctx.font = "7px monospace";
+    ctx.fillText(b[2], b[0] / 2 - 2, b[1] / 2 + 2.5);
+  }
 
   mtx.imageSmoothingEnabled = false;
   for (let ty = 0; ty < 2; ty++)
@@ -140,7 +153,7 @@ function stats() {
     "sand tiles: <b>" + sand + "</b><br>shore tiles: <b>" + shore +
     "</b> (~16 unique after bake)<br>rope length: <b>" + Math.round(ropeLen) +
     "</b> texels (cell-canonical: ~24 unique tiles total)<br>ropes: <b>" +
-    ropes.length + (current ? " +1 open" : "") + "</b>";
+    ropes.length + (current ? " +1 open" : "") + "</b><br>buoys: <b>" + buoys.length + "</b>";
 }
 
 function cellAt(ev) {
@@ -185,7 +198,13 @@ function fill(ev) {
 
 cv.addEventListener("mousedown", ev => {
   const t = tool();
-  if (t === "rope") {
+  if (t === "buoyL" || t === "buoyR") {
+    const r = cv.getBoundingClientRect();
+    buoys.push([Math.round((ev.clientX - r.left) * 2),
+                Math.round((ev.clientY - r.top) * 2),
+                t === "buoyR" ? "R" : "L"]);
+    render();
+  } else if (t === "rope") {
     const r = cv.getBoundingClientRect();
     const x = Math.round((ev.clientX - r.left) * 2);
     const y = Math.round((ev.clientY - r.top) * 2);
@@ -205,6 +224,10 @@ window.addEventListener("mouseup", () => { painting = false; });
 document.getElementById("endRope").addEventListener("click", () => {
   if (current && current.length >= 2) ropes.push(current);
   current = null;
+  render();
+});
+document.getElementById("undoBuoy").addEventListener("click", () => {
+  buoys.pop();
   render();
 });
 document.getElementById("undoRope").addEventListener("click", () => {
@@ -239,6 +262,7 @@ document.getElementById("importFile").addEventListener("change", ev => {
     const c = JSON.parse(txt);
     zones = c.zones.map(r => r.split(""));
     ropes = c.ropes || [];
+    buoys = c.buoys || [];
     current = null;
     render();
   });

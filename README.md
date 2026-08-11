@@ -94,6 +94,14 @@ asm probe reads it, and movement is resolved one axis at a time at the ski's
 position — the blocked axis stops, the other keeps its momentum, so oblique
 contact slides along shores and rope lines instead of snagging.
 
+**Buoys.** Course markers (yellow L / red R — pass sides not yet enforced) are
+placed in the painter and live twice: a collision cell plus a painted base ripple
+in the texture, and a sprite projected each frame — the distance table gives the
+screen row (which also makes wave crests occlude them for free) and the S-CPU
+hardware divider gives the column. The SNES cannot scale sprites, so each buoy is
+authored at three sizes (8/16/32 px) switched by distance. Rope floats are magenta
+so they never read as R buoys.
+
 **The UI band.** The top 24 scanlines run in BG mode 1 (HDMA on `$2105` switches
 the whole PPU mode mid-frame, back to mode 7 below) giving 3 rows of tiled text.
 The PVSnesLib console uploads its map to a hardcoded VRAM address inside the

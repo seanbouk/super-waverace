@@ -286,16 +286,68 @@ def encode_4bpp(grid, w_tiles, h_tiles):
     return bytes(out)
 
 
+LETTER_L = ["10000","10000","10000","10000","10000","10000","11111"]
+LETTER_R = ["11110","10001","10001","11110","10100","10010","10001"]
+
+
+def buoy_grid(size, right):
+    """Conical buoy, bottom-aligned: yellow/L or red/R (letter from 16px up)."""
+    g = [[0] * size for _ in range(size)]
+    body, shade = (10, 11) if right else (2, 3)
+    letter_col = 8 if right else 1
+    top = size // 8
+    for y in range(top, size):
+        f = (y - top) / max(1, size - 1 - top)
+        w = max(1, round(2 + f * (size // 2 - 2)))
+        c = size // 2
+        for x in range(c - w, c + w):
+            g[y][x] = shade if (x > c + w - 3 or y > size - size // 6 - 1) else body
+        g[y][c - w] = 1
+        g[y][min(size - 1, c + w)] = 1
+    for x in range(size // 2 - 2, size // 2 + 2):
+        g[top][x] = 1
+    if size >= 16:
+        letter = LETTER_R if right else LETTER_L
+        s = 2 if size == 32 else 1
+        ly0 = size // 2 - (7 * s) // 2 + size // 8
+        lx0 = size // 2 - (5 * s) // 2
+        for ly, rowbits in enumerate(letter):
+            for lx, bit in enumerate(rowbits):
+                if bit == "1":
+                    for dy in range(s):
+                        for dx in range(s):
+                            yy, xx = ly0 + ly * s + dy, lx0 + lx * s + dx
+                            if 0 <= yy < size and 0 <= xx < size:
+                                g[yy][xx] = letter_col
+    return g
+
+
 def build_ski_sheet():
     """128x32 sheet: frame 0 = straight, frame 1 = lean (hflip for other side).
     128px wide = 16 tiles/row, matching OAM's name-row stride exactly."""
-    sheet = [[0] * 128 for _ in range(32)]
+    sheet = [[0] * 128 for _ in range(48)]
     for f, shear in enumerate((0.0, 0.14)):
         grid = ski_frame(shear)
         for y in range(32):
             for x in range(32):
                 sheet[y][f * 32 + x] = grid[y][x]
-    tiles = encode_4bpp(sheet, 16, 4)
+    # buoys: near 32px at names 8/12; mid 16px at 64/66; far 8px at 68/70
+    for r, bx in ((0, 64), (1, 96)):
+        g = buoy_grid(32, r)
+        for y in range(32):
+            for x in range(32):
+                sheet[y][bx + x] = g[y][x]
+    for r, bx in ((0, 0), (1, 16)):
+        g = buoy_grid(16, r)
+        for y in range(16):
+            for x in range(16):
+                sheet[32 + y][bx + x] = g[y][x]
+    for r, bx in ((0, 32), (1, 48)):
+        g = buoy_grid(8, r)
+        for y in range(8):
+            for x in range(8):
+                sheet[40 + y][bx + x] = g[y][x]  # bottom half of the 16px cell
+    tiles = encode_4bpp(sheet, 16, 6)
     pal = bytearray()
     for r, g, b in SKI_PALETTE:
         pal += struct.pack("<H", ((b >> 3) << 10) | ((g >> 3) << 5) | (r >> 3))
@@ -406,7 +458,7 @@ SAND, SAND_SH, FOAM, WET_SAND, FLOAT_A, SHAL_BLUE, CALM, SHAL_SAND =     8, 9, 1
 COURSE_COLORS = {
     SAND: (232, 214, 164), SAND_SH: (212, 190, 142),
     FOAM: (250, 250, 244), WET_SAND: (186, 164, 118),
-    FLOAT_A: (226, 62, 48),
+    FLOAT_A: (216, 44, 214),  # magenta: not confusable with R buoys
     CALM: (22, 62, 122),   # flat wake band under ropes (non-rotating)
     # SHAL_BLUE is set at bake time to the lightest deep-water rotation
     # colour (fixed copy, so the shallows don't flow); SHAL_SAND to sand
@@ -422,7 +474,7 @@ def load_course():
     zones = c["zones"]
     assert len(zones) == 128 and all(len(r) == 128 for r in zones), \
         "course zones must be 128x128"
-    return zones, c.get("ropes", [])
+    return zones, c.get("ropes", []), c.get("buoys", [])
 
 
 def compose_canvas(pat, course):
@@ -440,7 +492,7 @@ def compose_canvas(pat, course):
     if not course:
         return canvas, coll
 
-    zones, ropes = course
+    zones, ropes, buoys = course
 
     def water(cy, cx):
         return zones[cy % 128][cx % 128] == "w"
@@ -509,6 +561,14 @@ def compose_canvas(pat, course):
                     elif d == 2:
                         c = WET_SAND
                     canvas[y][x] = c
+
+    for bx, by, _side in buoys:
+        cy, cx = (by >> 3) & 127, (bx >> 3) & 127
+        coll[cy * 128 + cx] = 3
+        for py in range(8):
+            for px in range(8):
+                d2 = (px * 2 - 7) ** 2 + (py * 2 - 7) ** 2
+                canvas[cy * 8 + py][cx * 8 + px] =                     FOAM if 20 <= d2 <= 40 else CALM
 
     # Ropes are CELL-CANONICAL to keep the tile budget flat: each crossed
     # 8x8 cell gets a flat calm-water background (the rope's wake) and one
@@ -700,7 +760,8 @@ def main():
     palette[SHAL_BLUE] = max((palette[rs + i] for i in range(rc)), key=sum)
     course = load_course()
     if course:
-        print("course: assets/course.json ({0} ropes)".format(len(course[1])))
+        print("course: assets/course.json ({0} ropes, {1} buoys)".format(
+            len(course[1]), len(course[2])))
     canvas, coll = compose_canvas(pat, course)
     # EXTBG: set bit 7 on course pixels -> they render via BG2-high (above
     # BG1, colour-math-free); colour comes from the low 7 bits so the
@@ -827,6 +888,7 @@ def main():
 #define WAVE_ROT_FRAMES {3}
 #define WAVE_RAW_STRIDE 448
 #define WAVE_PC7_SIZE {{PC7SIZE}}
+#define WAVE_BUOY_COUNT {{NBUOYS}}
 #define WAVE_UI_LINES {4}
 #define WAVE_BASE_ROLL 64
 #define WAVE_STEPS_PER_TEXEL {5}
@@ -840,12 +902,16 @@ extern u8 *waveG[WAVE_PHASES];
 extern u8 waveSky[WAVE_PHASES];
 extern u8 waveSkiRow[WAVE_PHASES];
 extern s8 waveSurfH[WAVE_PHASES];
+extern u16 buoyX[WAVE_BUOY_COUNT + 1];
+extern u16 buoyY[WAVE_BUOY_COUNT + 1];
+extern u8 buoyType[WAVE_BUOY_COUNT + 1];
 
 void waveTablesInit(void);
 void waveRotateStep(u8 offset);
 
 #endif
-""".replace("{{PC7SIZE}}", str(len(pc7))).format(phases, tick_shift, rot_count, rot_frames, UI_LINES,
+""".replace("{{PC7SIZE}}", str(len(pc7))).replace("{{NBUOYS}}",
+             str(len(course[2]) if course else 0)).format(phases, tick_shift, rot_count, rot_frames, UI_LINES,
            round(256.0 * phases / P["wavelength"]), phases * 256 - 1,
            # screen px per world texel at the ski's distance, x2 for drama,
            # in 4.4 fixed point
@@ -860,6 +926,8 @@ void waveRotateStep(u8 offset);
         f.write("u8 *waveTM[WAVE_PHASES];\nu8 *waveG[WAVE_PHASES];\n")
         f.write("u8 waveSky[WAVE_PHASES];\n")
         f.write("u8 waveSkiRow[WAVE_PHASES];\ns8 waveSurfH[WAVE_PHASES];\n\n")
+        f.write("u16 buoyX[WAVE_BUOY_COUNT + 1];\nu16 buoyY[WAVE_BUOY_COUNT + 1];\n")
+        f.write("u8 buoyType[WAVE_BUOY_COUNT + 1];\n\n")
         f.write("void waveTablesInit(void)\n{\n")
         for name in ("tm", "g"):
             f.write("\n".join(inits[name]) + "\n")
@@ -869,6 +937,11 @@ void waveRotateStep(u8 offset);
             f.write("    waveSkiRow[{0}] = {1};\n".format(p, r))
         for p, h in enumerate(surf_hs):
             f.write("    waveSurfH[{0}] = {1};\n".format(p, h))
+        if course:
+            for i, (bx, by, side) in enumerate(course[2]):
+                f.write("    buoyX[{0}] = {1};\n".format(i, (bx * 4) & 4095))
+                f.write("    buoyY[{0}] = {1};\n".format(i, (by * 4) & 4095))
+                f.write("    buoyType[{0}] = {1};\n".format(i, 1 if side == "R" else 0))
         f.write("}\n\n")
         f.write("void waveRotateStep(u8 offset)\n{\n    switch (offset)\n    {\n")
         for o in range(rot_count):
