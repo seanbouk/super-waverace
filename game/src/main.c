@@ -504,7 +504,7 @@ int main(void)
             rowDepth(); // surface row for this depth, and what's shown there
             if (rdRow == 0xFFFF)
                 goto hide;
-            if (rdD - rdV > 48)
+            if (rdD - rdV > 96)
                 goto hide; // behind a wave crest
             // screen column: px = u * 221 / v via the hardware divider
             bq = (u16)bau << 6;
@@ -521,25 +521,25 @@ int main(void)
                 goto hide;
             // five scales, all bottom-anchored to the surface row so a
             // scale change never reads as movement
-            if (bv < 240)
+            if (bv < 192)
             {
                 oamSet((1 + bi) << 2, bq - 16, rdRow - 30, 3, 0, 0,
                        buoyType[bi] ? 12 : 8, 0);
                 oamSetEx((1 + bi) << 2, OBJ_LARGE, OBJ_SHOW);
             }
-            else if (bv < 320)
+            else if (bv < 268)
             {
                 oamSet((1 + bi) << 2, bq - 16, rdRow - 30, 3, 0, 0,
                        buoyType[bi] ? 68 : 64, 0);
                 oamSetEx((1 + bi) << 2, OBJ_LARGE, OBJ_SHOW);
             }
-            else if (bv < 410)
+            else if (bv < 382)
             {
                 oamSet((1 + bi) << 2, bq - 8, rdRow - 14, 3, 0, 0,
                        buoyType[bi] ? 74 : 72, 0);
                 oamSetEx((1 + bi) << 2, OBJ_SMALL, OBJ_SHOW);
             }
-            else if (bv < 510)
+            else if (bv < 534)
             {
                 oamSet((1 + bi) << 2, bq - 8, rdRow - 14, 3, 0, 0,
                        buoyType[bi] ? 78 : 76, 0);
