@@ -98,7 +98,7 @@ u16 skiWX, skiWY;
 s16 stepX, stepY;
 // buoys
 u16 rdV, rdRow, rdD;
-s16 bdx, bdy, bv, bu, bau;
+s16 bdx, bdy, bv, bu, bau, bh, bl;
 u16 bq, winRow, dly;
 u8 bi;
 
@@ -318,10 +318,15 @@ int main(void)
                     skiVv = 0;
             }
             // hovercraft scrabble: thrust only bites in the water
-            if (pad0 & KEY_B)
+            if ((pad0 & KEY_B) && tick > 20) // grace while the spawn settles
             {
                 skiVX += (THRUST * camSinVal) >> 7;
                 skiVY += (THRUST * camCosVal) >> 7;
+            }
+            if (pad0 & KEY_Y) // reverse: half thrust, backwards
+            {
+                skiVX -= ((THRUST / 2) * camSinVal) >> 7;
+                skiVY -= ((THRUST / 2) * camCosVal) >> 7;
             }
             // water drag
             skiVX -= skiVX >> 4;
@@ -479,10 +484,19 @@ int main(void)
                 bdy -= 4096;
             if (bdx > 700 || bdx < -700 || bdy > 700 || bdy < -700)
                 goto hide;
-            bv = ((bdx >> 4) * camSinVal + (bdy >> 4) * camCosVal) >> 3;
+            // full-precision view transform: split each delta so the
+            // 16-bit products stay exact (a plain >>4 pre-shift quantised
+            // buoy motion to 16-world-unit jumps)
+            bh = bdx >> 4;
+            bl = bdx & 15;
+            bv = ((bh * camSinVal) >> 3) + ((bl * camSinVal) >> 7);
+            bu = ((bh * camCosVal) >> 3) + ((bl * camCosVal) >> 7);
+            bh = bdy >> 4;
+            bl = bdy & 15;
+            bv += ((bh * camCosVal) >> 3) + ((bl * camCosVal) >> 7);
+            bu -= ((bh * camSinVal) >> 3) + ((bl * camSinVal) >> 7);
             if (bv < 176 || bv > 620)
                 goto hide;
-            bu = ((bdx >> 4) * camCosVal - (bdy >> 4) * camSinVal) >> 3;
             bau = bu < 0 ? -bu : bu;
             if (bau > 480)
                 goto hide;
