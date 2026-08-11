@@ -319,7 +319,7 @@ def buoy_grid(size, right):
         x0, x1 = int(_m.ceil(c - w)), int(_m.floor(c + w))
         for x in range(x0, x1 + 1):
             edge = (x == x0 or x == x1 or y == flat + cut or
-                    (yy == y and widths[y - 1] < 0))
+                    (yy == y and y > 0 and widths[y - 1] < 0))
             if edge:
                 g[y][x] = 1
             else:
@@ -352,7 +352,7 @@ def build_ski_sheet():
 
     def blit(size, right, sx, sy, slot):
         g = buoy_grid(size, right)
-        oy = slot - 2 - size  # bottom-aligned, 2px margin: stable baseline
+        oy = slot - size  # bottom row of art == bottom row of slot, always
         for y in range(size):
             for x in range(size):
                 sheet[sy + oy + y][sx + (slot - size) // 2 + x] = g[y][x]

@@ -524,31 +524,31 @@ int main(void)
             // scale change never reads as movement
             if (bv < 192)
             {
-                oamSet((1 + bi) << 2, bq - 16, rdRow - 30, 3, 0, 0,
+                oamSet((1 + bi) << 2, bq - 16, rdRow - 31, 3, 0, 0,
                        buoyType[bi] ? 12 : 8, 0);
                 oamSetEx((1 + bi) << 2, OBJ_LARGE, OBJ_SHOW);
             }
             else if (bv < 268)
             {
-                oamSet((1 + bi) << 2, bq - 16, rdRow - 30, 3, 0, 0,
+                oamSet((1 + bi) << 2, bq - 16, rdRow - 31, 3, 0, 0,
                        buoyType[bi] ? 68 : 64, 0);
                 oamSetEx((1 + bi) << 2, OBJ_LARGE, OBJ_SHOW);
             }
             else if (bv < 382)
             {
-                oamSet((1 + bi) << 2, bq - 8, rdRow - 14, 3, 0, 0,
+                oamSet((1 + bi) << 2, bq - 8, rdRow - 15, 3, 0, 0,
                        buoyType[bi] ? 74 : 72, 0);
                 oamSetEx((1 + bi) << 2, OBJ_SMALL, OBJ_SHOW);
             }
             else if (bv < 534)
             {
-                oamSet((1 + bi) << 2, bq - 8, rdRow - 14, 3, 0, 0,
+                oamSet((1 + bi) << 2, bq - 8, rdRow - 15, 3, 0, 0,
                        buoyType[bi] ? 78 : 76, 0);
                 oamSetEx((1 + bi) << 2, OBJ_SMALL, OBJ_SHOW);
             }
             else
             {
-                oamSet((1 + bi) << 2, bq - 8, rdRow - 14, 3, 0, 0,
+                oamSet((1 + bi) << 2, bq - 8, rdRow - 15, 3, 0, 0,
                        buoyType[bi] ? 106 : 104, 0);
                 oamSetEx((1 + bi) << 2, OBJ_SMALL, OBJ_SHOW);
             }
