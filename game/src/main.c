@@ -504,8 +504,9 @@ int main(void)
             rowDepth(); // surface row for this depth, and what's shown there
             if (rdRow == 0xFFFF)
                 goto hide;
-            if (rdD - rdV > 96)
-                goto hide; // behind a wave crest
+            // never hide behind waves: rdRow is the occluding crest's row
+            // when the buoy is tucked behind one, so the buoy simply rides
+            // up onto the wave in front - correct for waves half its height
             // screen column: px = u * 221 / v via the hardware divider
             bq = (u16)bau << 6;
             REG_WRDIVL = bq & 0xFF;
