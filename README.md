@@ -1,123 +1,126 @@
 # Super Waverace
 
-A Mode 7 style SNES game — a wave racer where the sea itself rolls, using per-scanline zoom/position tricks to fake a sinusoidal ocean on hardware that can only rotate and scale a flat plane.
+A Mode 7 SNES wave racer where the sea itself rolls — per-scanline register tricks
+fake a sinusoidal ocean on hardware that can only rotate and scale a flat plane.
 
 ## Status
 
-🌊 Phase 3 — the rolling sea works in Mode 7. See `docs/PLAN.md` for the roadmap
-(target: [SNES DEV Game Jam 2026](https://itch.io/jam/snes-dev-game-jam-2026)).
+🌊 Playable: jet ski with buoyancy physics on the rolling sea, an island course
+with shorelines, rope float-lines and L/R buoys, collision with slide-along, and
+a debug UI band. Verified on real hardware. Target:
+[SNES DEV Game Jam 2026](https://itch.io/jam/snes-dev-game-jam-2026) — LoROM,
+≤512KB, no enhancement chips, no SRAM, NTSC+PAL. See `docs/PLAN.md` for history.
 
 ![Rolling sea](docs/rolling-sea.png) ![Rolling sea, later phase](docs/rolling-sea-2.png)
 
-The sea is a per-scanline raycast baked at build time (`tools/bake_tables.py`) into
-HDMA tables: `TM` splits sky from sea, `M7A` sets perspective width, and — with the
-matrix row zeroed — `M7Y` picks the exact texture row each scanline samples, so near
-crests correctly occlude the water behind them. 32 baked phases cycle to roll the
-swell (~28KB of ROM, near-zero CPU).
-
-**Controls:** hold **B** to accelerate (thrust only bites while the hull is in the
-water — hovercraft scrabble), d-pad **left/right** to steer. The jet ski floats on
-a buoyancy spring: sitting still it bobs with the swell; at speed it skims from
-crest to crest, catching air where thrust and steering stop working.
+**Controls:** hold **B** to accelerate, **Y** to reverse (half power) — thrust only
+bites while the hull is in the water (hovercraft scrabble). D-pad **left/right**
+steers; turn authority scales with speed (none when stopped). The ski floats on a
+buoyancy spring: sitting still it bobs with the swell; at speed it skims crest to
+crest, catching air where thrust and steering stop working.
 
 ## How the effects work
 
 Mode 7 can only rotate and scale a flat plane — everything below is per-scanline
-register trickery on top of that, all driven by HDMA (zero CPU cost per frame).
+register trickery driven by HDMA.
 
 **The waves.** Instead of describing the sea surface, we ask, for each of the 224
 scanlines: *what is the nearest bit of wave this line's view ray hits?* — a raycaster
 turned on its side (top-to-bottom instead of Wolfenstein's left-to-right). Because
 only the *first* crossing wins, near crests naturally hide the troughs and waves
 behind them. None of this runs on the SNES: `tools/bake_tables.py` raycasts every
-scanline for 32 wave phases at build time and bakes the results into HDMA tables
-(~20KB of ROM). Rolling the sea is just repointing three HDMA channels at the next
-phase's tables each frame.
+scanline for 32 wave phases at build time and bakes the results.
 
 **Putting a hit on screen.** The Mode 7 matrix is set to `B = D = 0`, which makes
 the sampled texture position depend only on the per-scanline registers. `TM` flips
 between backdrop-only (sky) and BG1 (sea) at the horizon line, which moves per phase.
 
-**The camera.** Position and heading are free (god mode). Each frame, a 65816
-routine (`game/camera.asm`) rebuilds five HDMA tables — `M7A` = a·cos θ,
-`M7C` = −a·sin θ, `M7X` = px + d·sin θ, `M7Y` = py + d·cos θ, `HOFS` = M7X−128 —
-from the baked per-scanline distance/scale arrays, using the S-CPU hardware
-multiplier ($4202/$4203). The build is sign-specialised (four loop variants chosen
-per call — zero branches per scanline), feeds the multiplier straight from ROM,
-keeps shared operands latched between products, and runs its scratch in a private
-direct page. Sky lines are skipped entirely. Measured cost: **262 scanlines ≈ 1
-frame** per rebuild (down from 524 unoptimised), double-buffered in WRAM and
-flipped during vblank. The main loop runs at 30Hz — build fills one frame, game
-logic gets the other (~45% of the loop currently spare). One honest simplification: the
-wave field is defined in view space, so the swell always rolls toward the camera —
-turning rotates the texture but not the wave direction. (A world-fixed swell would
-need a rebake per heading; this is the trade that keeps it all baked.)
+**The camera / renderer.** Each frame a 65816 routine (`game/camera.asm`) rebuilds
+the camera-dependent HDMA streams — `M7A` = a·cos θ, `M7C` = −a·sin θ,
+`M7X` = px + d·sin θ, `M7Y` = py + d·cos θ, `HOFS` = M7X−128 — from the baked
+per-scanline distance/scale arrays, using the S-CPU hardware multiplier. The build
+is sign-specialised (four loop variants, zero branches per scanline), feeds the
+multiplier straight from ROM, keeps shared operands latched, runs scratch in a
+private direct page, and skips sky lines. Cost: **262 scanlines ≈ 1 frame**
+(down from 524 unoptimised), double-buffered in WRAM, pointers flipped in vblank.
+The main loop runs at 30Hz — build fills one frame, game logic gets the other
+(~45% of the loop spare). Honest simplification: the wave field is defined in view
+space, so the swell always rolls toward the camera — turning rotates the texture
+but not the wave direction (a world-fixed swell would need a rebake per heading).
 
-**Pale crests.** A fourth HDMA channel writes the fixed-colour register (`$2132`)
-each scanline, with additive colour math enabled on the sea layer. Rows at wave tops
-get white added (`sin²` falloff baked in), fading down the flanks. Brightening the
-whole row is geometrically correct here: in this renderer each scanline shows a
-single distance, so a crest row is crest all the way across. (Mid-screen CGRAM
-writes — the obvious alternative — glitch during active display; colour math has no
-such timing hazard.)
+**HDMA channel map** (all 8 in use):
+ch0 BG mode split (UI band), ch1 TM sky/sea (baked per phase), ch2 COLDATA crest
+glow (baked per phase), ch3 M7A+B / ch4 M7C+D / ch5 M7X+Y / ch6 HOFS+VOFS
+(paired-register mode-3 streams built each frame; B, D, VOFS ride along as
+permanently-zero words), ch7 window waterline (WH0+WH1).
 
-**Water flow / fake parallax.** The deep-water areas of the texture are painted in
-stripes across a few consecutive palette indices. Every N frames the CPU rotates
-those CGRAM entries (a handful of vblank writes), so the surface pattern flows
-independently of the rolling swell — two apparent layers of motion from one
-background. The stripe colours ping-pong (from → to → from), so the cycle never has
-a hard lightest-to-darkest jump, and the stripe bands are quantised by phase rather
-than sine value so each band covers equal area.
+**World scale.** One texture texel spans **4 world units**: raycast, wave field,
+physics and speeds all live in world units (the swell's size and feel never change),
+while the map's 1024 texels stretch across a 4096-unit world. The scale is applied
+at exactly three points: the baked M7A array (÷4) and a mask-and-shift (&4095, >>2)
+where the table builder feeds M7X/M7Y.
+
+**Pale crests.** ch2 writes the fixed-colour register (`$2132`) per scanline with
+additive colour math enabled on BG1. Wave-top rows get white added (`sin²` falloff
+baked in). Whole-row brightening is geometrically correct here: each scanline shows
+a single distance, so a crest row is crest all the way across. (Mid-screen CGRAM
+writes — the obvious alternative — glitch during active display.)
+
+**Water flow / fake parallax.** Deep-water areas are painted in stripes across
+consecutive palette indices; every N frames the CPU rotates those CGRAM entries, so
+the surface flows independently of the swell. Stripe colours ping-pong (from → to →
+from) so the cycle never hard-jumps, and bands are quantised by phase (not sine
+value) so each covers equal area.
 
 **The jet ski and its waterline.** The ski floats at a fixed distance ahead of the
-camera; the bake exports, per wave phase, the screen row where the rendered surface
-sits at that distance and the wave height there. Runtime physics is a buoyancy
-spring toward "10% under the surface" (plus gravity when airborne), and the sprite's
-screen position is the surface row offset by the ski's height error. The submersion
-feedback is a PPU **window** driven by HDMA: below the surface row, window 1 opens
-full-width and masks OBJ on the main screen, so the hull is clipped per pixel-row —
-the waterline visibly rides up and down the sprite as it bobs, and nearer water
-correctly swallows it. (Freeing that eighth HDMA channel required merging the five
-matrix streams into four paired-register mode-3 channels — B, D and VOFS ride along
-as permanently-zero words.)
+camera; the bake exports, per phase, the surface's screen row at that distance and
+the wave height there. Physics is a buoyancy spring toward "a dip under the surface"
+(splash damping on entry, gravity when airborne, hard depth floor). Submersion
+feedback is the HDMA **window**: below the waterline row, window 1 opens full-width
+and masks OBJ, clipping the hull per pixel-row — the waterline rides the sprite as
+it bobs, and nearer water swallows it.
 
-**Glow-free land (EXTBG).** The crest glow is colour math on BG1, and sand
-is BG1 � so Mode 7's hidden second layer is used to exempt it: with EXTBG enabled,
-BG2 duplicates the image treating pixel bit 7 as a per-pixel priority flag. Course
-pixels are baked with bit 7 set, so they win via BG2-high (above BG1, per the mode 7
-priority order S3 S2 2H S1 BG1 S0 2L) and escape BG1's colour math entirely � the
-surf keeps its texture, the beach stays clean, the water keeps its glow. Verified on real hardware.
+**Glow-free land (EXTBG).** Crest glow is colour math on BG1, and land is BG1 — so
+Mode 7's hidden second layer exempts it: with EXTBG enabled, BG2 duplicates the
+image treating **pixel bit 7** as a per-pixel priority flag (colour = low 7 bits).
+Sand-coloured pixels, the rope cord, floats and sandy shallows are baked with bit 7
+set, so they win via BG2-high (mode 7 priority: S3 S2 2H S1 BG1 S0 2L) and escape
+the glow; foam, pale shallows and open water keep it. Verified on real hardware.
 
-**Collision.** The course painter's zones double as physics: the bake exports a
-128�128 collision byte-map (water / sand / rope; one cell = 32 world units), a tiny
-asm probe reads it, and movement is resolved one axis at a time at the ski's
-position � the blocked axis stops, the other keeps its momentum, so oblique
-contact slides along shores and rope lines instead of snagging.
+**Collision.** The course zones double as physics: the bake exports a 128×128
+collision byte-map (water / sand / rope / buoy; one cell = 32 world units), a tiny
+asm probe reads it, and movement resolves one axis at a time at the ski's position —
+the blocked axis stops, the other keeps its momentum, so oblique contact slides
+along shores and ropes instead of snagging. An embedded ski (rounding creep while
+grinding + turning) is actively pushed back to open water.
 
-**Buoys.** Course markers (yellow L / red R � pass sides not yet enforced) are
-placed in the painter and live twice: a collision cell plus a painted base ripple
-in the texture, and a sprite projected each frame � the distance table gives the
-screen row (which also makes wave crests occlude them for free) and the S-CPU
-hardware divider gives the column. The SNES cannot scale sprites, so each buoy is
-authored at five sizes (8/12/16/24/32 px, flat-bottomed circles, letter at every scale, bottom-anchored so scale swaps never read as movement). Rope floats are magenta
+**Buoys.** Course markers (yellow L / red R — pass sides not yet enforced) live
+twice: a collision cell + painted base ripple in the texture, and a sprite projected
+each frame — the distance table gives the screen row, the hardware divider gives the
+column. The SNES cannot scale sprites, so each buoy is authored at **five sizes**
+(8/12/16/24/32 px) switched at perspective-correct distances (a geometric ladder, so
+scale changes don't tick past at regular intervals). Flat-bottomed circles keep a
+stable silhouette, every size carries its letter, and all sizes are bottom-anchored
+to the surface row so scale swaps never read as movement. A buoy tucked behind a
+crest rides up onto the wave in front rather than hiding. Rope floats are magenta
 so they never read as R buoys.
 
-**The UI band.** The top 24 scanlines run in BG mode 1 (HDMA on `$2105` switches
-the whole PPU mode mid-frame, back to mode 7 below) giving 3 rows of tiled text.
-The PVSnesLib console uploads its map to a hardcoded VRAM address inside the
-Mode 7 region, so `game/src/ui.c` owns its own map buffer and DMAs it during
-vblank; the library is still used for its font and palette. Currently shows
-camera position/heading and a live profiler (scanlines per table rebuild).
+**The UI band.** The top 24 scanlines run in BG mode 1 (HDMA on `$2105` switches the
+whole PPU mode mid-frame and back), giving 3 rows of tiled text. The PVSnesLib
+console uploads its map to a hardcoded VRAM address inside the Mode 7 region, so
+`game/src/ui.c` owns its own map buffer and DMAs it in vblank; the library is still
+used for its font and palette. Shows position/heading/speed, build profiler,
+WET/AIR and physics state.
 
-**Motion-coupled swell.** The wave phase advances with time *and* with forward
-motion (baked steps-per-texel constant), so driving fast genuinely skips across
-the crests, and reversing backs the swell down.
+**Motion-coupled swell.** Wave phase advances with time *and* forward motion, so
+driving fast genuinely skips across crests, and reversing backs the swell down.
 
-**The texture.** One 1024×1024 Mode 7 map (the hardware's only option), built from a
-128×128 tileable pattern designed in `tools/water-designer/` — Perlin noise whose
-mid-band ("the stringy middles") becomes the off-white lattice, with everything
-either side falling through to the striped deep blues. The pattern budget is the
-hardware's: max 256 unique 8×8 tiles, palette kept in CGRAM 0–15.
+**The texture.** One 1024×1024 Mode 7 map (the hardware's only option), from a
+128×128 tileable pattern designed in `tools/water-designer/`. Max 256 unique 8×8
+tiles (Mode 7 has no tile flipping); when course art pushes the composed map over
+budget, the bake's quantiser merges the most-similar tiles — water first (course
+tiles never merge with water and cost 8× to merge at all). `game/sea.png` previews
+the exact post-quantise data the SNES ships.
 
 ## Colour map (CGRAM)
 
@@ -127,16 +130,16 @@ The line in the sand — update this table whenever an allocation changes.
 |---------|-------|-------|
 | 0 | Backdrop | Sky above the horizon (dusk orange, set at runtime) |
 | 1–7 | Water | `1..N` rotating deep stripes (ping-pong colours), `N+1` peaks, `N+2` lattice. N ≤ 5 fits here |
-| 8–15 | Course | 8 sand, 9 sand shade, 10 foam, 11 wet sand/rope, 12–13 float red/white; 14–15 free |
+| 8–15 | Course | 8 sand, 9 sand shade, 10 foam, 11 wet sand/rope, 12 float magenta, 13 shallow blue, 14 calm wake, 15 shallow sand |
 | 16–31 | UI text | Font palette for the mode-1 text band (palette row 1) |
 | 32–127 | BG reserve | Unallocated (future sky gfx) |
-| 128–143 | Jet ski | OBJ palette 0 (12 colours used) |
+| 128–143 | Ski + buoys | OBJ palette 0 (shared: ski, buoy yellows/reds, letters) |
 | 144–255 | Sprites reserve | OBJ palettes 1–7 — do not touch from BG code |
 
 ## Building the ROM
 
-The game (in `game/`) is built with [PVSnesLib 4.6.0](https://github.com/alekmaul/pvsneslib).
-Output is `game/superwaverace.sfc` — LoROM, no SRAM, no enhancement chips, per the jam rules.
+Built with [PVSnesLib 4.6.0](https://github.com/alekmaul/pvsneslib) plus Python 3
+(the bake step). Output `game/superwaverace.sfc` — LoROM, no SRAM, no chips.
 
 **Windows (Git Bash):**
 
@@ -147,42 +150,39 @@ export PVSNESLIB_HOME=$HOME/pvsneslib
 make -C game
 ```
 
-**CI:** every push to `main` builds the ROM on Linux, uploads it as a workflow artifact,
-and deploys the web player to the `gh-pages` branch.
+**CI:** every push to `main` builds the ROM on Linux, uploads it as an artifact, and
+deploys the web player to `gh-pages`.
 
 ## Play in the browser
 
-**https://seanbouk.github.io/super-waverace/** — the latest ROM from `main`, running in
-[EmulatorJS](https://emulatorjs.org/) (snes9x core). For local testing: build the ROM,
-copy it into `web/`, and serve that folder with any static file server.
+**https://seanbouk.github.io/super-waverace/** — the latest ROM from `main`, in
+[EmulatorJS](https://emulatorjs.org/) (snes9x core). The page's "download the ROM"
+link serves the exact deployed build (handy for flashcarts).
 
 ## Tools
 
+All are self-contained web pages — open `index.html` in a browser.
+
 ### Wave Visualizer (`tools/wave-visualizer/`)
 
-A self-contained web tool (open `index.html` in a browser) for getting the per-scanline raycast geometry right. Instead of defining the floor directly, each of the SNES's 224 scanlines casts a ray from the camera and records the *first* crossing with a sine wave — a top-to-bottom raycaster, so near crests correctly hide the troughs and waves behind them.
-
-Four charts:
-
-1. **The sea** — the sine wave itself (+x is into the distance, +z in game terms)
-2. **The eye** — the 224 rays fanned out from the camera, truncated at their hit points
-3. **First crossing** — per scanline, the lowest x where its ray meets the wave (plateaus = hidden water)
-4. **SNES display** — the 224 scanlines shaded near→far, with misses as sky
-
-Controls for camera height/pitch/FOV, wave amplitude/wavelength/phase, ray distance, and an animated rolling-sea mode.
-
-**Simplification (deliberate):** the hit's x value is used for both "which part of the wave" and "how far away it is". True texture position (arc length) and true distance (ray length) differ slightly, but occlusion — the effect that matters — comes entirely from the first-crossing rule and stays exact.
-
-**Tuning workflow:** the lab's controls mirror `tools/bake_tables.py` exactly (texel units,
-32-phase quantisation, crest glow). Tune the feel, hit **Export wave_params.json**, drop the
-file into `tools/`, and `make` — the ROM now matches what the lab showed.
+The geometry lab: 224 rays cast against a sine wave, first crossing wins. Four
+charts (the wave, the ray fan, first-crossing per scanline, simulated SNES display
+with crest-glow preview). Controls mirror the bake exactly (texel units, phase
+quantisation, glow). **Export wave_params.json** → drop into `tools/` → `make`:
+the ROM matches the lab.
 
 ### Water Tile Designer (`tools/water-designer/`)
 
-Designs the sea texture: tileable Perlin noise split into a Wind Waker-style off-white
-lattice (the "stringy middles" of the noise) over deep-blue layers, with directional
-stripes assigned to rotating palette slots — the SNES rotates those CGRAM entries at
-runtime so the water surface flows independently of the swell (fake parallax, one layer).
-Live-previews the rotation, counts unique 8×8 tiles (max 256) and colours. Exports
-`sea_pattern.png` + `water_params.json` into `assets/`, which the bake script prefers
-over its built-in procedural texture.
+Designs the sea texture: tileable Perlin noise split into a Wind Waker-style
+off-white lattice over deep-blue layers, with directional stripes assigned to the
+rotating palette slots. Independent surface/deep noise controls, rotation preview,
+live tile/colour budget. Exports `sea_pattern.png` + `water_params.json` into
+`assets/`, which the bake prefers over its procedural fallback.
+
+### Course Painter (`tools/course-painter/`)
+
+The course editor: paint water/sand zones at tile resolution (wrap-aware — maps are
+islands on a repeating 4096-unit sea), draw rope float-lines as polylines, place
+L/R buoys. Fill tool, undo, tiled 2×2 preview, budget readouts. Exports/imports
+`assets/course.json`; the bake composes it over the water pattern (auto shoreline
+foam + 2-band shallow surf on the water side) and derives the collision map.

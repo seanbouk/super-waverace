@@ -1,5 +1,12 @@
 # Development Plan
 
+> **Status (Aug 2026): phases 1–3 complete and exceeded** — see README for what
+> actually got built. Notable deviations from the plan below: the bake emits
+> Mode 7 data directly (gfx4snes dropped, so palette indices stay stable for
+> rotation); the camera became a full runtime HDMA table builder (hardware
+> multiplier) rather than purely baked tables; EXTBG, a PPU-window waterline,
+> colour-math crest glow, courses, collision and buoys were added along the way.
+
 Target: [SNES DEV Game Jam 2026](https://itch.io/jam/snes-dev-game-jam-2026) â€” submissions close **31 October 2026**.
 
 ## Jam constraints (hard requirements)
