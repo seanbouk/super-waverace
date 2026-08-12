@@ -20,11 +20,12 @@ void uiInit(void)
 
     // Font + palette via the library (both respect the address overrides;
     // only the console's own MAP path is $0800-hardcoded, which we bypass).
-    // VRAM kept clear of mode 7's 0x0000-0x3FFF: font 0x5000, map 0x6800.
+    // VRAM kept clear of mode 7's 0x0000-0x3FFF: font 0x5000, map 0x7000
+    // (the OBJ sheet at 0x6000 runs to 0x6BFF since the NPC ski band).
     bgSetGfxPtr(0, 0x5000);
-    bgSetMapPtr(0, 0x6800, SC_32x32);
+    bgSetMapPtr(0, 0x7000, SC_32x32);
     consoleSetTextGfxPtr(0x5000);
-    consoleSetTextMapPtr(0x6800);
+    consoleSetTextMapPtr(0x7000);
     consoleInitDefaultText(1); // palette row 1 = CGRAM 16-31 (see colour map)
 
     for (i = 0; i < UI_COLS * UI_ROWS; i++)
@@ -84,5 +85,5 @@ void uiPrintS16(u16 x, u16 y, s16 val, u16 width)
 
 void uiFlush(void)
 {
-    dmaCopyVram((u8 *)uiMap, 0x6800, UI_COLS * UI_ROWS * 2);
+    dmaCopyVram((u8 *)uiMap, 0x7000, UI_COLS * UI_ROWS * 2);
 }

@@ -244,6 +244,20 @@ SKI_PALETTE = [
 
 SKI_WATERLINE_ROW = 26  # sprite row that sits at the surface when at rest
 
+# NPC rider/hull recolours (OBJ palettes 1-3; the tiles are shared).
+# Overrides by palette index: 2/3 helmet, 4/5 suit, 10/11 hull accent.
+NPC_PALETTES = [
+    {2: (200, 240, 120), 3: (148, 184, 84),   # green racer
+     4: (24, 96, 48), 5: (14, 60, 30),
+     10: (72, 190, 84), 11: (46, 128, 54)},
+    {2: (238, 238, 244), 3: (184, 184, 196),  # purple racer
+     4: (72, 36, 122), 5: (46, 22, 78),
+     10: (172, 92, 224), 11: (116, 58, 154)},
+    {2: (40, 40, 52), 3: (26, 26, 34),        # orange racer
+     4: (122, 50, 20), 5: (80, 32, 12),
+     10: (240, 150, 40), 11: (176, 106, 26)},
+]
+
 
 def ski_frame(shear):
     """32x32 index grid; shear shifts rows above the hull toward +x."""
@@ -257,6 +271,36 @@ def ski_frame(shear):
                 if 0 <= nx < 32:
                     grid[y][nx] = c
     return grid
+
+
+def ski_scaled(size):
+    """size x size grid: the rear-view ski for NPC racers. Cropped at the
+    waterline (rows 0..SKI_WATERLINE_ROW) so, like the flat-bottomed buoys,
+    nothing hangs below the surface row it gets anchored to; scaled with a
+    majority-vote box filter (keeps the outline/hull blobs readable at 8px);
+    bottom-anchored in the grid."""
+    src = ski_frame(0.0)
+    sh = SKI_WATERLINE_ROW + 1
+    h = max(1, round(sh * size / 32.0))
+    g = [[0] * size for _ in range(size)]
+    for dy in range(h):
+        y0 = dy * sh // h
+        y1 = max(y0 + 1, (dy + 1) * sh // h)
+        for dx in range(size):
+            x0 = dx * 32 // size
+            x1 = max(x0 + 1, (dx + 1) * 32 // size)
+            counts = {}
+            area = 0
+            for sy in range(y0, y1):
+                for sx in range(x0, x1):
+                    area += 1
+                    c = src[sy][sx]
+                    if c:
+                        counts[c] = counts.get(c, 0) + 1
+            if counts and sum(counts.values()) * 2 >= area:
+                g[size - h + dy][dx] = max(counts.items(),
+                                           key=lambda kv: kv[1])[0]
+    return g
 
 
 def encode_4bpp(grid, w_tiles, h_tiles):
@@ -341,21 +385,26 @@ def buoy_grid(size, right):
 
 
 def build_ski_sheet():
-    """128x32 sheet: frame 0 = straight, frame 1 = lean (hflip for other side).
+    """128x96 sheet: player ski frames (straight + lean), buoys at 5 sizes,
+    and the NPC rear-view ski at 5 sizes (rows 64+, recoloured by palette).
     128px wide = 16 tiles/row, matching OAM's name-row stride exactly."""
-    sheet = [[0] * 128 for _ in range(64)]
+    sheet = [[0] * 128 for _ in range(96)]
     for f, shear in enumerate((0.0, 0.14)):
         grid = ski_frame(shear)
         for y in range(32):
             for x in range(32):
                 sheet[y][f * 32 + x] = grid[y][x]
 
-    def blit(size, right, sx, sy, slot):
-        g = buoy_grid(size, right)
+    def blitg(g, sx, sy, slot):
+        size = len(g)
         oy = slot - size  # bottom row of art == bottom row of slot, always
+        ox = (slot - size) // 2
         for y in range(size):
             for x in range(size):
-                sheet[sy + oy + y][sx + (slot - size) // 2 + x] = g[y][x]
+                sheet[sy + oy + y][sx + ox + x] = g[y][x]
+
+    def blit(size, right, sx, sy, slot):
+        blitg(buoy_grid(size, right), sx, sy, slot)
 
     blit(32, 0, 64, 0, 32)   # name 8
     blit(32, 1, 96, 0, 32)   # name 12
@@ -367,11 +416,25 @@ def build_ski_sheet():
     blit(12, 1, 112, 32, 16) # name 78
     blit(8, 0, 64, 48, 16)   # name 104
     blit(8, 1, 80, 48, 16)   # name 106
-    tiles = encode_4bpp(sheet, 16, 8)
-    pal = bytearray()
-    for r, g, b in SKI_PALETTE:
-        pal += struct.pack("<H", ((b >> 3) << 10) | ((g >> 3) << 5) | (r >> 3))
-    return tiles, bytes(pal), sheet
+    # NPC ski scale ladder (same distance bands as the buoys)
+    blitg(ski_scaled(32), 0, 64, 32)   # name 128
+    blitg(ski_scaled(24), 32, 64, 32)  # name 132
+    blitg(ski_scaled(16), 64, 64, 16)  # name 136
+    blitg(ski_scaled(12), 80, 64, 16)  # name 138
+    blitg(ski_scaled(8), 96, 64, 16)   # name 140
+    tiles = encode_4bpp(sheet, 16, 12)
+
+    def pal_bytes(cols):
+        out = bytearray()
+        for r, g, b in cols:
+            out += struct.pack("<H", ((b >> 3) << 10) | ((g >> 3) << 5) | (r >> 3))
+        return out
+
+    pal = pal_bytes(SKI_PALETTE)
+    npc = bytearray()
+    for over in NPC_PALETTES:
+        npc += pal_bytes([over.get(i, c) for i, c in enumerate(SKI_PALETTE)])
+    return tiles, bytes(pal), bytes(npc), sheet
 
 
 # ---- sea texture ----------------------------------------------------------
@@ -873,7 +936,7 @@ def main():
     asm.append("")
 
     # jet ski sprite sheet (4bpp OBJ tiles) + palette
-    ski_tiles, ski_pal, ski_sheet = build_ski_sheet()
+    ski_tiles, ski_pal, npc_pals, ski_sheet = build_ski_sheet()
     write_png(os.path.join(OUT_DIR, "ski.png"),
               [bytes(r) for r in ski_sheet], SKI_PALETTE + [(0, 0, 0)] * 240)
     asm.append('.section ".skigfx" superfree')
@@ -881,6 +944,8 @@ def main():
     asm.append(db_lines(ski_tiles))
     asm.append("ski_pal:")
     asm.append(db_lines(ski_pal))
+    asm.append("npc_pals:")
+    asm.append(db_lines(npc_pals))
     asm.append(".ends")
     asm.append("")
 

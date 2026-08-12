@@ -136,7 +136,8 @@ The line in the sand — update this table whenever an allocation changes.
 | 16–31 | UI text | Font palette for the mode-1 text band (palette row 1) |
 | 32–127 | BG reserve | Unallocated (future sky gfx) |
 | 128–143 | Ski + buoys | OBJ palette 0 (shared: ski, buoy yellows/reds, letters) |
-| 144–255 | Sprites reserve | OBJ palettes 1–7 — do not touch from BG code |
+| 144–191 | NPC racers | OBJ palettes 1–3: green/purple/orange recolours of the ski palette (tiles shared) |
+| 192–255 | Sprites reserve | OBJ palettes 4–7 — do not touch from BG code |
 
 ## Building the ROM
 

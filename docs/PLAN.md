@@ -105,8 +105,11 @@ Phases (each headless-verifiable in Mesen; ✅ = done):
    visible at correct ladder scales from the grid, wrap laps continuously.
    Known gap for phase 4: NPC lap pace (~40-50s) trails a well-driven
    player (~24s) — speeds/rubber-banding are tuning knobs, not bugs.
-3. **NPC ski art** — rear-view sheet at the scale-ladder sizes, lean frames.
-   Watch the 34-tiles-per-scanline limit at the start grid (stagger starts).
+3. ✅ **NPC ski art** — rear-view ski at all 5 buoy scale bands (no lean
+   frames), cropped at the waterline so the bottom-anchored slot sits ON
+   the water like the buoys. One tile set, recoloured per racer via OBJ
+   palettes 1-3 (green/purple/orange; CGRAM 144-191). Sheet grew to 6144
+   bytes, so the UI map moved 0x6800 -> 0x7000 in VRAM.
 4. **Race flow** — countdown/input lock, live positions, 3-lap finish,
    results; race UI replaces the debug rows (debug behind a #define).
 5. **Gate judging / penalties** (optional) — waypoints already carry the

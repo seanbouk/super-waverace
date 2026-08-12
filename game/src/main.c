@@ -23,7 +23,7 @@
 #include "ui.h"
 
 extern char sea_patterns, sea_map, sea_palette;
-extern char ski_tiles, ski_pal;
+extern char ski_tiles, ski_pal, npc_pals;
 extern void buildCamTables(void);
 extern void collProbe(void); // camera.asm: reads the collision byte-map
 extern void rowDepth(void);  // camera.asm: screen row for a view depth
@@ -262,6 +262,39 @@ static void drawLadder(u16 oid, u8 right)
 }
 
 //---------------------------------------------------------------------------------
+// NPC racer at the projected point: rear-view ski, same five distance bands
+// as the buoys, recoloured per racer via OBJ palette (tiles shared). The art
+// is cropped at its waterline, so the bottom-anchored slot sits ON the water.
+static void drawSki(u16 oid, u8 pal)
+{
+    if (pjV < 192)
+    {
+        oamSet(oid, pjCol - 16, rdRow - 31, 3, 0, 0, 128, pal);
+        oamSetEx(oid, OBJ_LARGE, OBJ_SHOW);
+    }
+    else if (pjV < 268)
+    {
+        oamSet(oid, pjCol - 16, rdRow - 31, 3, 0, 0, 132, pal);
+        oamSetEx(oid, OBJ_LARGE, OBJ_SHOW);
+    }
+    else if (pjV < 382)
+    {
+        oamSet(oid, pjCol - 8, rdRow - 15, 3, 0, 0, 136, pal);
+        oamSetEx(oid, OBJ_SMALL, OBJ_SHOW);
+    }
+    else if (pjV < 534)
+    {
+        oamSet(oid, pjCol - 8, rdRow - 15, 3, 0, 0, 138, pal);
+        oamSetEx(oid, OBJ_SMALL, OBJ_SHOW);
+    }
+    else
+    {
+        oamSet(oid, pjCol - 8, rdRow - 15, 3, 0, 0, 140, pal);
+        oamSetEx(oid, OBJ_SMALL, OBJ_SHOW);
+    }
+}
+
+//---------------------------------------------------------------------------------
 static void waveHdma(u16 ph, u16 bufOff)
 {
     dmaTM.mem.p = waveTM[ph];
@@ -335,8 +368,11 @@ int main(void)
     REG_SETINI = 0x40;
     uiInit();
 
-    // ski + buoy sheet: 96 tiles at VRAM 0x6000, OBJ palette 0 (CGRAM 128+)
-    oamInitGfxSet(&ski_tiles, 4096, &ski_pal, 32, 0, 0x6000, OBJ_SIZE16_L32);
+    // ski + buoy + NPC sheet: 192 tiles at VRAM 0x6000 (through 0x6BFF -
+    // the UI map moved to 0x7000 to make room), OBJ palette 0 (CGRAM 128+)
+    oamInitGfxSet(&ski_tiles, 6144, &ski_pal, 32, 0, 0x6000, OBJ_SIZE16_L32);
+    // NPC racer recolours: OBJ palettes 1-3 (CGRAM 144-191), shared tiles
+    dmaCopyCGram((u8 *)&npc_pals, 144, 96);
     oamSet(0, SKI_X, 140, 3, 0, 0, 0, 0);
     oamSetEx(0, OBJ_LARGE, OBJ_SHOW);
     for (bi = 1; bi < 12; bi++)
@@ -755,15 +791,15 @@ int main(void)
         }
 #endif
 #if WAVE_PATH_COUNT > 0
-        // NPC racers ride the exact same pipeline (placeholder buoy art
-        // until the rear-view ski sheet lands in phase 3)
+        // NPC racers ride the exact same pipeline: rear-view ski art,
+        // one recolour palette per racer
         for (bi = 0; bi < NPC_COUNT; bi++)
         {
             pjX = npcX[bi];
             pjY = npcY[bi];
             projectPoint();
             if (pjOk)
-                drawLadder((5 + bi) << 2, (u8)(bi & 1));
+                drawSki((5 + bi) << 2, (u8)(1 + bi));
             else
                 oamSetVisible((5 + bi) << 2, OBJ_HIDE);
         }
