@@ -101,6 +101,10 @@ u16 rdV, rdRow, rdD;
 s16 bdx, bdy, bv, bu, bau, bh, bl;
 u16 bq, winRow, dly;
 u8 bi;
+// race progress (phase 1: player only) + waypoint-chaser steering
+u8 nextWp, lapCount;
+u16 lapTicks, lastLap;
+s16 wpdx, wpdy, apc, apd, apu;
 
 //---------------------------------------------------------------------------------
 static u16 scanline(void)
@@ -264,6 +268,12 @@ int main(void)
     prevCos = 127;
     rotTimer = 0;
     rotOfs = 0;
+    nextWp = 0; // BSS is not zero-initialised: clear all race state
+    lapCount = 0;
+    lapTicks = 0;
+    lastLap = 0;
+    skiWX = camPX; // autopilot reads these before the first physics pass
+    skiWY = camPY + WAVE_SKI_DIST;
     buildWinTab(200);
 
 // build-time debug: drive itself (the emulator test runner has no input)
@@ -273,7 +283,41 @@ int main(void)
     {
         pad0 = padsCurrent(0);
 #if AUTOPILOT
+#if WAVE_PATH_COUNT > 0
+        // waypoint chaser — also the seed of the NPC racer brain.
+        // apc = r*sin(heading - bearing): negative means the target is to
+        // the right (theta must grow). Deadband ~7 deg (apd>>3 = tan-ish).
+        wpdx = (s16)((pathX[nextWp] - skiWX) & 4095);
+        if (wpdx > 2048)
+            wpdx -= 4096;
+        wpdy = (s16)((pathY[nextWp] - skiWY) & 4095);
+        if (wpdy > 2048)
+            wpdy -= 4096;
+        apc = (wpdy >> 4) * camSinVal - (wpdx >> 4) * camCosVal;
+        apd = (wpdx >> 4) * camSinVal + (wpdy >> 4) * camCosVal;
+        if (apd < 0)
+        {
+            // target behind: commit to one side until it comes round
+            if (apc <= 0)
+                pad0 |= KEY_RIGHT;
+            else
+                pad0 |= KEY_LEFT;
+        }
+        else
+        {
+            if (apc < -(apd >> 3))
+                pad0 |= KEY_RIGHT;
+            if (apc > (apd >> 3))
+                pad0 |= KEY_LEFT;
+        }
+        // full throttle on the straights; coast into corners sharper than
+        // ~45 deg — but never stall (turn authority needs speed)
+        apu = apc < 0 ? -apc : apc;
+        if ((apd > 0 && apu < apd) || (vAlong < 300 && vAlong > -300))
+            pad0 |= KEY_B;
+#else
         pad0 |= KEY_B;
+#endif
 #endif
 
         // ---- steering: turn authority scales with speed (no speed, no
@@ -412,6 +456,33 @@ int main(void)
             }
         }
         camPY += stepY;
+
+#if WAVE_PATH_COUNT > 0
+        // ---- race progress: next waypoint reached within ~1.5 cells
+        // (Manhattan, world units; skiWX is one step stale — harmless) ----
+        wpdx = (s16)((pathX[nextWp] - skiWX) & 4095);
+        if (wpdx > 2048)
+            wpdx -= 4096;
+        if (wpdx < 0)
+            wpdx = -wpdx;
+        wpdy = (s16)((pathY[nextWp] - skiWY) & 4095);
+        if (wpdy > 2048)
+            wpdy -= 4096;
+        if (wpdy < 0)
+            wpdy = -wpdy;
+        if (wpdx + wpdy < 200)
+        {
+            nextWp++;
+            if (nextWp >= WAVE_PATH_COUNT)
+            {
+                nextWp = 0;
+                lapCount++;
+                lastLap = lapTicks;
+                lapTicks = 0;
+            }
+        }
+        lapTicks++;
+#endif
 
         // split velocity into forward/side components along the heading
         vAlong = ((skiVX >> 4) * camSinVal + (skiVY >> 4) * camCosVal) >> 3;
@@ -571,6 +642,15 @@ int main(void)
             uiPrintNum(13, 0, camTheta, 3);
             uiPrint(17, 0, "V");
             uiPrintNum(18, 0, vAlong >= 0 ? vAlong : -vAlong, 4);
+#if WAVE_PATH_COUNT > 0
+            // race progress: lap.waypoint, and the last lap's tick count
+            uiPrint(23, 0, "L");
+            uiPrintNum(24, 0, lapCount, 1);
+            uiPrint(25, 0, ".");
+            uiPrintNum(26, 0, nextWp, 2);
+            uiPrint(21, 1, "T");
+            uiPrintNum(22, 1, lastLap, 4);
+#endif
             uiPrint(0, 1, "BUILD");
             uiPrintNum(5, 1, profLines, 4);
             uiPrint(9, 1, "LN PH");

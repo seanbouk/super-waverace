@@ -6,8 +6,10 @@ fake a sinusoidal ocean on hardware that can only rotate and scale a flat plane.
 ## Status
 
 🌊 Playable: jet ski with buoyancy physics on the rolling sea, an island course
-with shorelines, rope float-lines and L/R buoys, collision with slide-along, and
-a debug UI band. Verified on real hardware. Target:
+with shorelines, rope float-lines and L/R buoys, collision with slide-along, a
+racing line with waypoint/lap/lap-time tracking, and a debug UI band. Verified
+on real hardware. In progress: 3-lap race against 3 NPC racers (see
+`docs/PLAN.md`, "Race mode"). Target:
 [SNES DEV Game Jam 2026](https://itch.io/jam/snes-dev-game-jam-2026) — LoROM,
 ≤512KB, no enhancement chips, no SRAM, NTSC+PAL. See `docs/PLAN.md` for history.
 
@@ -183,6 +185,9 @@ live tile/colour budget. Exports `sea_pattern.png` + `water_params.json` into
 
 The course editor: paint water/sand zones at tile resolution (wrap-aware — maps are
 islands on a repeating 4096-unit sea), draw rope float-lines as polylines, place
-L/R buoys. Fill tool, undo, tiled 2×2 preview, budget readouts. Exports/imports
-`assets/course.json`; the bake composes it over the water pattern (auto shoreline
-foam + 2-band shallow surf on the water side) and derives the collision map.
+L/R buoys, and draw the racing line (an ordered waypoint loop — point 0 is the
+start/finish; arrows show race direction). Fill tool, undo, tiled 2×2 preview,
+budget readouts. Exports/imports `assets/course.json`; the bake composes it over
+the water pattern (auto shoreline foam + 2-band shallow surf on the water side),
+derives the collision map, and exports the waypoints for lap counting and (soon)
+NPC steering.

@@ -39,10 +39,12 @@
       <label class="radio"><input type="radio" name="tool" value="rope"> Rope (click points)</label>
       <label class="radio"><input type="radio" name="tool" value="buoyL"> Buoy L (yellow, pass left)</label>
       <label class="radio"><input type="radio" name="tool" value="buoyR"> Buoy R (red, pass right)</label>
+      <label class="radio"><input type="radio" name="tool" value="path"> Path (racing line, in race order)</label>
       <div class="ctl"><label>Brush size</label><input type="range" id="bsize" min="1" max="12" step="1" value="4"><output for="bsize"></output></div>
       <button id="endRope">End current rope</button>
       <button id="undoRope">Delete last rope</button>
       <button id="undoBuoy">Delete last buoy</button>
+      <button id="undoPath">Delete last waypoint</button>
       <button id="clearAll">Clear to water</button>
     </div>
     <div class="group"><b>File</b>
@@ -77,6 +79,7 @@ const CELL = 4; // canvas px per tile
 let zones = Array.from({length: N}, () => Array(N).fill("w"));
 let ropes = [];       // finished ropes: arrays of [x,y] texel coords
 let buoys = [];       // [x, y, "L"/"R"] texel coords
+let path = [];        // racing line waypoints [x,y] texel coords, race order
 let current = null;   // rope being drawn
 let painting = false;
 
@@ -118,6 +121,36 @@ function render() {
   };
   for (const r of ropes) drawRope(r, false);
   if (current) drawRope(current, true);
+  // racing line: cyan loop (last->first closes it), arrows show direction,
+  // numbered points (0 = start/finish)
+  if (path.length) {
+    ctx.strokeStyle = "#58c4dd";
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(path[0][0] / 2, path[0][1] / 2);
+    for (let i = 1; i < path.length; i++) ctx.lineTo(path[i][0] / 2, path[i][1] / 2);
+    if (path.length > 2) ctx.closePath();
+    ctx.stroke();
+    for (let i = 0; i < path.length; i++) {
+      const [x, y] = path[i], nx = path[(i + 1) % path.length];
+      // arrowhead at the segment midpoint
+      if (path.length > 1) {
+        const mx = (x + nx[0]) / 4, my = (y + nx[1]) / 4;
+        const a = Math.atan2(nx[1] - y, nx[0] - x);
+        ctx.fillStyle = "#58c4dd";
+        ctx.beginPath();
+        ctx.moveTo(mx + 4 * Math.cos(a), my + 4 * Math.sin(a));
+        ctx.lineTo(mx + 4 * Math.cos(a + 2.5), my + 4 * Math.sin(a + 2.5));
+        ctx.lineTo(mx + 4 * Math.cos(a - 2.5), my + 4 * Math.sin(a - 2.5));
+        ctx.fill();
+      }
+      ctx.fillStyle = i ? "#fff" : "#ffd24a";
+      ctx.fillRect(x / 2 - 1.5, y / 2 - 1.5, 4, 4);
+      ctx.fillStyle = "#9be3f4";
+      ctx.font = "8px monospace";
+      ctx.fillText(i, x / 2 + 3, y / 2 - 3);
+    }
+  }
   for (const b of buoys) {
     ctx.fillStyle = b[2] === "R" ? "#e04a3c" : "#ffd24a";
     ctx.beginPath();
@@ -153,7 +186,8 @@ function stats() {
     "sand tiles: <b>" + sand + "</b><br>shore tiles: <b>" + shore +
     "</b> (~16 unique after bake)<br>rope length: <b>" + Math.round(ropeLen) +
     "</b> texels (cell-canonical: ~24 unique tiles total)<br>ropes: <b>" +
-    ropes.length + (current ? " +1 open" : "") + "</b><br>buoys: <b>" + buoys.length + "</b>";
+    ropes.length + (current ? " +1 open" : "") + "</b><br>buoys: <b>" + buoys.length +
+    "</b><br>waypoints: <b>" + path.length + "</b>";
 }
 
 function cellAt(ev) {
@@ -204,6 +238,11 @@ cv.addEventListener("mousedown", ev => {
                 Math.round((ev.clientY - r.top) * 2),
                 t === "buoyR" ? "R" : "L"]);
     render();
+  } else if (t === "path") {
+    const r = cv.getBoundingClientRect();
+    path.push([Math.round((ev.clientX - r.left) * 2),
+               Math.round((ev.clientY - r.top) * 2)]);
+    render();
   } else if (t === "rope") {
     const r = cv.getBoundingClientRect();
     const x = Math.round((ev.clientX - r.left) * 2);
@@ -230,6 +269,10 @@ document.getElementById("undoBuoy").addEventListener("click", () => {
   buoys.pop();
   render();
 });
+document.getElementById("undoPath").addEventListener("click", () => {
+  path.pop();
+  render();
+});
 document.getElementById("undoRope").addEventListener("click", () => {
   if (current) current = null;
   else ropes.pop();
@@ -246,7 +289,9 @@ document.getElementById("clearAll").addEventListener("click", () => {
 document.getElementById("exportBtn").addEventListener("click", () => {
   const json = JSON.stringify({
     zones: zones.map(r => r.join("")),
-    ropes: ropes
+    ropes: ropes,
+    buoys: buoys,
+    path: path
   }) + "\n";
   const a = document.createElement("a");
   a.href = URL.createObjectURL(new Blob([json], { type: "application/json" }));
@@ -263,6 +308,7 @@ document.getElementById("importFile").addEventListener("change", ev => {
     zones = c.zones.map(r => r.split(""));
     ropes = c.ropes || [];
     buoys = c.buoys || [];
+    path = c.path || [];
     current = null;
     render();
   });

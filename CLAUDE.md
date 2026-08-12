@@ -38,8 +38,9 @@ Mesen.exe --testrunner --timeout=30 <rom> <script.lua>   # arg order-free
   `endFrame` callback, save PNGs at target frame counts (see git history:
   multishot.lua / farshot.lua). Claude can Read the PNGs to verify visually.
 - **Scripted controller input does NOT work in testrunner mode.** To test
-  driving, flip `#define AUTOPILOT 1` in `game/src/main.c` (injects held
-  KEY_B) and rebuild; ALWAYS set back to 0 for release builds.
+  driving, flip `#define AUTOPILOT 1` in `game/src/main.c` (steers around
+  the racing-line waypoints at full throttle — laps in ~750-900 ticks) and
+  rebuild; ALWAYS set back to 0 for release builds.
 - The on-screen debug UI is the other half of verification: X/Y/H/V, BUILD
   profiler (262 lines/rebuild is the baseline), PH phase, WET/AIR, K/S/V
   physics row. If numbers look wrong in a screenshot, trust them over vibes.
@@ -93,7 +94,11 @@ tools/wave_params.json via the wave lab.
 
 ## State / not yet done
 
-- Buoy pass-sides (L/R) recorded but not judged; no laps/timing; no opponents;
+- Race mode in progress — see docs/PLAN.md "Race mode" for the agreed design
+  (waypoint progress, kinematic NPCs, rear-view art) and phase list. Phase 1
+  (racing line + player laps/timing + waypoint autopilot) is done; NPCs,
+  race flow, and multi-course are not.
+- Buoy pass-sides (L/R) recorded but not judged; no opponents yet;
   no sound (jam judges music — PVSnesLib has an .it tracker driver, unused);
   sand is collidable but there's no "run aground" state; no title screen.
 - PAL: accepted trade = runs slower (30Hz loop becomes 25Hz); must still boot.

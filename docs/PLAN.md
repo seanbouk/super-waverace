@@ -70,3 +70,40 @@ Key insight: **bake the raycast at build time**. The per-scanline math never nee
 6. Later (post-phase-3): camera height/pitch changes need multiple table banks or runtime table interpolation — deferred until the ship/controls phase
 
 Known hardware quirk to handle: Mode 7 matrix registers are write-twice 8-bit; HDMA tables must be laid out accordingly (two-writes-per-register mode).
+
+---
+
+## Race mode (Aug 2026): 3-lap race, player + 3 NPC racers
+
+Design decisions (agreed):
+
+- **Progress = racing-line waypoints.** One ordered polyline authored in the
+  course painter (`path` in course.json) drives lap counting, position
+  ranking (`lap x N + nextWaypoint`, tie-break distance-to-next), NPC
+  steering, and start placement. No painted sector map, no extra ROM.
+- **NPCs are kinematic followers**, not physics clones: steer along the line
+  with per-racer speed/cornering profiles + the collision probe. Visually
+  they are "moving buoys with ski art" — the buoy projection path (rowDepth,
+  hardware divider, scale ladder, surface-row anchoring, waterline window)
+  is reused as-is, so wave bob comes free.
+- **Rear-view NPC art only** (4-5 sizes + lean, hflip free). Multi-heading
+  art deferred until head-on passes prove it's needed.
+- **One course first**; multi-course loader (bake N course.json → tiles/map/
+  collision blobs + VRAM reload between races) is the last phase.
+
+Phases (each headless-verifiable in Mesen; ✅ = done):
+
+1. ✅ **Racing line + player progress** — painter path tool, bake exports
+   pathX/pathY, next-waypoint/lap/lap-time tracking, and AUTOPILOT upgraded
+   from "hold B" to a waypoint chaser (cross-product steering, corner
+   throttle release) — deliberately the seed of the NPC brain. Verified:
+   autopilot laps continuously, ~750-900 ticks/lap, threads both gates.
+2. **NPCs as moving buoys** — 3 kinematic racers on the line with distinct
+   speed profiles, placeholder buoy art, OAM slots after the buoys.
+3. **NPC ski art** — rear-view sheet at the scale-ladder sizes, lean frames.
+   Watch the 34-tiles-per-scanline limit at the start grid (stagger starts).
+4. **Race flow** — countdown/input lock, live positions, 3-lap finish,
+   results; race UI replaces the debug rows (debug behind a #define).
+5. **Gate judging / penalties** (optional) — waypoints already carry the
+   gate geometry; check crossing side against buoyType.
+6. **Multi-course** — bake N courses, runtime loader, course select.

@@ -494,7 +494,7 @@ def load_course():
     zones = c["zones"]
     assert len(zones) == 128 and all(len(r) == 128 for r in zones), \
         "course zones must be 128x128"
-    return zones, c.get("ropes", []), c.get("buoys", [])
+    return zones, c.get("ropes", []), c.get("buoys", []), c.get("path", [])
 
 
 def compose_canvas(pat, course):
@@ -512,7 +512,7 @@ def compose_canvas(pat, course):
     if not course:
         return canvas, coll
 
-    zones, ropes, buoys = course
+    zones, ropes, buoys = course[:3]
 
     def water(cy, cx):
         return zones[cy % 128][cx % 128] == "w"
@@ -780,8 +780,8 @@ def main():
     palette[SHAL_BLUE] = max((palette[rs + i] for i in range(rc)), key=sum)
     course = load_course()
     if course:
-        print("course: assets/course.json ({0} ropes, {1} buoys)".format(
-            len(course[1]), len(course[2])))
+        print("course: assets/course.json ({0} ropes, {1} buoys, {2} waypoints)"
+              .format(len(course[1]), len(course[2]), len(course[3])))
     canvas, coll = compose_canvas(pat, course)
     # EXTBG: set bit 7 on course pixels -> they render via BG2-high (above
     # BG1, colour-math-free); colour comes from the low 7 bits so the
@@ -909,6 +909,7 @@ def main():
 #define WAVE_RAW_STRIDE 448
 #define WAVE_PC7_SIZE {{PC7SIZE}}
 #define WAVE_BUOY_COUNT {{NBUOYS}}
+#define WAVE_PATH_COUNT {{NPATH}}
 #define WAVE_UI_LINES {4}
 #define WAVE_BASE_ROLL 64
 #define WAVE_STEPS_PER_TEXEL {5}
@@ -925,13 +926,16 @@ extern s8 waveSurfH[WAVE_PHASES];
 extern u16 buoyX[WAVE_BUOY_COUNT + 1];
 extern u16 buoyY[WAVE_BUOY_COUNT + 1];
 extern u8 buoyType[WAVE_BUOY_COUNT + 1];
+extern u16 pathX[WAVE_PATH_COUNT + 1];
+extern u16 pathY[WAVE_PATH_COUNT + 1];
 
 void waveTablesInit(void);
 void waveRotateStep(u8 offset);
 
 #endif
 """.replace("{{PC7SIZE}}", str(len(pc7))).replace("{{NBUOYS}}",
-             str(len(course[2]) if course else 0)).format(phases, tick_shift, rot_count, rot_frames, UI_LINES,
+             str(len(course[2]) if course else 0)).replace("{{NPATH}}",
+             str(len(course[3]) if course else 0)).format(phases, tick_shift, rot_count, rot_frames, UI_LINES,
            round(256.0 * phases / P["wavelength"]), phases * 256 - 1,
            # screen px per world texel at the ski's distance, x2 for drama,
            # in 4.4 fixed point
@@ -947,7 +951,8 @@ void waveRotateStep(u8 offset);
         f.write("u8 waveSky[WAVE_PHASES];\n")
         f.write("u8 waveSkiRow[WAVE_PHASES];\ns8 waveSurfH[WAVE_PHASES];\n\n")
         f.write("u16 buoyX[WAVE_BUOY_COUNT + 1];\nu16 buoyY[WAVE_BUOY_COUNT + 1];\n")
-        f.write("u8 buoyType[WAVE_BUOY_COUNT + 1];\n\n")
+        f.write("u8 buoyType[WAVE_BUOY_COUNT + 1];\n")
+        f.write("u16 pathX[WAVE_PATH_COUNT + 1];\nu16 pathY[WAVE_PATH_COUNT + 1];\n\n")
         f.write("void waveTablesInit(void)\n{\n")
         for name in ("tm", "g"):
             f.write("\n".join(inits[name]) + "\n")
@@ -962,6 +967,9 @@ void waveRotateStep(u8 offset);
                 f.write("    buoyX[{0}] = {1};\n".format(i, (bx * 4) & 4095))
                 f.write("    buoyY[{0}] = {1};\n".format(i, (by * 4) & 4095))
                 f.write("    buoyType[{0}] = {1};\n".format(i, 1 if side == "R" else 0))
+            for i, (px, py) in enumerate(course[3]):
+                f.write("    pathX[{0}] = {1};\n".format(i, (px * 4) & 4095))
+                f.write("    pathY[{0}] = {1};\n".format(i, (py * 4) & 4095))
         f.write("}\n\n")
         f.write("void waveRotateStep(u8 offset)\n{\n    switch (offset)\n    {\n")
         for o in range(rot_count):
