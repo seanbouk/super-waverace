@@ -98,8 +98,13 @@ Phases (each headless-verifiable in Mesen; ✅ = done):
    from "hold B" to a waypoint chaser (cross-product steering, corner
    throttle release) — deliberately the seed of the NPC brain. Verified:
    autopilot laps continuously, ~750-900 ticks/lap, threads both gates.
-2. **NPCs as moving buoys** — 3 kinematic racers on the line with distinct
-   speed profiles, placeholder buoy art, OAM slots after the buoys.
+2. ✅ **NPCs as moving buoys** — 3 kinematic racers on the line with distinct
+   speed profiles, placeholder buoy art, OAM sprites 5-7. Buoy projection
+   extracted into projectPoint()/drawLadder() and shared; npcTrig helper in
+   camera.asm serves sin/cos from the far-ROM table. Verified: all three
+   visible at correct ladder scales from the grid, wrap laps continuously.
+   Known gap for phase 4: NPC lap pace (~40-50s) trails a well-driven
+   player (~24s) — speeds/rubber-banding are tuning knobs, not bugs.
 3. **NPC ski art** — rear-view sheet at the scale-ladder sizes, lean frames.
    Watch the 34-tiles-per-scanline limit at the start grid (stagger starts).
 4. **Race flow** — countdown/input lock, live positions, 3-lap finish,

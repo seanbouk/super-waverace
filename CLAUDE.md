@@ -95,10 +95,11 @@ tools/wave_params.json via the wave lab.
 ## State / not yet done
 
 - Race mode in progress — see docs/PLAN.md "Race mode" for the agreed design
-  (waypoint progress, kinematic NPCs, rear-view art) and phase list. Phase 1
-  (racing line + player laps/timing + waypoint autopilot) is done; NPCs,
-  race flow, and multi-course are not.
-- Buoy pass-sides (L/R) recorded but not judged; no opponents yet;
+  (waypoint progress, kinematic NPCs, rear-view art) and phase list. Done:
+  phase 1 (racing line + player laps/timing + waypoint autopilot) and
+  phase 2 (3 kinematic NPCs, buoy placeholder art, sprites 5-7). Next:
+  NPC ski art, race flow (countdown/positions/results), multi-course.
+- Buoy pass-sides (L/R) recorded but not judged;
   no sound (jam judges music — PVSnesLib has an .it tracker driver, unused);
   sand is collidable but there's no "run aground" state; no title screen.
 - PAL: accepted trade = runs slower (30Hz loop becomes 25Hz); must still boot.

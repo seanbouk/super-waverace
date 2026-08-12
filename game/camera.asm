@@ -321,7 +321,7 @@ buildDone:
 
 ;----------------------------------------------------------------------------
 ;----------------------------------------------------------------------------
-; rowDepth — find the lowest screen row whose surface distance >= rdV
+; rowDepth ï¿½ find the lowest screen row whose surface distance >= rdV
 ; (d is non-increasing downward). in: rdV, camPhaseOff; out: rdRow (0xFFFF
 ; if none), rdD = distance actually shown at that row (occlusion check).
 rowDepth:
@@ -356,7 +356,46 @@ _rd_done:
     rtl
 
 ;----------------------------------------------------------------------------
-; collProbe — read the course collision byte-map (C cannot do far ROM reads)
+; npcTrig - signed sin/cos of an NPC heading from the camera's sine table
+; (C cannot do far ROM reads). in: npcA (u8, 256 binary degrees);
+; out: npcSin, npcCos (s16, +/-127 = 1.0) - same convention as camSin/CosVal
+npcTrig:
+    php
+    rep #$30
+    phx
+    lda.l npcA
+    and #$00FF
+    tax
+    sep #$20
+    lda.l camSinTab,x
+    rep #$20
+    and #$00FF
+    bit #$0080
+    beq _np_sin_pos
+    ora #$FF00
+_np_sin_pos:
+    sta.l npcSin
+    lda.l npcA
+    and #$00FF
+    clc
+    adc #64
+    and #$00FF
+    tax
+    sep #$20
+    lda.l camSinTab,x
+    rep #$20
+    and #$00FF
+    bit #$0080
+    beq _np_cos_pos
+    ora #$FF00
+_np_cos_pos:
+    sta.l npcCos
+    plx
+    plp
+    rtl
+
+;----------------------------------------------------------------------------
+; collProbe ï¿½ read the course collision byte-map (C cannot do far ROM reads)
 ; in: collOfs = cellY*128 + cellX; out: collVal = 0 water / 1 sand / 2 rope
 collProbe:
     php

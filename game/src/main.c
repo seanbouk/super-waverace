@@ -27,6 +27,7 @@ extern char ski_tiles, ski_pal;
 extern void buildCamTables(void);
 extern void collProbe(void); // camera.asm: reads the collision byte-map
 extern void rowDepth(void);  // camera.asm: screen row for a view depth
+extern void npcTrig(void);   // camera.asm: npcA (u8 heading) -> npcSin/npcCos
 
 // ---- camera state shared with camera.asm (accessed via long addressing) ----
 u8 camTheta;
@@ -105,6 +106,19 @@ u8 bi;
 u8 nextWp, lapCount;
 u16 lapTicks, lastLap;
 s16 wpdx, wpdy, apc, apd, apu;
+// NPC racers (phase 2): kinematic waypoint followers, buoy placeholder art,
+// OAM sprites 5..7 (after the ski and the 4 course buoys)
+#define NPC_COUNT 3
+#define NPC_TURN 2 // binary degrees/loop = the player's full turn rate
+u16 npcX[NPC_COUNT], npcY[NPC_COUNT]; // world units, wrap & 4095
+s16 npcFX[NPC_COUNT], npcFY[NPC_COUNT]; // sub-unit accumulators (8.8)
+u16 npcSpd[NPC_COUNT];                  // cruise speed, 8.8 world/loop
+u8 npcTheta[NPC_COUNT], npcWp[NPC_COUNT], npcLap[NPC_COUNT];
+u8 npcA; // npcTrig interface
+s16 npcSin, npcCos;
+// projectPoint i/o
+u16 pjX, pjY, pjV, pjCol;
+u8 pjOk;
 
 //---------------------------------------------------------------------------------
 static u16 scanline(void)
@@ -153,6 +167,98 @@ static void buildWinTab(u8 row)
     *w++ = 0x00;
     *w++ = 0xFF;
     *w = 0x00;
+}
+
+//---------------------------------------------------------------------------------
+// project a world point onto the screen the way buoys render: view-space
+// transform, surface-row lookup (rides the occluding crest), hardware-divider
+// column. in: pjX, pjY (world units). out: pjOk, and when visible pjV (view
+// depth: scale ladder), pjCol (screen centre x), rdRow (surface row); pushes
+// winRow down so the waterline window clips whatever gets drawn there.
+static void projectPoint(void)
+{
+    pjOk = 0;
+    bdx = (s16)((pjX - camPX) & 4095);
+    if (bdx > 2048)
+        bdx -= 4096;
+    bdy = (s16)((pjY - camPY) & 4095);
+    if (bdy > 2048)
+        bdy -= 4096;
+    if (bdx > 700 || bdx < -700 || bdy > 700 || bdy < -700)
+        return;
+    // full-precision view transform: split each delta so the 16-bit products
+    // stay exact (a plain >>4 pre-shift quantised motion to 16-unit jumps)
+    bh = bdx >> 4;
+    bl = bdx & 15;
+    bv = ((bh * camSinVal) >> 3) + ((bl * camSinVal) >> 7);
+    bu = ((bh * camCosVal) >> 3) + ((bl * camCosVal) >> 7);
+    bh = bdy >> 4;
+    bl = bdy & 15;
+    bv += ((bh * camCosVal) >> 3) + ((bl * camCosVal) >> 7);
+    bu -= ((bh * camSinVal) >> 3) + ((bl * camSinVal) >> 7);
+    if (bv < 176 || bv > 620)
+        return;
+    bau = bu < 0 ? -bu : bu;
+    if (bau > 480)
+        return;
+    rdV = (u16)bv;
+    rowDepth(); // surface row for this depth, and what's shown there
+    if (rdRow == 0xFFFF)
+        return;
+    // never hide behind waves: rdRow is the occluding crest's row when the
+    // point is tucked behind one, so it rides up onto the wave in front -
+    // correct for waves half its height
+    // screen column: px = u * 221 / v via the hardware divider
+    bq = (u16)bau << 6;
+    REG_WRDIVL = bq & 0xFF;
+    REG_WRDIVH = bq >> 8;
+    REG_WRDIVB = (u8)(((u16)bv * 74) >> 8);
+    dly = tick + phase; // cover the 16-cycle divide latency
+    dly += winRow;
+    bq = REG_RDDIV;
+    if (bq > 140)
+        return;
+    bq = bu < 0 ? 128 - bq : 128 + bq;
+    if (bq < 12 || bq > 232)
+        return;
+    if (rdRow > winRow)
+        winRow = (u16)rdRow;
+    pjV = (u16)bv;
+    pjCol = bq;
+    pjOk = 1;
+}
+
+//---------------------------------------------------------------------------------
+// draw OAM sprite `oid` (byte-offset id!) at the projected point: five scales,
+// all bottom-anchored to the surface row so a scale change never reads as
+// movement. `right` picks the red R art over the yellow L art.
+static void drawLadder(u16 oid, u8 right)
+{
+    if (pjV < 192)
+    {
+        oamSet(oid, pjCol - 16, rdRow - 31, 3, 0, 0, right ? 12 : 8, 0);
+        oamSetEx(oid, OBJ_LARGE, OBJ_SHOW);
+    }
+    else if (pjV < 268)
+    {
+        oamSet(oid, pjCol - 16, rdRow - 31, 3, 0, 0, right ? 68 : 64, 0);
+        oamSetEx(oid, OBJ_LARGE, OBJ_SHOW);
+    }
+    else if (pjV < 382)
+    {
+        oamSet(oid, pjCol - 8, rdRow - 15, 3, 0, 0, right ? 74 : 72, 0);
+        oamSetEx(oid, OBJ_SMALL, OBJ_SHOW);
+    }
+    else if (pjV < 534)
+    {
+        oamSet(oid, pjCol - 8, rdRow - 15, 3, 0, 0, right ? 78 : 76, 0);
+        oamSetEx(oid, OBJ_SMALL, OBJ_SHOW);
+    }
+    else
+    {
+        oamSet(oid, pjCol - 8, rdRow - 15, 3, 0, 0, right ? 106 : 104, 0);
+        oamSetEx(oid, OBJ_SMALL, OBJ_SHOW);
+    }
 }
 
 //---------------------------------------------------------------------------------
@@ -274,6 +380,24 @@ int main(void)
     lastLap = 0;
     skiWX = camPX; // autopilot reads these before the first physics pass
     skiWY = camPY + WAVE_SKI_DIST;
+    // NPC grid: just ahead of the ski (world y: ski starts at 968), inside
+    // the gate span, staggered in depth so no scanline drowns in sprites.
+    // They open on waypoint 2 (gate 2) - waypoints 0/1 are behind them.
+    for (bi = 0; bi < NPC_COUNT; bi++)
+    {
+        npcTheta[bi] = 0;
+        npcFX[bi] = 0;
+        npcFY[bi] = 0;
+        npcWp[bi] = 2;
+        npcLap[bi] = 0;
+        npcY[bi] = 1020 + (bi << 6);
+    }
+    npcX[0] = 1950;
+    npcX[1] = 2148;
+    npcX[2] = 2050;
+    npcSpd[0] = 2050; // cruise speeds (8.8 world/loop; player tops ~2300)
+    npcSpd[1] = 2175;
+    npcSpd[2] = 2300;
     buildWinTab(200);
 
 // build-time debug: drive itself (the emulator test runner has no input)
@@ -482,6 +606,80 @@ int main(void)
             }
         }
         lapTicks++;
+
+        // ---- NPC racers: kinematic waypoint followers (the autopilot's
+        // steering brain), collision-probed so they cannot cross land ----
+        if (tick > 20) // same spawn grace as the player's throttle
+            for (bi = 0; bi < NPC_COUNT; bi++)
+            {
+                wpdx = (s16)((pathX[npcWp[bi]] - npcX[bi]) & 4095);
+                if (wpdx > 2048)
+                    wpdx -= 4096;
+                wpdy = (s16)((pathY[npcWp[bi]] - npcY[bi]) & 4095);
+                if (wpdy > 2048)
+                    wpdy -= 4096;
+                npcA = npcTheta[bi];
+                npcTrig();
+                apc = (wpdy >> 4) * npcSin - (wpdx >> 4) * npcCos;
+                apd = (wpdx >> 4) * npcSin + (wpdy >> 4) * npcCos;
+                if (apd < 0)
+                {
+                    // target behind: commit to one side
+                    if (apc <= 0)
+                        npcTheta[bi] += NPC_TURN;
+                    else
+                        npcTheta[bi] -= NPC_TURN;
+                }
+                else if (apc < -(apd >> 3))
+                    npcTheta[bi] += NPC_TURN;
+                else if (apc > (apd >> 3))
+                    npcTheta[bi] -= NPC_TURN;
+                // corner slowdown: half cruise past ~45 deg off the line
+                apu = apc < 0 ? -apc : apc;
+                bq = npcSpd[bi];
+                if (apd < 0 || apu > apd)
+                    bq >>= 1;
+                // velocity along the (pre-turn) heading; >>4 before the
+                // product keeps it 16-bit, then 8.8 accumulators as fracX
+                apu = (s16)(bq >> 4);
+                apc = (apu * npcSin) >> 3;
+                apd = (apu * npcCos) >> 3;
+                npcFX[bi] += apc;
+                stepX = npcFX[bi] >> 8;
+                npcFX[bi] &= 0x00FF;
+                if (stepX)
+                {
+                    collOfs = ((npcY[bi] >> 5) & 127) * 128
+                              + (((u16)(npcX[bi] + stepX) >> 5) & 127);
+                    collProbe();
+                    if (!collVal)
+                        npcX[bi] = (npcX[bi] + stepX) & 4095;
+                }
+                npcFY[bi] += apd;
+                stepY = npcFY[bi] >> 8;
+                npcFY[bi] &= 0x00FF;
+                if (stepY)
+                {
+                    collOfs = (((u16)(npcY[bi] + stepY) >> 5) & 127) * 128
+                              + ((npcX[bi] >> 5) & 127);
+                    collProbe();
+                    if (!collVal)
+                        npcY[bi] = (npcY[bi] + stepY) & 4095;
+                }
+                if (wpdx < 0)
+                    wpdx = -wpdx;
+                if (wpdy < 0)
+                    wpdy = -wpdy;
+                if (wpdx + wpdy < 200)
+                {
+                    npcWp[bi]++;
+                    if (npcWp[bi] >= WAVE_PATH_COUNT)
+                    {
+                        npcWp[bi] = 0;
+                        npcLap[bi]++;
+                    }
+                }
+            }
 #endif
 
         // split velocity into forward/side components along the heading
@@ -547,87 +745,27 @@ int main(void)
 #if WAVE_BUOY_COUNT > 0
         for (bi = 0; bi < WAVE_BUOY_COUNT; bi++)
         {
-            bdx = (s16)((buoyX[bi] - camPX) & 4095);
-            if (bdx > 2048)
-                bdx -= 4096;
-            bdy = (s16)((buoyY[bi] - camPY) & 4095);
-            if (bdy > 2048)
-                bdy -= 4096;
-            if (bdx > 700 || bdx < -700 || bdy > 700 || bdy < -700)
-                goto hide;
-            // full-precision view transform: split each delta so the
-            // 16-bit products stay exact (a plain >>4 pre-shift quantised
-            // buoy motion to 16-world-unit jumps)
-            bh = bdx >> 4;
-            bl = bdx & 15;
-            bv = ((bh * camSinVal) >> 3) + ((bl * camSinVal) >> 7);
-            bu = ((bh * camCosVal) >> 3) + ((bl * camCosVal) >> 7);
-            bh = bdy >> 4;
-            bl = bdy & 15;
-            bv += ((bh * camCosVal) >> 3) + ((bl * camCosVal) >> 7);
-            bu -= ((bh * camSinVal) >> 3) + ((bl * camSinVal) >> 7);
-            if (bv < 176 || bv > 620)
-                goto hide;
-            bau = bu < 0 ? -bu : bu;
-            if (bau > 480)
-                goto hide;
-            rdV = (u16)bv;
-            rowDepth(); // surface row for this depth, and what's shown there
-            if (rdRow == 0xFFFF)
-                goto hide;
-            // never hide behind waves: rdRow is the occluding crest's row
-            // when the buoy is tucked behind one, so the buoy simply rides
-            // up onto the wave in front - correct for waves half its height
-            // screen column: px = u * 221 / v via the hardware divider
-            bq = (u16)bau << 6;
-            REG_WRDIVL = bq & 0xFF;
-            REG_WRDIVH = bq >> 8;
-            REG_WRDIVB = (u8)(((u16)bv * 74) >> 8);
-            dly = tick + phase; // cover the 16-cycle divide latency
-            dly += winRow;
-            bq = REG_RDDIV;
-            if (bq > 140)
-                goto hide;
-            bq = bu < 0 ? 128 - bq : 128 + bq;
-            if (bq < 12 || bq > 232)
-                goto hide;
-            // five scales, all bottom-anchored to the surface row so a
-            // scale change never reads as movement
-            if (bv < 192)
-            {
-                oamSet((1 + bi) << 2, bq - 16, rdRow - 31, 3, 0, 0,
-                       buoyType[bi] ? 12 : 8, 0);
-                oamSetEx((1 + bi) << 2, OBJ_LARGE, OBJ_SHOW);
-            }
-            else if (bv < 268)
-            {
-                oamSet((1 + bi) << 2, bq - 16, rdRow - 31, 3, 0, 0,
-                       buoyType[bi] ? 68 : 64, 0);
-                oamSetEx((1 + bi) << 2, OBJ_LARGE, OBJ_SHOW);
-            }
-            else if (bv < 382)
-            {
-                oamSet((1 + bi) << 2, bq - 8, rdRow - 15, 3, 0, 0,
-                       buoyType[bi] ? 74 : 72, 0);
-                oamSetEx((1 + bi) << 2, OBJ_SMALL, OBJ_SHOW);
-            }
-            else if (bv < 534)
-            {
-                oamSet((1 + bi) << 2, bq - 8, rdRow - 15, 3, 0, 0,
-                       buoyType[bi] ? 78 : 76, 0);
-                oamSetEx((1 + bi) << 2, OBJ_SMALL, OBJ_SHOW);
-            }
+            pjX = buoyX[bi];
+            pjY = buoyY[bi];
+            projectPoint();
+            if (pjOk)
+                drawLadder((1 + bi) << 2, buoyType[bi]);
             else
-            {
-                oamSet((1 + bi) << 2, bq - 8, rdRow - 15, 3, 0, 0,
-                       buoyType[bi] ? 106 : 104, 0);
-                oamSetEx((1 + bi) << 2, OBJ_SMALL, OBJ_SHOW);
-            }
-            if (rdRow > winRow)
-                winRow = (u16)rdRow;
-            continue;
-        hide:
-            oamSetVisible((1 + bi) << 2, OBJ_HIDE);
+                oamSetVisible((1 + bi) << 2, OBJ_HIDE);
+        }
+#endif
+#if WAVE_PATH_COUNT > 0
+        // NPC racers ride the exact same pipeline (placeholder buoy art
+        // until the rear-view ski sheet lands in phase 3)
+        for (bi = 0; bi < NPC_COUNT; bi++)
+        {
+            pjX = npcX[bi];
+            pjY = npcY[bi];
+            projectPoint();
+            if (pjOk)
+                drawLadder((5 + bi) << 2, (u8)(bi & 1));
+            else
+                oamSetVisible((5 + bi) << 2, OBJ_HIDE);
         }
 #endif
         buildWinTab((u8)winRow);
@@ -666,6 +804,13 @@ int main(void)
             uiPrintS16(15, 2, skiVv, 4);
             uiPrint(21, 2, "W");
             uiPrintNum(22, 2, waterRow, 3);
+#if WAVE_PATH_COUNT > 0
+            // NPC 0 progress (debug): lap.waypoint
+            uiPrint(26, 2, "N");
+            uiPrintNum(27, 2, npcLap[0], 1);
+            uiPrint(28, 2, ".");
+            uiPrintNum(29, 2, npcWp[0], 2);
+#endif
         }
 
         WaitForVBlank();
