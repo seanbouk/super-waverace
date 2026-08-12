@@ -91,7 +91,7 @@ u8 rotTimer, rotOfs;
 u8 skip, waterRow, inWater, wasInWater;
 s16 prevSin, prevCos;
 u16 profStartLine, profLines, profFrames;
-u16 vbl0;
+u16 vbl0, loopVbl, loopFrames;
 // collision
 u16 collOfs;
 u8 collVal, collHere;
@@ -106,16 +106,40 @@ u8 bi;
 u8 nextWp, lapCount;
 u16 lapTicks, lastLap;
 s16 wpdx, wpdy, apc, apd, apu;
-// NPC racers (phase 2): kinematic waypoint followers, buoy placeholder art,
+// NPC racers (phase 2): kinematic waypoint followers,
 // OAM sprites 5..7 (after the ski and the 4 course buoys)
 #define NPC_COUNT 3
 #define NPC_TURN 2 // binary degrees/loop = the player's full turn rate
 u16 npcX[NPC_COUNT], npcY[NPC_COUNT]; // world units, wrap & 4095
 s16 npcFX[NPC_COUNT], npcFY[NPC_COUNT]; // sub-unit accumulators (8.8)
-u16 npcSpd[NPC_COUNT];                  // cruise speed, 8.8 world/loop
+u16 npcSpd[NPC_COUNT];                  // current speed, 8.8 world/loop
 u8 npcTheta[NPC_COUNT], npcWp[NPC_COUNT], npcLap[NPC_COUNT];
 u8 npcA; // npcTrig interface
 s16 npcSin, npcCos;
+// race flow (phase 4): countdown -> racing -> finished
+#define RACE_LAPS 3
+// schedule rubber-banding: four speed tiers picked from (should this racer
+// still be ahead of the player?) x (how far ahead is it really?).
+// Calibrated from position traces: the REAL player pace is ~120 world/s
+// (thrust only bites in water, corners coast) which matches npcSpd ~1700,
+// NOT the nominal top speed. HOLD is deliberately slower than player pace
+// so a racer passed on schedule drifts back and never re-passes.
+#define SPD_FAST 2000   // behind schedule: catch up (~140 world/s)
+#define SPD_CRUISE 1700 // holding its scheduled place (~player pace)
+#define SPD_SLOW 1200   // fade: let the player by decisively (~85)
+#define SPD_HOLD 1500   // keep contact without racing (~105)
+u8 raceState;           // 0 countdown, 1 racing, 2 finished
+u8 racePos, finPos, posAcc, goTimer;
+u8 npcFade[NPC_COUNT]; // player lap at which this racer starts fading
+u16 npcDist[NPC_COUNT], pDist, spdTgt;
+s16 rubDiff;
+// race + lap clocks: REAL frames from snes_vblank_count (the loop rate
+// varies, so loop ticks are not time); digits maintained incrementally
+u8 rMin, rSecT, rSecU, rTick; // rTick = frame accum (also counts the countdown)
+u16 lapFr;                    // frames this lap
+u8 lastLapSec, lastLapTenth;
+// set to 1 to restore the dev readouts (position/physics/profiler)
+#define DEBUG_UI 0
 // projectPoint i/o
 u16 pjX, pjY, pjV, pjCol;
 u8 pjOk;
@@ -124,8 +148,10 @@ u8 pjOk;
 static u16 scanline(void)
 {
     u8 lo, hi;
-    (void)REG_STAT78;
-    (void)REG_SLHV;
+    // assign the latch reads: tcc drops (void)-cast volatile reads, which
+    // left OPVCT unlatched and this function returning garbage
+    lo = REG_STAT78; // reset the latch-read flip-flop
+    lo = REG_SLHV;   // latch H/V counters
     lo = REG_OPVCT;
     hi = REG_OPVCT & 1;
     return ((u16)hi << 8) | lo;
@@ -426,14 +452,35 @@ int main(void)
         npcFY[bi] = 0;
         npcWp[bi] = 2;
         npcLap[bi] = 0;
+        npcDist[bi] = 0;
         npcY[bi] = 1020 + (bi << 6);
     }
     npcX[0] = 1950;
     npcX[1] = 2148;
     npcX[2] = 2050;
-    npcSpd[0] = 2050; // cruise speeds (8.8 world/loop; player tops ~2300)
-    npcSpd[1] = 2175;
-    npcSpd[2] = 2300;
+    // the race is scripted to unwind: green fades two laps in, purple one
+    // lap in, orange from the gun - pass one racer per lap
+    npcFade[0] = 2;
+    npcFade[1] = 1;
+    npcFade[2] = 0;
+    npcSpd[0] = SPD_CRUISE;
+    npcSpd[1] = SPD_CRUISE;
+    npcSpd[2] = SPD_SLOW;
+    raceState = 0;
+    racePos = 4;
+    finPos = 0;
+    posAcc = 0;
+    goTimer = 0;
+    pDist = 0;
+    rMin = 0;
+    rSecT = 0;
+    rSecU = 0;
+    rTick = 0;
+    lapFr = 0;
+    lastLapSec = 0;
+    lastLapTenth = 0;
+    loopVbl = snes_vblank_count; // BSS garbage would poison the first
+    loopFrames = 0;              // countdown accumulation
     buildWinTab(200);
 
 // build-time debug: drive itself (the emulator test runner has no input)
@@ -441,6 +488,10 @@ int main(void)
 
     while (1)
     {
+        // the loop takes a variable 3-4 vblanks (see CLAUDE.md), so ALL
+        // race timing accumulates real frames, never loop ticks
+        loopFrames = snes_vblank_count - loopVbl;
+        loopVbl = snes_vblank_count;
         pad0 = padsCurrent(0);
 #if AUTOPILOT
 #if WAVE_PATH_COUNT > 0
@@ -479,6 +530,49 @@ int main(void)
         pad0 |= KEY_B;
 #endif
 #endif
+
+        // ---- race flow: countdown holds the engines, GO releases them,
+        // the finish cuts them again (masks the autopilot too) ----
+        if (raceState == 0)
+        {
+            pad0 &= ~(KEY_B | KEY_Y);
+            rTick += (u8)loopFrames; // counting down in real frames
+            if (rTick >= 240)        // 4 seconds: 3.. 2.. 1.. GO
+            {
+                raceState = 1;
+                goTimer = 30;
+                lapTicks = 0;
+                rTick = 0;
+                lapFr = 0;
+            }
+        }
+        else
+        {
+            if (goTimer)
+                goTimer--;
+            if (raceState == 2)
+                pad0 &= ~(KEY_B | KEY_Y);
+            else
+            {
+                rTick += (u8)loopFrames;
+                if (rTick >= 60)
+                {
+                    rTick -= 60;
+                    rSecU++;
+                    if (rSecU == 10)
+                    {
+                        rSecU = 0;
+                        rSecT++;
+                        if (rSecT == 6)
+                        {
+                            rSecT = 0;
+                            rMin++;
+                        }
+                    }
+                }
+                lapFr += loopFrames;
+            }
+        }
 
         // ---- steering: turn authority scales with speed (no speed, no
         // rudder bite); full rate from ~20% of top speed upward ----
@@ -630,7 +724,8 @@ int main(void)
             wpdy -= 4096;
         if (wpdy < 0)
             wpdy = -wpdy;
-        if (wpdx + wpdy < 200)
+        pDist = (u16)(wpdx + wpdy);
+        if (pDist < 200)
         {
             nextWp++;
             if (nextWp >= WAVE_PATH_COUNT)
@@ -639,13 +734,22 @@ int main(void)
                 lapCount++;
                 lastLap = lapTicks;
                 lapTicks = 0;
+                lastLapSec = (u8)(lapFr / 60); // division: once per lap only
+                lastLapTenth = (u8)((lapFr % 60) / 6);
+                lapFr = 0;
+                if (raceState == 1 && lapCount >= RACE_LAPS)
+                {
+                    raceState = 2; // chequered flag
+                    finPos = racePos;
+                }
             }
         }
         lapTicks++;
 
         // ---- NPC racers: kinematic waypoint followers (the autopilot's
         // steering brain), collision-probed so they cannot cross land ----
-        if (tick > 20) // same spawn grace as the player's throttle
+        posAcc = 1;
+        if (raceState) // frozen on the grid until GO
             for (bi = 0; bi < NPC_COUNT; bi++)
             {
                 wpdx = (s16)((pathX[npcWp[bi]] - npcX[bi]) & 4095);
@@ -706,7 +810,8 @@ int main(void)
                     wpdx = -wpdx;
                 if (wpdy < 0)
                     wpdy = -wpdy;
-                if (wpdx + wpdy < 200)
+                npcDist[bi] = (u16)(wpdx + wpdy);
+                if (npcDist[bi] < 200)
                 {
                     npcWp[bi]++;
                     if (npcWp[bi] >= WAVE_PATH_COUNT)
@@ -715,7 +820,45 @@ int main(void)
                         npcLap[bi]++;
                     }
                 }
+                // schedule rubber-banding: is it ahead of the player?
+                rubDiff = (s16)(npcLap[bi] * WAVE_PATH_COUNT + npcWp[bi])
+                          - (s16)(lapCount * WAVE_PATH_COUNT + nextWp);
+                if (rubDiff > 0)
+                    apu = 1;
+                else if (rubDiff < 0)
+                    apu = 0;
+                else // same waypoint: nearer to it = ahead
+                    apu = npcDist[bi] < pDist ? 1 : 0;
+                if (apu)
+                    posAcc++;
+                // ...and should it still be, per its fade schedule? Gap
+                // caps keep the race close for players off autopilot pace:
+                // a scheduled leader never runs away, a faded racer never
+                // falls out of sight
+                if (lapCount < npcFade[bi])
+                {
+                    if (!apu)
+                        spdTgt = SPD_FAST; // behind schedule: catch up
+                    else if (rubDiff > 3)
+                        spdTgt = SPD_HOLD; // never run away from the player
+                    else
+                        spdTgt = SPD_CRUISE;
+                }
+                else
+                {
+                    // fading: keep SLOW until CLEARLY passed (a tie-boundary
+                    // equilibrium otherwise pins it to the player's tail)
+                    if (rubDiff >= -3)
+                        spdTgt = SPD_SLOW;
+                    else if (rubDiff < -10)
+                        spdTgt = SPD_CRUISE; // far back: stay in sight
+                    else
+                        spdTgt = SPD_HOLD;
+                }
+                npcSpd[bi] += (s16)(spdTgt - npcSpd[bi]) >> 3;
             }
+        if (raceState)
+            racePos = posAcc;
 #endif
 
         // split velocity into forward/side components along the heading
@@ -808,6 +951,7 @@ int main(void)
 
         if ((tick & 3) == 0)
         {
+#if DEBUG_UI
             uiPrint(0, 0, "X");
             uiPrintNum(1, 0, camPX & 4095, 4);
             uiPrint(6, 0, "Y");
@@ -830,6 +974,14 @@ int main(void)
             uiPrint(9, 1, "LN PH");
             uiPrintNum(14, 1, phase, 2);
             uiPrint(17, 1, inWater ? "WET" : "AIR");
+            uiPrint(27, 1, "F");
+            uiPrintNum(28, 1, loopFrames, 1);
+            // scanline costs: A = loop top to build start (logic),
+            // B = build end to WaitForVBlank (sprites/buoys/UI)
+            uiPrint(0, 0, "A");
+            uiPrintNum(1, 0, secA, 4);
+            uiPrint(6, 0, "B");
+            uiPrintNum(7, 0, secB, 4);
             // physics state, in 16ths of a texel: K = ski height,
             // S = water surface, V = vertical speed (8.8 raw)
             uiPrint(0, 2, "K");
@@ -846,6 +998,52 @@ int main(void)
             uiPrintNum(27, 2, npcLap[0], 1);
             uiPrint(28, 2, ".");
             uiPrintNum(29, 2, npcWp[0], 2);
+#endif
+#else
+            // ---- race HUD ----
+            uiPrint(0, 0, "LAP ");
+            uiPrintNum(4, 0, lapCount < RACE_LAPS ? lapCount + 1 : RACE_LAPS, 1);
+            uiPrint(5, 0, "/3");
+            uiPrint(11, 0, "POS ");
+            bq = raceState == 2 ? finPos : racePos;
+            uiPrintNum(15, 0, bq, 1);
+            if (bq == 1)
+                uiPrint(16, 0, "ST");
+            else if (bq == 2)
+                uiPrint(16, 0, "ND");
+            else if (bq == 3)
+                uiPrint(16, 0, "RD");
+            else
+                uiPrint(16, 0, "TH");
+            uiPrint(23, 0, "T");
+            uiPrintNum(24, 0, rMin, 1);
+            uiPrint(25, 0, ":");
+            uiPrintNum(26, 0, rSecT, 1);
+            uiPrintNum(27, 0, rSecU, 1);
+            // centre banner: countdown / GO! / FINISH!
+            if (raceState == 0)
+            {
+                uiPrint(13, 1, "       ");
+                if (rTick >= 180)
+                    uiPrint(15, 1, "1");
+                else if (rTick >= 120)
+                    uiPrint(15, 1, "2");
+                else if (rTick >= 60)
+                    uiPrint(15, 1, "3");
+            }
+            else if (goTimer)
+                uiPrint(14, 1, "GO!");
+            else if (raceState == 2)
+                uiPrint(13, 1, "FINISH!");
+            else
+                uiPrint(13, 1, "       ");
+            if (lapCount)
+            {
+                uiPrint(0, 2, "LAST LAP ");
+                uiPrintNum(9, 2, lastLapSec, 2);
+                uiPrint(11, 2, ".");
+                uiPrintNum(12, 2, lastLapTenth, 1);
+            }
 #endif
         }
 

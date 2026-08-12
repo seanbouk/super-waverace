@@ -538,6 +538,7 @@ def load_pattern():
 # ---- course: sand islands, shorelines, rope float-lines ----------------------
 # palette indices 8-13 (the course block in the colour map)
 SAND, SAND_SH, FOAM, WET_SAND, FLOAT_A, SHAL_BLUE, CALM, SHAL_SAND =     8, 9, 10, 11, 12, 13, 14, 15
+CHECK_DARK = 32  # start/finish checker black (BG-reserve palette block)
 COURSE_COLORS = {
     SAND: (232, 214, 164), SAND_SH: (212, 190, 142),
     FOAM: (250, 250, 244), WET_SAND: (186, 164, 118),
@@ -690,6 +691,25 @@ def compose_canvas(pat, course):
                 for fx in range(-2, 3):
                     if fx * fx + fy * fy <= 4:
                         canvas[cy * 8 + 3 + fy][cx * 8 + 3 + fx] = FLOAT_A
+
+    # Start/finish line: a checkered strip across the course at path[0],
+    # perpendicular to the opening racing-line segment (axis-snapped). It is
+    # texture art, so it floats on the swell like everything painted; no
+    # collision cells - skis drive straight over it.
+    path = course[3] if len(course) > 3 else []
+    if len(path) >= 2:
+        sx, sy = path[0]
+        dx = (path[1][0] - sx + 512) % 1024 - 512
+        dy = (path[1][1] - sy + 512) % 1024 - 512
+        HALF, THICK, CELL = 40, 6, 3  # texels; 2 rows of 3-texel checkers
+        for t in range(-HALF, HALF):
+            for s in range(THICK):
+                if abs(dy) >= abs(dx):  # racing N-S: strip runs E-W
+                    x, y = (sx + t) & 1023, (sy - THICK // 2 + s) & 1023
+                else:
+                    x, y = (sx - THICK // 2 + s) & 1023, (sy + t) & 1023
+                canvas[y][x] = FOAM if ((t // CELL) + (s // CELL)) & 1 \
+                    else CHECK_DARK
     return canvas, coll
 
 
@@ -773,8 +793,10 @@ def build_mode7_data(canvas, palette):
 
     raw_unique = len(tiles)
     if raw_unique > 256:
-        # class 1 = contains course colours (shore foam, sand, ropes, floats)
-        classes = [1 if any(8 <= (px & 0x7F) <= 15 for px in t) else 0 for t in tiles]
+        # class 1 = contains course colours (shore foam, sand, ropes, floats,
+        # the start-line checker) - never merged into water
+        classes = [1 if any(8 <= (px & 0x7F) <= 15 or (px & 0x7F) == CHECK_DARK
+                            for px in t) else 0 for t in tiles]
         alive, resolve, merges = quantize_tiles(tiles, counts, palette, classes)
         final = {old: new for new, old in enumerate(alive)}
         mp7 = bytearray(128 * 128)
@@ -839,6 +861,7 @@ def main():
     for idx, rgb in COURSE_COLORS.items():
         palette[idx] = rgb
     palette[SHAL_SAND] = palette[SAND]
+    palette[CHECK_DARK] = (16, 16, 20)  # start-line checker black
     rs, rc = int(P["rotStart"]), int(P["rotCount"])
     palette[SHAL_BLUE] = max((palette[rs + i] for i in range(rc)), key=sum)
     course = load_course()
@@ -852,7 +875,7 @@ def main():
     # per-PIXEL exemption: anything sand-coloured (beach, wet-sand line,
     # sandy shallows) plus the rope cord and floats escape the glow; foam,
     # pale shallows, calm wake and open water keep the crest highlights
-    exempt = (SAND, SAND_SH, WET_SAND, FLOAT_A, SHAL_SAND)
+    exempt = (SAND, SAND_SH, WET_SAND, FLOAT_A, SHAL_SAND, CHECK_DARK)
     for row in canvas:
         for x in range(1024):
             if row[x] in exempt:

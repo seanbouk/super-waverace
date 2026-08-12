@@ -41,9 +41,14 @@ Mesen.exe --testrunner --timeout=30 <rom> <script.lua>   # arg order-free
   driving, flip `#define AUTOPILOT 1` in `game/src/main.c` (steers around
   the racing-line waypoints at full throttle — laps in ~750-900 ticks) and
   rebuild; ALWAYS set back to 0 for release builds.
-- The on-screen debug UI is the other half of verification: X/Y/H/V, BUILD
-  profiler (262 lines/rebuild is the baseline), PH phase, WET/AIR, K/S/V
-  physics row. If numbers look wrong in a screenshot, trust them over vibes.
+- The on-screen debug UI is the other half of verification (flip DEBUG_UI
+  to 1 in main.c; 0 shows the race HUD): X/Y/H/V, BUILD profiler (~326
+  lines is the real baseline), PH phase, WET/AIR, K/S/V physics row, F
+  loop-frames. If numbers look wrong in a screenshot, trust them over vibes.
+- For NPC/entity debugging, Mesen Lua can read WRAM directly: get addresses
+  from game/superwaverace.sym, then emu.read16(0x7Exxxx,
+  emu.memType.snesMemory) in the endFrame callback (see git history:
+  npctrace.lua pattern). Position traces beat screenshot archaeology.
 
 ## Hardware/toolchain gotchas (each cost real debugging time)
 
@@ -83,6 +88,16 @@ Mesen.exe --testrunner --timeout=30 <rom> <script.lua>   # arg order-free
 - **Windows line endings**: git checkout rewrites working files to CRLF;
   python patch scripts must read with universal newlines and write
   newline='\n'. Write files before asserting patch success, never after.
+- **The main loop is 3-4 vblanks (~15-20Hz), NOT the 2 (30Hz) the README
+  used to claim** - and it varies with sprite load. Consequences: (a) any
+  wall-clock timing MUST accumulate snes_vblank_count deltas, never loop
+  ticks (the race clocks do this); (b) per-loop speeds breathe ~25% with
+  scene load. Restoring a fixed loop is a deliberate backlog item (see
+  PLAN.md race-mode notes) because all feel tuning would shift.
+- **tcc silently drops (void)-cast volatile reads.** This broke scanline()
+  for the project's whole life (OPVCT never latched -> BUILD "262" was
+  profFrames*262, a constant). Reads that matter must be assigned to a
+  variable, even a throwaway one.
 
 ## Tuning knobs (game feel — user-driven, ask before big changes)
 
@@ -95,11 +110,13 @@ tools/wave_params.json via the wave lab.
 ## State / not yet done
 
 - Race mode in progress — see docs/PLAN.md "Race mode" for the agreed design
-  (waypoint progress, kinematic NPCs, rear-view art) and phase list. Done:
-  phase 1 (racing line + player laps/timing + waypoint autopilot) and
-  phase 2 (3 kinematic NPCs, sprites 5-7) and phase 3 (rear-view NPC ski
-  art at the 5 buoy scales, OBJ palettes 1-3 recolours; UI map now at
-  VRAM 0x7000). Next: race flow (countdown/positions/results), multi-course.
+  and phase list. Done: phases 1-4 — racing line + laps + waypoint autopilot;
+  3 kinematic NPCs (sprites 5-7); rear-view NPC ski art at the 5 buoy scales
+  (OBJ palettes 1-3 recolours; UI map at VRAM 0x7000); full race flow
+  (countdown/positions/finish, schedule rubber-banding via SPD_* tiers in
+  main.c — calibrated to the REAL ~120 world/s player pace, see PLAN.md),
+  checkered start line baked at path[0]. Next: gate judging (optional),
+  multi-course, and the fixed-loop-rate backlog item.
 - Buoy pass-sides (L/R) recorded but not judged;
   no sound (jam judges music — PVSnesLib has an .it tracker driver, unused);
   sand is collidable but there's no "run aground" state; no title screen.

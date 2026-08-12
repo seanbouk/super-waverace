@@ -5,11 +5,12 @@ fake a sinusoidal ocean on hardware that can only rotate and scale a flat plane.
 
 ## Status
 
-🌊 Playable: jet ski with buoyancy physics on the rolling sea, an island course
-with shorelines, rope float-lines and L/R buoys, collision with slide-along, a
-racing line with waypoint/lap/lap-time tracking, and a debug UI band. Verified
-on real hardware. In progress: 3-lap race against 3 NPC racers (see
-`docs/PLAN.md`, "Race mode"). Target:
+🌊 Playable: a full 3-lap race against three rubber-banded NPC racers — start
+grid, 3-2-1-GO countdown, live positions, lap times, chequered start line and
+a FINISH banner — on the rolling sea, around an island course with shorelines,
+rope float-lines and L/R buoys, collision with slide-along. Verified on real
+hardware (pre-race build). See `docs/PLAN.md` "Race mode" for what's left
+(gate judging, multi-course) and for important performance findings. Target:
 [SNES DEV Game Jam 2026](https://itch.io/jam/snes-dev-game-jam-2026) — LoROM,
 ≤512KB, no enhancement chips, no SRAM, NTSC+PAL. See `docs/PLAN.md` for history.
 

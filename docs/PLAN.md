@@ -110,8 +110,34 @@ Phases (each headless-verifiable in Mesen; ✅ = done):
    the water like the buoys. One tile set, recoloured per racer via OBJ
    palettes 1-3 (green/purple/orange; CGRAM 144-191). Sheet grew to 6144
    bytes, so the UI map moved 0x6800 -> 0x7000 in VRAM.
-4. **Race flow** — countdown/input lock, live positions, 3-lap finish,
-   results; race UI replaces the debug rows (debug behind a #define).
+4. ✅ **Race flow** — countdown (3-2-1-GO, engines locked), live position
+   ranking with sub-waypoint tie-breaks, 3-lap finish (FINISH! banner,
+   clock frozen, engines cut), race HUD (LAP/POS/clock/last-lap) replacing
+   the debug rows (DEBUG_UI define restores them). Schedule rubber-banding:
+   each NPC has a fade lap (orange from the gun, purple after lap 1, green
+   after lap 2) and picks one of four speed tiers from (should it be
+   ahead?) x (how far ahead is it?), with gap caps both ways so leaders
+   never run away and faded racers stay in sight. A checkered start/finish
+   strip is baked into the sea texture at path[0] (floats on the swell,
+   no collision). Verified headless: 4TH -> 3RD -> 2ND -> 1ST, one pass
+   per lap, FINISH! at ~2:15.
+
+   **Performance findings from this phase (important):**
+   - The main loop takes 3-4 vblanks, not 2: the game runs at ~15-20Hz,
+     varying with load (sprite-heavy scenes tip 3 -> 4). This PREDATES race
+     mode (verified by profiling the pre-race commit).
+   - The "30Hz / BUILD 262 lines / 45% spare" story came from a broken
+     profiler: tcc silently drops the (void)-cast volatile reads that
+     latched OPVCT, so scanline() returned garbage and profLines was
+     profFrames*262 = a constant fiction. Fixed by assigning the reads.
+     The REAL build cost is ~326 lines; the per-loop C logic is ~317 more.
+   - All race timing therefore uses snes_vblank_count (real frames), never
+     loop ticks. Anything time-based added later must do the same.
+   - The real player pace is ~120 world/s (thrust only bites in water,
+     corners coast) - NPC tiers are calibrated to that, not to top speed.
+   - Backlog item: restore a fixed-rate loop (likely = move the per-loop C
+     hot paths to asm with the hardware multiplier, as camera.asm did for
+     the build). Would change all feel tuning - schedule it deliberately.
 5. **Gate judging / penalties** (optional) — waypoints already carry the
    gate geometry; check crossing side against buoyType.
 6. **Multi-course** — bake N courses, runtime loader, course select.
