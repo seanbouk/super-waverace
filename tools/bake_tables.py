@@ -35,7 +35,10 @@ SCANLINES = 224
 SKY_TM = 0x10        # sky lines: sprites + backdrop only
 SEA_TM = 0x13        # sea lines: BG1 + BG2 (EXTBG) + sprites
 UI_LINES = 24        # top band: BG mode 1 text UI (3 tile rows)
-SKY_RGB = (248, 168, 96)  # backdrop / palette index 0 (dusk orange)
+SKY_RGB = (16, 60, 150)  # backdrop / palette index 0 (deep azure zenith)
+# per-scanline additive sky gradient (COLDATA, riding the crest-glow HDMA
+# channel): 0 at the top of the sky, this much white added at the horizon
+SKY_GRAD_MAX = 17
 
 DEFAULTS = {
     "camH": 34.0, "pitch": -10.0, "fovV": 25.0, "fovH": 60.0,
@@ -156,6 +159,13 @@ def phase_tables(phi):
             n_sky, UI_LINES)
 
     g_entries = []
+    # sky gradient: the backdrop (deep azure) gets progressively more white
+    # added toward the horizon - same COLDATA channel the crest glow rides,
+    # with the backdrop enabled in colour math (CGADSUB bit 5, main.c)
+    span = max(1, n_sky - UI_LINES - 1)
+    for i in range(n_sky - UI_LINES):
+        b = round(SKY_GRAD_MAX * (i / span) ** 1.3)
+        g_entries.append((0xE0 | min(31, b),))
     for x in sea_x:
         # crest glow: sin() is 1 exactly at wave tops, fades down the flanks
         c = math.sin(K_WAVE * x + phi)
@@ -166,7 +176,7 @@ def phase_tables(phi):
     tab_tm = bytes(repeat_blocks(UI_LINES, 0x11)
                    + repeat_blocks(n_sky - UI_LINES, SKY_TM)
                    + bytearray((0x81, SEA_TM, 0x00)))
-    tab_g = hdma_table(n_sky, (0xE0,), g_entries)   # UI band + sky: add zero
+    tab_g = hdma_table(UI_LINES, (0xE0,), g_entries) # UI band: add zero
     return tab_tm, tab_g, n_sky
 
 

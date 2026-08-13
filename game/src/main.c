@@ -412,11 +412,13 @@ int main(void)
     for (bi = 1; bi < NPC_SPR + NPC_COUNT; bi++)
         oamSetVisible(bi << 2, OBJ_HIDE); // NB: OAM ids are byte offsets (x4)
 
-    setPaletteColor(0, RGB8(248, 168, 96));
+    setPaletteColor(0, RGB8(16, 60, 150)); // deep azure zenith
 
-    // Additive colour math on BG1 with the fixed colour = crest glow
+    // Additive colour math with the fixed colour: BG1 = crest glow, and
+    // the backdrop too (bit 5) - the baked COLDATA table ramps white into
+    // the sky lines, so the azure pales toward the horizon for free
     REG_CGWSEL = 0x00;
-    REG_CGADSUB = 0x01;
+    REG_CGADSUB = 0x21;
 
     // Window 1 masks OBJ on the main screen; HDMA moves the window edges so
     // the region below the waterline swallows the sprite
