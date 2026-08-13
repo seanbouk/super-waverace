@@ -55,7 +55,7 @@ u8 skiFlip;       // lean direction (hflip)
 
 #define TURN_SPEED 2
 #define THRUST 144 // applied at >>6: top speed = THRUST*32 (8.8 world/loop)
-#define GRAV 48       // 8.8 texels/loop^2 — snappy hops, not moon gravity
+#define GRAV 72       // 8.8 texels/loop^2 — +50% for the doubled pace
 #define DIP 128       // rest waterline: 0.5 texel below surface
 #define MAX_VV_UP 320   // launch clamp: small crisp hops
 #define MAX_VV_DOWN 768 // falls can be faster than launches
