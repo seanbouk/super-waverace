@@ -868,6 +868,31 @@ def main():
     if course:
         print("course: assets/course.json ({0} ropes, {1} buoys, {2} waypoints)"
               .format(len(course[1]), len(course[2]), len(course[3])))
+
+    # Start grid derived from the racing line: the four skis line up just
+    # behind waypoint 0 facing along the opening segment, player at the
+    # back. Exported in world units (the C side derives the camera from the
+    # ski slot). Falls back to the historical spawn when there is no path.
+    if course and len(course[3]) >= 2:
+        p = course[3]
+        gx, gy = p[0]
+        gdx = (p[1][0] - gx + 512) % 1024 - 512
+        gdy = (p[1][1] - gy + 512) % 1024 - 512
+        gl = math.hypot(gdx, gdy) or 1.0
+        gux, guy = gdx / gl, gdy / gl
+        gqx, gqy = -guy, gux  # lateral, to the line's left
+
+        def grid_slot(back, lat):
+            return (round((gx - gux * back + gqx * lat) * 4) & 4095,
+                    round((gy - guy * back + gqy * lat) * 4) & 4095)
+
+        start_slot = grid_slot(40, 0)
+        npc_slots = [grid_slot(6, -20), grid_slot(14, 20), grid_slot(26, -6)]
+        start_theta = round(math.atan2(gdx, gdy) * 128 / math.pi) & 255
+    else:
+        start_slot = (2048, 968)
+        npc_slots = [(1950, 1020), (2148, 1084), (2050, 1148)]
+        start_theta = 0
     canvas, coll = compose_canvas(pat, course)
     # EXTBG: set bit 7 on course pixels -> they render via BG2-high (above
     # BG1, colour-math-free); colour comes from the low 7 bits so the
@@ -998,6 +1023,16 @@ def main():
 #define WAVE_PC7_SIZE {{PC7SIZE}}
 #define WAVE_BUOY_COUNT {{NBUOYS}}
 #define WAVE_PATH_COUNT {{NPATH}}
+/* start grid (world units, ski positions; heading in binary degrees) */
+#define WAVE_START_X {{STX}}
+#define WAVE_START_Y {{STY}}
+#define WAVE_START_THETA {{STTH}}
+#define WAVE_NPC_X0 {{NX0}}
+#define WAVE_NPC_Y0 {{NY0}}
+#define WAVE_NPC_X1 {{NX1}}
+#define WAVE_NPC_Y1 {{NY1}}
+#define WAVE_NPC_X2 {{NX2}}
+#define WAVE_NPC_Y2 {{NY2}}
 #define WAVE_UI_LINES {4}
 #define WAVE_BASE_ROLL 64
 #define WAVE_STEPS_PER_TEXEL {5}
@@ -1023,7 +1058,16 @@ void waveRotateStep(u8 offset);
 #endif
 """.replace("{{PC7SIZE}}", str(len(pc7))).replace("{{NBUOYS}}",
              str(len(course[2]) if course else 0)).replace("{{NPATH}}",
-             str(len(course[3]) if course else 0)).format(phases, tick_shift, rot_count, rot_frames, UI_LINES,
+             str(len(course[3]) if course else 0))
+           .replace("{{STX}}", str(start_slot[0]))
+           .replace("{{STY}}", str(start_slot[1]))
+           .replace("{{STTH}}", str(start_theta))
+           .replace("{{NX0}}", str(npc_slots[0][0]))
+           .replace("{{NY0}}", str(npc_slots[0][1]))
+           .replace("{{NX1}}", str(npc_slots[1][0]))
+           .replace("{{NY1}}", str(npc_slots[1][1]))
+           .replace("{{NX2}}", str(npc_slots[2][0]))
+           .replace("{{NY2}}", str(npc_slots[2][1])).format(phases, tick_shift, rot_count, rot_frames, UI_LINES,
            round(256.0 * phases / P["wavelength"]), phases * 256 - 1,
            # screen px per world texel at the ski's distance, x2 for drama,
            # in 4.4 fixed point

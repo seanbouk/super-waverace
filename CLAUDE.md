@@ -105,7 +105,12 @@ Mesen.exe --testrunner --timeout=30 <rom> <script.lua>   # arg order-free
 THRUST*16), GRAV, DIP, MAX_VV_UP/DOWN, splash retention (>>2 on entry),
 grip (vSide -= vSide>>3) and rudder (vAlong += |vSide|>>3). Buoy scale bands
 are a geometric ladder (192/268/382/534). Wave feel comes from
-tools/wave_params.json via the wave lab.
+tools/wave_params.json via the wave lab. NPC race feel: npcFade[] (which
+player lap each racer fades) and the SPD_* tiers — percentages of paceEma
+(the player's measured pace), so they survive course redesigns; tune the
+percentages, not absolute speeds. The start grid is baked from the racing
+line (WAVE_START_*/WAVE_NPC_* in wavedata.h) — move waypoint 0/1 in the
+painter to move the grid.
 
 ## State / not yet done
 

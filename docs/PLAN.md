@@ -117,7 +117,14 @@ Phases (each headless-verifiable in Mesen; ✅ = done):
    each NPC has a fade lap (orange from the gun, purple after lap 1, green
    after lap 2) and picks one of four speed tiers from (should it be
    ahead?) x (how far ahead is it?), with gap caps both ways so leaders
-   never run away and faded racers stay in sight. A checkered start/finish
+   never run away and faded racers stay in sight. The tiers are PERCENTAGES
+   of a ~3s EMA of the player's real forward speed (paceEma) - they
+   self-calibrate to any course and driver; fixed numbers broke on the
+   first real course redesign. The start grid (player + NPC slots +
+   heading) is baked from the racing line's opening segment
+   (WAVE_START_*/WAVE_NPC_*), and NPC sprites sit after the buoys
+   (NPC_SPR) so buoy-heavy courses cannot collide with them in OAM.
+   A checkered start/finish
    strip is baked into the sea texture at path[0] (floats on the swell,
    no collision). Verified headless: 4TH -> 3RD -> 2ND -> 1ST, one pass
    per lap, FINISH! at ~2:15.

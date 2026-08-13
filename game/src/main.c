@@ -106,9 +106,10 @@ u8 bi;
 u8 nextWp, lapCount;
 u16 lapTicks, lastLap;
 s16 wpdx, wpdy, apc, apd, apu;
-// NPC racers (phase 2): kinematic waypoint followers,
-// OAM sprites 5..7 (after the ski and the 4 course buoys)
+// NPC racers (phase 2): kinematic waypoint followers, on the OAM sprites
+// after the ski and the course buoys
 #define NPC_COUNT 3
+#define NPC_SPR (1 + WAVE_BUOY_COUNT) // first NPC sprite index
 #define NPC_TURN 2 // binary degrees/loop = the player's full turn rate
 u16 npcX[NPC_COUNT], npcY[NPC_COUNT]; // world units, wrap & 4095
 s16 npcFX[NPC_COUNT], npcFY[NPC_COUNT]; // sub-unit accumulators (8.8)
@@ -119,15 +120,16 @@ s16 npcSin, npcCos;
 // race flow (phase 4): countdown -> racing -> finished
 #define RACE_LAPS 3
 // schedule rubber-banding: four speed tiers picked from (should this racer
-// still be ahead of the player?) x (how far ahead is it really?).
-// Calibrated from position traces: the REAL player pace is ~120 world/s
-// (thrust only bites in water, corners coast) which matches npcSpd ~1700,
-// NOT the nominal top speed. HOLD is deliberately slower than player pace
-// so a racer passed on schedule drifts back and never re-passes.
-#define SPD_FAST 2000   // behind schedule: catch up (~140 world/s)
-#define SPD_CRUISE 1700 // holding its scheduled place (~player pace)
-#define SPD_SLOW 1200   // fade: let the player by decisively (~85)
-#define SPD_HOLD 1500   // keep contact without racing (~105)
+// still be ahead of the player?) x (how far ahead is it really?). The tiers
+// are PERCENTAGES OF THE PLAYER'S MEASURED PACE (a slow EMA of forward
+// speed), so they self-calibrate to any course and any driver - absolute
+// numbers broke on every course redesign. HOLD stays below player pace so
+// a racer passed on schedule drifts back and never re-passes.
+u16 paceEma; // player pace, 8.8 world/loop, ~3s window
+#define SPD_FAST (paceEma + (paceEma >> 2))                  // +25%: catch up
+#define SPD_CRUISE (paceEma)                                 // match the player
+#define SPD_HOLD (paceEma - (paceEma >> 3))                  // -12%: drift back
+#define SPD_SLOW (paceEma - (paceEma >> 2) - (paceEma >> 3)) // -37%: fade
 u8 raceState;           // 0 countdown, 1 racing, 2 finished
 u8 racePos, finPos, posAcc, goTimer;
 u8 npcFade[NPC_COUNT]; // player lap at which this racer starts fading
@@ -401,7 +403,7 @@ int main(void)
     dmaCopyCGram((u8 *)&npc_pals, 144, 96);
     oamSet(0, SKI_X, 140, 3, 0, 0, 0, 0);
     oamSetEx(0, OBJ_LARGE, OBJ_SHOW);
-    for (bi = 1; bi < 12; bi++)
+    for (bi = 1; bi < NPC_SPR + NPC_COUNT; bi++)
         oamSetVisible(bi << 2, OBJ_HIDE); // NB: OAM ids are byte offsets (x4)
 
     setPaletteColor(0, RGB8(248, 168, 96));
@@ -419,12 +421,17 @@ int main(void)
 
     tick = 0;
     phaseAcc = 0;
-    camTheta = 0;
-    camTheta16 = 0;
-    camPX = 2048; // world units: 1 texel = 4 world; map spans 4096
-    camPY = 768;  // south of the demo island, ring ahead
-    camSinVal = 0;
-    camCosVal = 127;
+    // start pose comes from the bake (behind the racing line's waypoint 0,
+    // facing along the opening segment); the camera hangs back so the SKI
+    // sits on the exported grid slot
+    camTheta = WAVE_START_THETA;
+    camTheta16 = (u16)WAVE_START_THETA << 8;
+    npcA = WAVE_START_THETA;
+    npcTrig();
+    camSinVal = npcSin;
+    camCosVal = npcCos;
+    camPX = (u16)(WAVE_START_X - ((WAVE_SKI_DIST * npcSin) >> 7)) & 4095;
+    camPY = (u16)(WAVE_START_Y - ((WAVE_SKI_DIST * npcCos) >> 7)) & 4095;
     skiY = -1536; // spawn below any wave: wet from frame one, bobs up
     skiVv = 0;
     skiVX = 0;
@@ -432,37 +439,39 @@ int main(void)
     fracX = 0;
     fracY = 0;
     wasInWater = 1;
-    prevSin = 0;
-    prevCos = 127;
+    prevSin = npcSin; // matches the start heading: no spurious first pivot
+    prevCos = npcCos;
     rotTimer = 0;
     rotOfs = 0;
     nextWp = 0; // BSS is not zero-initialised: clear all race state
     lapCount = 0;
     lapTicks = 0;
     lastLap = 0;
-    skiWX = camPX; // autopilot reads these before the first physics pass
-    skiWY = camPY + WAVE_SKI_DIST;
-    // NPC grid: just ahead of the ski (world y: ski starts at 968), inside
-    // the gate span, staggered in depth so no scanline drowns in sprites.
-    // They open on waypoint 2 (gate 2) - waypoints 0/1 are behind them.
+    skiWX = WAVE_START_X; // autopilot reads these before the first pass
+    skiWY = WAVE_START_Y;
+    // NPC grid slots come from the bake too: just ahead of the player,
+    // staggered in depth so no scanline drowns in sprites
     for (bi = 0; bi < NPC_COUNT; bi++)
     {
-        npcTheta[bi] = 0;
+        npcTheta[bi] = WAVE_START_THETA;
         npcFX[bi] = 0;
         npcFY[bi] = 0;
-        npcWp[bi] = 2;
+        npcWp[bi] = 0;
         npcLap[bi] = 0;
         npcDist[bi] = 0;
-        npcY[bi] = 1020 + (bi << 6);
     }
-    npcX[0] = 1950;
-    npcX[1] = 2148;
-    npcX[2] = 2050;
+    npcX[0] = WAVE_NPC_X0;
+    npcY[0] = WAVE_NPC_Y0;
+    npcX[1] = WAVE_NPC_X1;
+    npcY[1] = WAVE_NPC_Y1;
+    npcX[2] = WAVE_NPC_X2;
+    npcY[2] = WAVE_NPC_Y2;
     // the race is scripted to unwind: green fades two laps in, purple one
     // lap in, orange from the gun - pass one racer per lap
     npcFade[0] = 2;
     npcFade[1] = 1;
     npcFade[2] = 0;
+    paceEma = 1700; // seeded near typical pace; the EMA takes over at GO
     npcSpd[0] = SPD_CRUISE;
     npcSpd[1] = SPD_CRUISE;
     npcSpd[2] = SPD_SLOW;
@@ -571,6 +580,12 @@ int main(void)
                     }
                 }
                 lapFr += loopFrames;
+                // player pace EMA (~3s window) drives the NPC speed tiers;
+                // floored so a parked player still gets a beatable field
+                apu = vAlong < 0 ? 0 : vAlong;
+                paceEma += (s16)(apu - paceEma) >> 6;
+                if (paceEma < 900)
+                    paceEma = 900;
             }
         }
 
@@ -942,9 +957,9 @@ int main(void)
             pjY = npcY[bi];
             projectPoint();
             if (pjOk)
-                drawSki((5 + bi) << 2, (u8)(1 + bi));
+                drawSki((NPC_SPR + bi) << 2, (u8)(1 + bi));
             else
-                oamSetVisible((5 + bi) << 2, OBJ_HIDE);
+                oamSetVisible((NPC_SPR + bi) << 2, OBJ_HIDE);
         }
 #endif
         buildWinTab((u8)winRow);
