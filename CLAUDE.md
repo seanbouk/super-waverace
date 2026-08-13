@@ -62,6 +62,15 @@ Mesen.exe --testrunner --timeout=30 <rom> <script.lua>   # arg order-free
   ui.c owns the text map. The lib is still used for font+palette init only.
 - **Mode 7 has NO tile flipping** (bare 8-bit map entries) — hence the bake's
   tile quantiser. Budget: 256 unique tiles, checked every bake.
+- **The Mode 7 view is LEFT-HANDED vs the painter's map** (facing +Y,
+  screen-right samples texture +X — a mirror image). load_course() flips all
+  course data in X once so the game matches the painter exactly. Never
+  "fix" a mirrored-looking course in the renderer or the painter; in-game
+  world coords are the mirror of painter coords (x_game = 1023 - x_painter
+  texels).
+- **Velocity-product overflow rule**: speeds are 8.8 and reach ~4600 since
+  the speed doubling; any (v * trig) product must pre-shift v by >>5 (then
+  >>2 after) — the old >>4/>>3 pattern overflows s16 above ~4096.
 - **EXTBG bit 7 is per PIXEL** (priority flag; colour = low 7 bits). The bake
   sets it on glow-exempt pixels. Priority order: S3 S2 2H S1 BG1 S0 2L.
 - **The VBlank ISR's OAM DMA uses channel 7's registers** and fires only on

@@ -54,7 +54,7 @@ u8 skiLean;       // 0 straight, 1 leaning
 u8 skiFlip;       // lean direction (hflip)
 
 #define TURN_SPEED 2
-#define THRUST 144
+#define THRUST 144 // applied at >>6: top speed = THRUST*32 (8.8 world/loop)
 #define GRAV 48       // 8.8 texels/loop^2 — snappy hops, not moon gravity
 #define DIP 128       // rest waterline: 0.5 texel below surface
 #define MAX_VV_UP 320   // launch clamp: small crisp hops
@@ -114,9 +114,12 @@ s16 wpdx, wpdy, apc, apd, apu;
 u16 npcX[NPC_COUNT], npcY[NPC_COUNT]; // world units, wrap & 4095
 s16 npcFX[NPC_COUNT], npcFY[NPC_COUNT]; // sub-unit accumulators (8.8)
 u16 npcSpd[NPC_COUNT];                  // current speed, 8.8 world/loop
-u8 npcTheta[NPC_COUNT], npcWp[NPC_COUNT], npcLap[NPC_COUNT];
+u8 npcTheta[NPC_COUNT], npcWp[NPC_COUNT];
+s8 npcBias[NPC_COUNT]; // per-racer lateral aim offset: no shared line
 u8 npcA; // npcTrig interface
 s16 npcSin, npcCos;
+u8 bj; // separation pass
+u16 ox, oy;
 // race flow (phase 4): countdown -> racing -> finished
 #define RACE_LAPS 3
 // schedule rubber-banding: four speed tiers picked from (should this racer
@@ -134,6 +137,9 @@ u8 raceState;           // 0 countdown, 1 racing, 2 finished
 u8 racePos, finPos, posAcc, goTimer;
 u8 npcFade[NPC_COUNT]; // player lap at which this racer starts fading
 u16 npcDist[NPC_COUNT], pDist, spdTgt;
+// monotone progress (total waypoints consumed): laps are counted at the
+// START LINE (waypoint 0), so nextWp alone no longer orders the field
+u16 pProg, npcProg[NPC_COUNT];
 s16 rubDiff;
 // race + lap clocks: REAL frames from snes_vblank_count (the loop rate
 // varies, so loop ticks are not time); digits maintained incrementally
@@ -444,7 +450,8 @@ int main(void)
     rotTimer = 0;
     rotOfs = 0;
     nextWp = 0; // BSS is not zero-initialised: clear all race state
-    lapCount = 0;
+    lapCount = 255; // -1: the rolling start's first line-crossing makes 0
+    pProg = 0;
     lapTicks = 0;
     lastLap = 0;
     skiWX = WAVE_START_X; // autopilot reads these before the first pass
@@ -457,9 +464,12 @@ int main(void)
         npcFX[bi] = 0;
         npcFY[bi] = 0;
         npcWp[bi] = 0;
-        npcLap[bi] = 0;
+        npcProg[bi] = 0;
         npcDist[bi] = 0;
     }
+    npcBias[0] = -56; // green aims left of the line, purple right,
+    npcBias[1] = 56;  // orange up the middle: three distinct lines
+    npcBias[2] = 0;
     npcX[0] = WAVE_NPC_X0;
     npcY[0] = WAVE_NPC_Y0;
     npcX[1] = WAVE_NPC_X1;
@@ -471,7 +481,7 @@ int main(void)
     npcFade[0] = 2;
     npcFade[1] = 1;
     npcFade[2] = 0;
-    paceEma = 1700; // seeded near typical pace; the EMA takes over at GO
+    paceEma = 3000; // seeded near typical pace; the EMA takes over at GO
     npcSpd[0] = SPD_CRUISE;
     npcSpd[1] = SPD_CRUISE;
     npcSpd[2] = SPD_SLOW;
@@ -533,7 +543,7 @@ int main(void)
         // full throttle on the straights; coast into corners sharper than
         // ~45 deg — but never stall (turn authority needs speed)
         apu = apc < 0 ? -apc : apc;
-        if ((apd > 0 && apu < apd) || (vAlong < 300 && vAlong > -300))
+        if ((apd > 0 && apu < apd) || (vAlong < 600 && vAlong > -600))
             pad0 |= KEY_B;
 #else
         pad0 |= KEY_B;
@@ -584,8 +594,8 @@ int main(void)
                 // floored so a parked player still gets a beatable field
                 apu = vAlong < 0 ? 0 : vAlong;
                 paceEma += (s16)(apu - paceEma) >> 6;
-                if (paceEma < 900)
-                    paceEma = 900;
+                if (paceEma < 1500)
+                    paceEma = 1500;
             }
         }
 
@@ -631,15 +641,16 @@ int main(void)
                     skiVv = 0;
             }
             // hovercraft scrabble: thrust only bites in the water
+            // (>>6 not >>7: doubled thrust and top speed)
             if ((pad0 & KEY_B) && tick > 20) // grace while the spawn settles
             {
-                skiVX += (THRUST * camSinVal) >> 7;
-                skiVY += (THRUST * camCosVal) >> 7;
+                skiVX += (THRUST * camSinVal) >> 6;
+                skiVY += (THRUST * camCosVal) >> 6;
             }
             if (pad0 & KEY_Y) // reverse: half thrust, backwards
             {
-                skiVX -= ((THRUST / 2) * camSinVal) >> 7;
-                skiVY -= ((THRUST / 2) * camCosVal) >> 7;
+                skiVX -= ((THRUST / 2) * camSinVal) >> 6;
+                skiVY -= ((THRUST / 2) * camCosVal) >> 6;
             }
             // water drag
             skiVX -= skiVX >> 4;
@@ -742,14 +753,17 @@ int main(void)
         pDist = (u16)(wpdx + wpdy);
         if (pDist < 200)
         {
-            nextWp++;
-            if (nextWp >= WAVE_PATH_COUNT)
+            // laps count when CROSSING THE START LINE (waypoint 0), where
+            // the chequered strip is painted - not at the last waypoint.
+            // lapCount seeds at 255 (-1): the grid spawns inside waypoint
+            // 0's radius, so the immediate first crossing is the rolling
+            // start (-> 0, "LAP 1/3") and lap 1 runs the extra grid gap.
+            if (nextWp == 0)
             {
-                nextWp = 0;
                 lapCount++;
                 lastLap = lapTicks;
                 lapTicks = 0;
-                lastLapSec = (u8)(lapFr / 60); // division: once per lap only
+                lastLapSec = (u8)(lapFr / 60); // division: once per lap
                 lastLapTenth = (u8)((lapFr % 60) / 6);
                 lapFr = 0;
                 if (raceState == 1 && lapCount >= RACE_LAPS)
@@ -758,6 +772,10 @@ int main(void)
                     finPos = racePos;
                 }
             }
+            nextWp++;
+            if (nextWp >= WAVE_PATH_COUNT)
+                nextWp = 0;
+            pProg++;
         }
         lapTicks++;
 
@@ -775,6 +793,10 @@ int main(void)
                     wpdy -= 4096;
                 npcA = npcTheta[bi];
                 npcTrig();
+                // each racer aims a little off the shared line (perp of
+                // its heading) so three followers never stack up on it
+                wpdx += (npcBias[bi] * npcCos) >> 7;
+                wpdy -= (npcBias[bi] * npcSin) >> 7;
                 apc = (wpdy >> 4) * npcSin - (wpdx >> 4) * npcCos;
                 apd = (wpdx >> 4) * npcSin + (wpdy >> 4) * npcCos;
                 if (apd < 0)
@@ -794,11 +816,11 @@ int main(void)
                 bq = npcSpd[bi];
                 if (apd < 0 || apu > apd)
                     bq >>= 1;
-                // velocity along the (pre-turn) heading; >>4 before the
-                // product keeps it 16-bit, then 8.8 accumulators as fracX
-                apu = (s16)(bq >> 4);
-                apc = (apu * npcSin) >> 3;
-                apd = (apu * npcCos) >> 3;
+                // velocity along the (pre-turn) heading; >>5 before the
+                // product keeps doubled speeds 16-bit, 8.8 accums as fracX
+                apu = (s16)(bq >> 5);
+                apc = (apu * npcSin) >> 2;
+                apd = (apu * npcCos) >> 2;
                 npcFX[bi] += apc;
                 stepX = npcFX[bi] >> 8;
                 npcFX[bi] &= 0x00FF;
@@ -830,14 +852,11 @@ int main(void)
                 {
                     npcWp[bi]++;
                     if (npcWp[bi] >= WAVE_PATH_COUNT)
-                    {
                         npcWp[bi] = 0;
-                        npcLap[bi]++;
-                    }
+                    npcProg[bi]++;
                 }
                 // schedule rubber-banding: is it ahead of the player?
-                rubDiff = (s16)(npcLap[bi] * WAVE_PATH_COUNT + npcWp[bi])
-                          - (s16)(lapCount * WAVE_PATH_COUNT + nextWp);
+                rubDiff = (s16)npcProg[bi] - (s16)pProg;
                 if (rubDiff > 0)
                     apu = 1;
                 else if (rubDiff < 0)
@@ -873,20 +892,68 @@ int main(void)
                 npcSpd[bi] += (s16)(spdTgt - npcSpd[bi]) >> 3;
             }
         if (raceState)
+        {
             racePos = posAcc;
+            // unstack the racers: when two are within ~28 texels the NPC
+            // shoves off along the dominant axis (land-checked). Cheap
+            // pairwise nudges, deliberately not a flocking system.
+            for (bi = 0; bi < NPC_COUNT; bi++)
+                for (bj = bi + 1; bj <= NPC_COUNT; bj++)
+                {
+                    if (bj < NPC_COUNT)
+                    {
+                        ox = npcX[bj];
+                        oy = npcY[bj];
+                    }
+                    else // the player: NPCs yield, the player never moves
+                    {
+                        ox = skiWX;
+                        oy = skiWY;
+                    }
+                    wpdx = (s16)((npcX[bi] - ox) & 4095);
+                    if (wpdx > 2048)
+                        wpdx -= 4096;
+                    wpdy = (s16)((npcY[bi] - oy) & 4095);
+                    if (wpdy > 2048)
+                        wpdy -= 4096;
+                    if (wpdx > 112 || wpdx < -112 || wpdy > 112 || wpdy < -112)
+                        continue;
+                    apu = wpdx < 0 ? -wpdx : wpdx;
+                    apd = wpdy < 0 ? -wpdy : wpdy;
+                    if (apu >= apd)
+                    {
+                        apc = wpdx >= 0 ? 6 : -6;
+                        collOfs = ((npcY[bi] >> 5) & 127) * 128
+                                  + (((u16)(npcX[bi] + apc) >> 5) & 127);
+                        collProbe();
+                        if (!collVal)
+                            npcX[bi] = (npcX[bi] + apc) & 4095;
+                    }
+                    else
+                    {
+                        apc = wpdy >= 0 ? 6 : -6;
+                        collOfs = (((u16)(npcY[bi] + apc) >> 5) & 127) * 128
+                                  + ((npcX[bi] >> 5) & 127);
+                        collProbe();
+                        if (!collVal)
+                            npcY[bi] = (npcY[bi] + apc) & 4095;
+                    }
+                }
+        }
 #endif
 
         // split velocity into forward/side components along the heading
-        vAlong = ((skiVX >> 4) * camSinVal + (skiVY >> 4) * camCosVal) >> 3;
-        vSide = ((skiVX >> 4) * camCosVal - (skiVY >> 4) * camSinVal) >> 3;
+        // (>>5 pre-shift: doubled speeds would overflow the old >>4 * 127)
+        vAlong = ((skiVX >> 5) * camSinVal + (skiVY >> 5) * camCosVal) >> 2;
+        vSide = ((skiVX >> 5) * camCosVal - (skiVY >> 5) * camSinVal) >> 2;
         if (inWater)
         {
             // gravel grip: kill a chunk of the slip each loop, and let the
             // rudder convert some of it into forward drive (momentum keeps)
             vAlong += (vSide < 0 ? -vSide : vSide) >> 3;
             vSide -= vSide >> 3;
-            skiVX = ((vAlong >> 4) * camSinVal + (vSide >> 4) * camCosVal) >> 3;
-            skiVY = ((vAlong >> 4) * camCosVal - (vSide >> 4) * camSinVal) >> 3;
+            skiVX = ((vAlong >> 5) * camSinVal + (vSide >> 5) * camCosVal) >> 2;
+            skiVY = ((vAlong >> 5) * camCosVal - (vSide >> 5) * camSinVal) >> 2;
         }
         phaseAcc = (phaseAcc + WAVE_BASE_ROLL
                     + (((vAlong >> 4) * WAVE_STEPS_PER_TEXEL) >> 4))
@@ -1008,16 +1075,19 @@ int main(void)
             uiPrint(21, 2, "W");
             uiPrintNum(22, 2, waterRow, 3);
 #if WAVE_PATH_COUNT > 0
-            // NPC 0 progress (debug): lap.waypoint
-            uiPrint(26, 2, "N");
-            uiPrintNum(27, 2, npcLap[0], 1);
-            uiPrint(28, 2, ".");
-            uiPrintNum(29, 2, npcWp[0], 2);
+            // NPC 0 total progress vs the player's (debug)
+            uiPrint(25, 2, "N");
+            uiPrintNum(26, 2, npcProg[0], 3);
+            uiPrintNum(29, 2, pProg, 3);
 #endif
 #else
             // ---- race HUD ----
             uiPrint(0, 0, "LAP ");
-            uiPrintNum(4, 0, lapCount < RACE_LAPS ? lapCount + 1 : RACE_LAPS, 1);
+            // lapCount 255 = the instant before the rolling start crosses
+            // the line; show lap 1
+            dly = lapCount == 255 ? 1
+                : lapCount < RACE_LAPS ? (u16)lapCount + 1 : RACE_LAPS;
+            uiPrintNum(4, 0, dly, 1);
             uiPrint(5, 0, "/3");
             uiPrint(11, 0, "POS ");
             bq = raceState == 2 ? finPos : racePos;

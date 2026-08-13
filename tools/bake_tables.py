@@ -558,7 +558,15 @@ def load_course():
     zones = c["zones"]
     assert len(zones) == 128 and all(len(r) == 128 for r in zones), \
         "course zones must be 128x128"
-    return zones, c.get("ropes", []), c.get("buoys", []), c.get("path", [])
+    # MIRROR FIX: the Mode 7 view transform is left-handed relative to the
+    # painter's map (facing +Y, screen-right samples texture +X - so the
+    # rendered world is the painter's mirror image). Flip ALL course data
+    # in X here, once, so the in-game world matches the painter exactly.
+    zones = [r[::-1] for r in zones]
+    ropes = [[[1023 - x, y] for x, y in rope] for rope in c.get("ropes", [])]
+    buoys = [[1023 - x, y, side] for x, y, side in c.get("buoys", [])]
+    rpath = [[1023 - x, y] for x, y in c.get("path", [])]
+    return zones, ropes, buoys, rpath
 
 
 def compose_canvas(pat, course):
@@ -886,8 +894,8 @@ def main():
             return (round((gx - gux * back + gqx * lat) * 4) & 4095,
                     round((gy - guy * back + gqy * lat) * 4) & 4095)
 
-        start_slot = grid_slot(40, 0)
-        npc_slots = [grid_slot(6, -20), grid_slot(14, 20), grid_slot(26, -6)]
+        start_slot = grid_slot(44, 0)
+        npc_slots = [grid_slot(8, -28), grid_slot(18, 28), grid_slot(30, -8)]
         start_theta = round(math.atan2(gdx, gdy) * 128 / math.pi) & 255
     else:
         start_slot = (2048, 968)

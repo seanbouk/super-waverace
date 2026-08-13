@@ -126,8 +126,15 @@ Phases (each headless-verifiable in Mesen; ✅ = done):
    (NPC_SPR) so buoy-heavy courses cannot collide with them in OAM.
    A checkered start/finish
    strip is baked into the sea texture at path[0] (floats on the swell,
-   no collision). Verified headless: 4TH -> 3RD -> 2ND -> 1ST, one pass
-   per lap, FINISH! at ~2:15.
+   no collision). Laps count AT the start line (waypoint 0), not the last
+   waypoint: lapCount seeds at -1 and the rolling start's first crossing
+   makes lap 1, so the opening lap runs the extra grid gap; ranking uses
+   monotone progress counters (pProg/npcProg). Post-course-1 additions:
+   the world-mirror fix (see CLAUDE.md), doubled player speed (THRUST at
+   >>6; overflow-safe >>5/>>2 velocity products), and anti-bunching
+   (per-racer lateral aim bias + land-checked pairwise shove, no boids).
+   Verified headless: 4TH at the gun, green holds the lead to a genuine
+   lap-3 pass, FINISH! 1ST, ~28s laps.
 
    **Performance findings from this phase (important):**
    - The main loop takes 3-4 vblanks, not 2: the game runs at ~15-20Hz,
