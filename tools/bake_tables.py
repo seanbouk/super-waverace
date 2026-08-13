@@ -150,9 +150,12 @@ def repeat_blocks(n, value):
     return out
 
 
-def phase_tables(phi):
+def phase_tables(phi, sky_ref):
     """HDMA tables that stay camera-independent: sky/sea split + crest glow.
-    Returns (tm, glow, n_sky)."""
+    sky_ref = the deepest horizon line across all phases: the sky gradient
+    is normalised against it, so the light-field is FIXED from the top and
+    the moving horizon merely slices into it (it must not breathe with the
+    swell). Returns (tm, glow, n_sky)."""
     n_sky, sea_x = raycast_phase(phi)
     assert n_sky >= UI_LINES, \
         "sea reaches into the UI band (n_sky={0} < {1}) - raise camH/pitch".format(
@@ -162,9 +165,9 @@ def phase_tables(phi):
     # sky gradient: the backdrop (deep azure) gets progressively more white
     # added toward the horizon - same COLDATA channel the crest glow rides,
     # with the backdrop enabled in colour math (CGADSUB bit 5, main.c)
-    span = max(1, n_sky - UI_LINES - 1)
+    span = max(1, sky_ref - UI_LINES - 1)
     for i in range(n_sky - UI_LINES):
-        b = round(SKY_GRAD_MAX * (i / span) ** 1.3)
+        b = round(SKY_GRAD_MAX * min(1.0, i / span) ** 1.3)
         g_entries.append((0xE0 | min(31, b),))
     for x in sea_x:
         # crest glow: sin() is 1 exactly at wave tops, fades down the flanks
@@ -948,9 +951,12 @@ def main():
     arr_name = {"tm": "waveTM", "g": "waveG"}
     total = 0
     raw_d, raw_a, sky_counts, ski_rows, surf_hs = [], [], [], [], []
+    # deepest horizon across the cycle: the sky gradient's fixed reference
+    sky_ref = max(raycast_phase(2 * math.pi * p / phases)[0]
+                  for p in range(phases))
     for p in range(phases):
         phi = 2 * math.pi * p / phases
-        tm_tab, g_tab, n_sky = phase_tables(phi)
+        tm_tab, g_tab, n_sky = phase_tables(phi, sky_ref)
         tabs = {"tm": tm_tab, "g": g_tab}
         sky_counts.append(n_sky)
         d_words, a_words = phase_raw(phi)
