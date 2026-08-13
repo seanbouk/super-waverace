@@ -57,7 +57,7 @@ u8 skiFlip;       // lean direction (hflip)
 #define THRUST 144 // applied at >>6: top speed = THRUST*32 (8.8 world/loop)
 #define GRAV 36       // 8.8 texels/loop^2 — floaty hangtime at race pace
 #define DIP 128       // rest waterline: 0.5 texel below surface
-#define MAX_VV_UP 320   // launch clamp: small crisp hops
+#define MAX_VV_UP 480   // launch clamp: proper air off the big rollers
 #define MAX_VV_DOWN 768 // falls can be faster than launches
 #define MAX_DEPTH 768 // the water is thick: hard floor 3 texels under
 #define SKI_X 112
