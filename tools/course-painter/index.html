@@ -53,9 +53,10 @@
       <label class="radio"><input type="radio" name="tool" value="note"> Note (click to add, drag to move)</label>
       <div class="ctl"><label>Brush size</label><input type="range" id="bsize" min="1" max="12" step="1" value="4"><output for="bsize"></output></div>
       <div class="hint" style="margin:4px 0 6px">
-        Buoys, waypoints and notes: <b>drag</b> to move, <b>right-click</b> to
-        delete, with their tool selected. Path: <b>shift-click</b> inserts a
-        waypoint on the nearest segment; double-click a note to edit it.
+        Rope points, waypoints, buoys and notes: <b>drag</b> to move,
+        <b>right-click</b> to delete, with their tool selected.
+        <b>Shift-click</b> inserts a point on the nearest rope/path segment;
+        double-click a note to edit it.
       </div>
       <button id="endRope">End current rope (Esc)</button>
       <button id="undoRope">Delete last rope</button>
@@ -337,6 +338,35 @@ function nearestSegment(tx, ty, maxD) {
   }
   return best;
 }
+// rope vertex under the cursor, across finished ropes and the open one
+// (ri -1 = the open rope)
+function hitRopePoint(tx, ty, r) {
+  if (current) {
+    const pi = hitIndex(current, tx, ty, r);
+    if (pi >= 0) return { ri: -1, pi };
+  }
+  for (let ri = ropes.length - 1; ri >= 0; ri--) {
+    const pi = hitIndex(ropes[ri], tx, ty, r);
+    if (pi >= 0) return { ri, pi };
+  }
+  return null;
+}
+// nearest segment of any finished rope (open polylines, no closing edge)
+function nearestRopeSegment(tx, ty, maxD) {
+  let best = null, bestD = maxD;
+  for (let ri = 0; ri < ropes.length; ri++)
+    for (let i = 0; i + 1 < ropes[ri].length; i++) {
+      const [ax, ay] = ropes[ri][i], [bx, by] = ropes[ri][i + 1];
+      const vx = bx - ax, vy = by - ay;
+      const len2 = vx * vx + vy * vy;
+      if (!len2) continue;
+      let t = ((tx - ax) * vx + (ty - ay) * vy) / len2;
+      t = Math.max(0, Math.min(1, t));
+      const d = Math.hypot(tx - (ax + t * vx), ty - (ay + t * vy));
+      if (d < bestD) { bestD = d; best = { ri, seg: i }; }
+    }
+  return best;
+}
 
 function paint(ev) {
   const [cx, cy] = cellAt(ev);
@@ -406,6 +436,31 @@ cv.addEventListener("mousedown", ev => {
     const txt = prompt("Note text:");
     if (txt) { pushUndo(); notes.push([tx, ty, txt]); render(); }
   } else if (t === "rope") {
+    const hit = hitRopePoint(tx, ty, 10);
+    if (hit) {
+      pushUndo();
+      // closed loops repeat their first point at the end: drag both ends
+      const rope = hit.ri < 0 ? current : ropes[hit.ri];
+      let twin = -1;
+      if (rope.length > 2 &&
+          rope[0][0] === rope[rope.length - 1][0] &&
+          rope[0][1] === rope[rope.length - 1][1]) {
+        if (hit.pi === 0) twin = rope.length - 1;
+        else if (hit.pi === rope.length - 1) twin = 0;
+      }
+      drag = { kind: "rope", ri: hit.ri, pi: hit.pi, twin };
+      return;
+    }
+    if (ev.shiftKey && !current) {
+      const seg = nearestRopeSegment(tx, ty, 20);
+      if (seg) {
+        pushUndo();
+        ropes[seg.ri].splice(seg.seg + 1, 0, [tx, ty]);
+        drag = { kind: "rope", ri: seg.ri, pi: seg.seg + 1 };
+        render();
+        return;
+      }
+    }
     pushUndo();
     if (!current) current = [];
     current.push([tx, ty]);
@@ -425,9 +480,20 @@ cv.addEventListener("mousemove", ev => {
     "texel " + tx + "," + ty + " · world " + tx * 4 + "," + ty * 4 +
     " · cell " + (tx >> 3) + "," + (ty >> 3);
   if (drag) {
-    const list = drag.kind === "buoy" ? buoys : drag.kind === "path" ? path : notes;
-    list[drag.idx][0] = tx;
-    list[drag.idx][1] = ty;
+    if (drag.kind === "rope") {
+      const rope = drag.ri < 0 ? current : ropes[drag.ri];
+      rope[drag.pi][0] = tx;
+      rope[drag.pi][1] = ty;
+      if (drag.twin >= 0) {
+        rope[drag.twin][0] = tx;
+        rope[drag.twin][1] = ty;
+      }
+    } else {
+      const list = drag.kind === "buoy" ? buoys
+                 : drag.kind === "path" ? path : notes;
+      list[drag.idx][0] = tx;
+      list[drag.idx][1] = ty;
+    }
     render();
   } else if (painting) paint(ev);
 });
@@ -447,6 +513,19 @@ cv.addEventListener("contextmenu", ev => {
   if (t === "buoyL" || t === "buoyR") del(buoys, 12);
   else if (t === "path") del(path, 12);
   else if (t === "note") del(notes, 16);
+  else if (t === "rope") {
+    const hit = hitRopePoint(tx, ty, 10);
+    if (!hit) return;
+    pushUndo();
+    const rope = hit.ri < 0 ? current : ropes[hit.ri];
+    rope.splice(hit.pi, 1);
+    // a rope needs two points to exist
+    if (rope.length < 2) {
+      if (hit.ri < 0) current = rope.length ? rope : null;
+      else ropes.splice(hit.ri, 1);
+    }
+    render();
+  }
 });
 // double-click a note to edit its text
 cv.addEventListener("dblclick", ev => {
