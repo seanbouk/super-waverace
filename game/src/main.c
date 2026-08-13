@@ -824,12 +824,15 @@ int main(void)
                 npcFX[bi] += apc;
                 stepX = npcFX[bi] >> 8;
                 npcFX[bi] &= 0x00FF;
+                // NPCs pass straight through buoy cells (3): the lateral
+                // bias lines cross them and snagging there looks broken.
+                // Sand (1) and rope (2) still block.
                 if (stepX)
                 {
                     collOfs = ((npcY[bi] >> 5) & 127) * 128
                               + (((u16)(npcX[bi] + stepX) >> 5) & 127);
                     collProbe();
-                    if (!collVal)
+                    if (!collVal || collVal == 3)
                         npcX[bi] = (npcX[bi] + stepX) & 4095;
                 }
                 npcFY[bi] += apd;
@@ -840,7 +843,7 @@ int main(void)
                     collOfs = (((u16)(npcY[bi] + stepY) >> 5) & 127) * 128
                               + ((npcX[bi] >> 5) & 127);
                     collProbe();
-                    if (!collVal)
+                    if (!collVal || collVal == 3)
                         npcY[bi] = (npcY[bi] + stepY) & 4095;
                 }
                 if (wpdx < 0)
@@ -926,7 +929,7 @@ int main(void)
                         collOfs = ((npcY[bi] >> 5) & 127) * 128
                                   + (((u16)(npcX[bi] + apc) >> 5) & 127);
                         collProbe();
-                        if (!collVal)
+                        if (!collVal || collVal == 3) // buoys don't block NPCs
                             npcX[bi] = (npcX[bi] + apc) & 4095;
                     }
                     else
@@ -935,7 +938,7 @@ int main(void)
                         collOfs = (((u16)(npcY[bi] + apc) >> 5) & 127) * 128
                                   + ((npcX[bi] >> 5) & 127);
                         collProbe();
-                        if (!collVal)
+                        if (!collVal || collVal == 3)
                             npcY[bi] = (npcY[bi] + apc) & 4095;
                     }
                 }
