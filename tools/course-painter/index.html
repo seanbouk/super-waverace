@@ -9,7 +9,7 @@
   body { margin:0; background:var(--bg); color:var(--ink); font:14px/1.4 "Segoe UI",system-ui,sans-serif; padding:16px; }
   h1 { font-size:18px; margin:0 0 12px; font-weight:600; }
   h1 span { color:var(--dim); font-weight:400; }
-  #layout { display:flex; gap:16px; flex-wrap:wrap; }
+  #layout { display:flex; gap:16px; flex-wrap:wrap; align-items:flex-start; }
   #controls { display:flex; flex-direction:column; gap:14px; background:var(--panel); border-radius:8px; padding:14px 16px; width:270px; }
   .group > b { font-size:12px; text-transform:uppercase; letter-spacing:.08em; color:var(--dim); display:block; margin-bottom:6px; }
   .ctl { display:grid; grid-template-columns:80px 120px 40px; align-items:center; gap:8px; margin-bottom:4px; }
@@ -23,7 +23,17 @@
   #view { background:var(--panel); border-radius:8px; padding:14px; }
   #view h2 { font-size:13px; margin:0 0 8px; color:var(--dim); font-weight:400; }
   canvas { image-rendering:pixelated; border-radius:4px; display:block; cursor:crosshair; }
+  #coords { font:12px monospace; color:var(--dim); margin-top:6px; min-height:16px; }
   #mini { margin-top:10px; }
+  .hint { font-size:11px; color:var(--dim); }
+  #refs { background:var(--panel); border-radius:8px; padding:14px 16px; width:300px; }
+  #refs > b { font-size:12px; text-transform:uppercase; letter-spacing:.08em; color:var(--dim); display:block; margin-bottom:6px; }
+  .refcard { position:relative; margin:8px 0; cursor:grab; border:1px solid #3d4658; border-radius:6px; overflow:hidden; }
+  .refcard.dragover { border-color:var(--accent); }
+  .refcard img { width:100%; display:block; }
+  .refcard .x { position:absolute; top:4px; right:4px; padding:1px 7px; margin:0; background:#12151ccc; border-radius:4px; }
+  #lightbox { position:fixed; inset:0; background:#000c; display:none; align-items:center; justify-content:center; z-index:9; cursor:zoom-out; }
+  #lightbox img { max-width:92vw; max-height:92vh; }
 </style>
 </head>
 <body>
@@ -40,21 +50,27 @@
       <label class="radio"><input type="radio" name="tool" value="buoyL"> Buoy L (yellow, pass left)</label>
       <label class="radio"><input type="radio" name="tool" value="buoyR"> Buoy R (red, pass right)</label>
       <label class="radio"><input type="radio" name="tool" value="path"> Path (racing line, in race order)</label>
+      <label class="radio"><input type="radio" name="tool" value="note"> Note (click to add, drag to move)</label>
       <div class="ctl"><label>Brush size</label><input type="range" id="bsize" min="1" max="12" step="1" value="4"><output for="bsize"></output></div>
-      <button id="endRope">End current rope</button>
+      <div class="hint" style="margin:4px 0 6px">
+        Buoys, waypoints and notes: <b>drag</b> to move, <b>right-click</b> to
+        delete, with their tool selected. Path: <b>shift-click</b> inserts a
+        waypoint on the nearest segment; double-click a note to edit it.
+      </div>
+      <button id="endRope">End current rope (Esc)</button>
       <button id="undoRope">Delete last rope</button>
-      <button id="undoBuoy">Delete last buoy</button>
-      <button id="undoPath">Delete last waypoint</button>
-      <button id="clearAll">Clear to water</button>
+      <button id="clearAll">Clear everything</button>
     </div>
     <div class="group"><b>File</b>
+      <button id="undoBtn">Undo (Ctrl+Z)</button>
+      <button id="redoBtn">Redo (Ctrl+Y)</button>
       <button id="exportBtn">Export course.json</button>
       <button id="importBtn">Import course.json</button>
       <input type="file" id="importFile" accept=".json" hidden>
     </div>
     <div class="group"><b>Budget</b>
       <div id="stats"></div>
-      <div style="font-size:11px;color:var(--dim);margin-top:6px">
+      <div class="hint" style="margin-top:6px">
         Exact tile count comes from the bake; its quantiser merges the most
         similar tiles if the total tops 256, softening the water first.
       </div>
@@ -64,10 +80,25 @@
   <div id="view">
     <h2>1024&times;1024 texels = 4096&times;4096 world units &middot; painted at 8-texel tiles &middot; drag to paint</h2>
     <canvas id="cv" width="512" height="512"></canvas>
+    <div id="coords"></div>
     <h2 id="mini">Tiled 2&times;2 (the world repeats — seams show here)</h2>
     <canvas id="mv" width="256" height="256"></canvas>
   </div>
+
+  <div id="refs">
+    <b>Reference images</b>
+    <button id="addImg">Add images</button>
+    <input type="file" id="imgFile" accept="image/*" multiple hidden>
+    <div class="hint" style="margin:4px 0 6px">
+      or paste from the clipboard (Ctrl+V) &middot; drag cards to reorder
+      &middot; click to enlarge &middot; kept in this browser, not in
+      course.json
+    </div>
+    <div id="reflist"></div>
+  </div>
 </div>
+
+<div id="lightbox"><img></div>
 
 <script>
 "use strict";
@@ -80,10 +111,13 @@ let zones = Array.from({length: N}, () => Array(N).fill("w"));
 let ropes = [];       // finished ropes: arrays of [x,y] texel coords
 let buoys = [];       // [x, y, "L"/"R"] texel coords
 let path = [];        // racing line waypoints [x,y] texel coords, race order
+let notes = [];       // [x, y, "text"] annotations (exported; the bake ignores them)
 let current = null;   // rope being drawn
 let painting = false;
+let drag = null;      // {kind:"path"|"buoy"|"note", idx}
 
 const COL = { w: "#1d4f94", s: "#e0d2a2" };
+const WP_RADIUS = 50; // texels: the game's 200-world-unit Manhattan advance radius
 
 document.getElementById("bsize").addEventListener("input", e => {
   e.target.parentElement.querySelector("output").value = e.target.value;
@@ -92,6 +126,43 @@ document.getElementById("bsize").dispatchEvent(new Event("input"));
 
 function tool() { return document.querySelector('input[name="tool"]:checked').value; }
 
+// ---- undo / redo: whole-state snapshots, one per gesture --------------------
+let undoStack = [], redoStack = [];
+function snapshot() {
+  return JSON.stringify({ zones: zones.map(r => r.join("")),
+                          ropes, buoys, path, notes, current });
+}
+function restore(s) {
+  const c = JSON.parse(s);
+  zones = c.zones.map(r => r.split(""));
+  ropes = c.ropes; buoys = c.buoys; path = c.path; notes = c.notes;
+  current = c.current;
+  render();
+}
+function pushUndo() {
+  undoStack.push(snapshot());
+  if (undoStack.length > 80) undoStack.shift();
+  redoStack.length = 0;
+}
+function undo() {
+  if (!undoStack.length) return;
+  redoStack.push(snapshot());
+  restore(undoStack.pop());
+}
+function redo() {
+  if (!redoStack.length) return;
+  undoStack.push(snapshot());
+  restore(redoStack.pop());
+}
+document.getElementById("undoBtn").addEventListener("click", undo);
+document.getElementById("redoBtn").addEventListener("click", redo);
+document.addEventListener("keydown", e => {
+  if (e.ctrlKey && !e.shiftKey && e.key.toLowerCase() === "z") { undo(); e.preventDefault(); }
+  else if (e.ctrlKey && (e.key.toLowerCase() === "y" || (e.shiftKey && e.key.toLowerCase() === "z"))) { redo(); e.preventDefault(); }
+  else if (e.key === "Escape") { endRope(); }
+});
+
+// ---- rendering --------------------------------------------------------------
 function render() {
   for (let y = 0; y < N; y++)
     for (let x = 0; x < N; x++) {
@@ -131,6 +202,35 @@ function render() {
     for (let i = 1; i < path.length; i++) ctx.lineTo(path[i][0] / 2, path[i][1] / 2);
     if (path.length > 2) ctx.closePath();
     ctx.stroke();
+    // the game's waypoint-reached diamonds (Manhattan radius), path tool only
+    if (tool() === "path") {
+      ctx.strokeStyle = "#58c4dd44";
+      ctx.lineWidth = 1;
+      const r = WP_RADIUS / 2;
+      for (const [x, y] of path) {
+        ctx.beginPath();
+        ctx.moveTo(x / 2, y / 2 - r);
+        ctx.lineTo(x / 2 + r, y / 2);
+        ctx.lineTo(x / 2, y / 2 + r);
+        ctx.lineTo(x / 2 - r, y / 2);
+        ctx.closePath();
+        ctx.stroke();
+      }
+    }
+    // start/finish checker preview at waypoint 0, matching the bake
+    if (path.length >= 2) {
+      const [sx, sy] = path[0];
+      const dx = ((path[1][0] - sx + 1536) % 1024) - 512;
+      const dy = ((path[1][1] - sy + 1536) % 1024) - 512;
+      const horiz = Math.abs(dy) >= Math.abs(dx);
+      for (let t = -40; t < 40; t += 3)
+        for (let s = 0; s < 6; s += 3) {
+          const x = horiz ? (sx + t + 1024) % 1024 : (sx - 3 + s + 1024) % 1024;
+          const y = horiz ? (sy - 3 + s + 1024) % 1024 : (sy + t + 1024) % 1024;
+          ctx.fillStyle = ((t / 3 + s / 3) & 1) ? "#f4f4f4" : "#16161a";
+          ctx.fillRect(x / 2, y / 2, 1.5, 1.5);
+        }
+    }
     for (let i = 0; i < path.length; i++) {
       const [x, y] = path[i], nx = path[(i + 1) % path.length];
       // arrowhead at the segment midpoint
@@ -160,6 +260,20 @@ function render() {
     ctx.font = "7px monospace";
     ctx.fillText(b[2], b[0] / 2 - 2, b[1] / 2 + 2.5);
   }
+  // notes: pin + label with a readable backing
+  ctx.font = "9px 'Segoe UI',sans-serif";
+  for (const n of notes) {
+    const x = n[0] / 2, y = n[1] / 2;
+    ctx.fillStyle = "#ffd24a";
+    ctx.beginPath();
+    ctx.arc(x, y, 2.5, 0, Math.PI * 2);
+    ctx.fill();
+    const w = ctx.measureText(n[2]).width;
+    ctx.fillStyle = "#12151cbb";
+    ctx.fillRect(x + 4, y - 8, w + 6, 12);
+    ctx.fillStyle = "#ffe9a8";
+    ctx.fillText(n[2], x + 7, y + 1);
+  }
 
   mtx.imageSmoothingEnabled = false;
   for (let ty = 0; ty < 2; ty++)
@@ -187,14 +301,41 @@ function stats() {
     "</b> (~16 unique after bake)<br>rope length: <b>" + Math.round(ropeLen) +
     "</b> texels (cell-canonical: ~24 unique tiles total)<br>ropes: <b>" +
     ropes.length + (current ? " +1 open" : "") + "</b><br>buoys: <b>" + buoys.length +
-    "</b><br>waypoints: <b>" + path.length + "</b>";
+    "</b><br>waypoints: <b>" + path.length +
+    "</b><br>notes: <b>" + notes.length + "</b>";
 }
 
-function cellAt(ev) {
+// ---- pointer helpers ----------------------------------------------------------
+function texelAt(ev) {
   const r = cv.getBoundingClientRect();
-  const x = Math.floor((ev.clientX - r.left) / CELL);
-  const y = Math.floor((ev.clientY - r.top) / CELL);
-  return [Math.max(0, Math.min(N-1, x)), Math.max(0, Math.min(N-1, y))];
+  const x = Math.max(0, Math.min(1023, Math.round((ev.clientX - r.left) * 2)));
+  const y = Math.max(0, Math.min(1023, Math.round((ev.clientY - r.top) * 2)));
+  return [x, y];
+}
+function cellAt(ev) {
+  const [x, y] = texelAt(ev);
+  return [Math.min(N-1, x >> 3), Math.min(N-1, y >> 3)];
+}
+function hitIndex(list, tx, ty, r) {
+  for (let i = list.length - 1; i >= 0; i--)
+    if (Math.abs(list[i][0] - tx) <= r && Math.abs(list[i][1] - ty) <= r)
+      return i;
+  return -1;
+}
+// nearest path segment (including the closing one) within `maxD` texels
+function nearestSegment(tx, ty, maxD) {
+  let best = -1, bestD = maxD;
+  for (let i = 0; i < path.length; i++) {
+    const [ax, ay] = path[i], [bx, by] = path[(i + 1) % path.length];
+    const vx = bx - ax, vy = by - ay;
+    const len2 = vx * vx + vy * vy;
+    if (!len2) continue;
+    let t = ((tx - ax) * vx + (ty - ay) * vy) / len2;
+    t = Math.max(0, Math.min(1, t));
+    const d = Math.hypot(tx - (ax + t * vx), ty - (ay + t * vy));
+    if (d < bestD) { bestD = d; best = i; }
+  }
+  return best;
 }
 
 function paint(ev) {
@@ -230,58 +371,120 @@ function fill(ev) {
   render();
 }
 
+// ---- mouse: place / drag / edit ------------------------------------------------
 cv.addEventListener("mousedown", ev => {
+  if (ev.button !== 0) return;
   const t = tool();
+  const [tx, ty] = texelAt(ev);
   if (t === "buoyL" || t === "buoyR") {
-    const r = cv.getBoundingClientRect();
-    buoys.push([Math.round((ev.clientX - r.left) * 2),
-                Math.round((ev.clientY - r.top) * 2),
-                t === "buoyR" ? "R" : "L"]);
+    const i = hitIndex(buoys, tx, ty, 12);
+    pushUndo();
+    if (i >= 0) { drag = { kind: "buoy", idx: i }; return; }
+    buoys.push([tx, ty, t === "buoyR" ? "R" : "L"]);
+    drag = { kind: "buoy", idx: buoys.length - 1 };
     render();
   } else if (t === "path") {
-    const r = cv.getBoundingClientRect();
-    path.push([Math.round((ev.clientX - r.left) * 2),
-               Math.round((ev.clientY - r.top) * 2)]);
+    const i = hitIndex(path, tx, ty, 12);
+    if (i >= 0) { pushUndo(); drag = { kind: "path", idx: i }; return; }
+    if (ev.shiftKey && path.length >= 2) {
+      const seg = nearestSegment(tx, ty, 30);
+      if (seg >= 0) {
+        pushUndo();
+        path.splice(seg + 1, 0, [tx, ty]);
+        drag = { kind: "path", idx: seg + 1 };
+        render();
+        return;
+      }
+    }
+    pushUndo();
+    path.push([tx, ty]);
+    drag = { kind: "path", idx: path.length - 1 };
     render();
+  } else if (t === "note") {
+    const i = hitIndex(notes, tx, ty, 16);
+    if (i >= 0) { pushUndo(); drag = { kind: "note", idx: i }; return; }
+    const txt = prompt("Note text:");
+    if (txt) { pushUndo(); notes.push([tx, ty, txt]); render(); }
   } else if (t === "rope") {
-    const r = cv.getBoundingClientRect();
-    const x = Math.round((ev.clientX - r.left) * 2);
-    const y = Math.round((ev.clientY - r.top) * 2);
+    pushUndo();
     if (!current) current = [];
-    current.push([x, y]);
+    current.push([tx, ty]);
     render();
   } else if (t === "fill") {
+    pushUndo();
     fill(ev);
   } else {
+    pushUndo(); // one undo step per brush stroke
     painting = true;
     paint(ev);
   }
 });
-cv.addEventListener("mousemove", ev => { if (painting) paint(ev); });
-window.addEventListener("mouseup", () => { painting = false; });
+cv.addEventListener("mousemove", ev => {
+  const [tx, ty] = texelAt(ev);
+  document.getElementById("coords").textContent =
+    "texel " + tx + "," + ty + " · world " + tx * 4 + "," + ty * 4 +
+    " · cell " + (tx >> 3) + "," + (ty >> 3);
+  if (drag) {
+    const list = drag.kind === "buoy" ? buoys : drag.kind === "path" ? path : notes;
+    list[drag.idx][0] = tx;
+    list[drag.idx][1] = ty;
+    render();
+  } else if (painting) paint(ev);
+});
+window.addEventListener("mouseup", () => { painting = false; drag = null; });
+cv.addEventListener("mouseleave", () => {
+  document.getElementById("coords").textContent = "";
+});
+// right-click deletes the pointed-at item of the current tool
+cv.addEventListener("contextmenu", ev => {
+  ev.preventDefault();
+  const t = tool();
+  const [tx, ty] = texelAt(ev);
+  const del = (list, r) => {
+    const i = hitIndex(list, tx, ty, r);
+    if (i >= 0) { pushUndo(); list.splice(i, 1); render(); }
+  };
+  if (t === "buoyL" || t === "buoyR") del(buoys, 12);
+  else if (t === "path") del(path, 12);
+  else if (t === "note") del(notes, 16);
+});
+// double-click a note to edit its text
+cv.addEventListener("dblclick", ev => {
+  if (tool() !== "note") return;
+  const [tx, ty] = texelAt(ev);
+  const i = hitIndex(notes, tx, ty, 16);
+  if (i < 0) return;
+  const txt = prompt("Note text:", notes[i][2]);
+  if (txt === null) return;
+  pushUndo();
+  if (txt) notes[i][2] = txt;
+  else notes.splice(i, 1);
+  render();
+});
 
-document.getElementById("endRope").addEventListener("click", () => {
-  if (current && current.length >= 2) ropes.push(current);
+// ---- buttons -------------------------------------------------------------------
+function endRope() {
+  if (!current) return;
+  pushUndo();
+  if (current.length >= 2) ropes.push(current);
   current = null;
   render();
-});
-document.getElementById("undoBuoy").addEventListener("click", () => {
-  buoys.pop();
-  render();
-});
-document.getElementById("undoPath").addEventListener("click", () => {
-  path.pop();
-  render();
-});
+}
+document.getElementById("endRope").addEventListener("click", endRope);
 document.getElementById("undoRope").addEventListener("click", () => {
+  pushUndo();
   if (current) current = null;
   else ropes.pop();
   render();
 });
 document.getElementById("clearAll").addEventListener("click", () => {
-  if (!confirm("Clear the whole map to water?")) return;
+  if (!confirm("Clear the map, ropes, buoys, path and notes? (undoable)")) return;
+  pushUndo();
   zones = Array.from({length: N}, () => Array(N).fill("w"));
   ropes = [];
+  buoys = [];
+  path = [];
+  notes = [];
   current = null;
   render();
 });
@@ -291,7 +494,8 @@ document.getElementById("exportBtn").addEventListener("click", () => {
     zones: zones.map(r => r.join("")),
     ropes: ropes,
     buoys: buoys,
-    path: path
+    path: path,
+    notes: notes
   }) + "\n";
   const a = document.createElement("a");
   a.href = URL.createObjectURL(new Blob([json], { type: "application/json" }));
@@ -305,16 +509,104 @@ document.getElementById("importFile").addEventListener("change", ev => {
   if (!f) return;
   f.text().then(txt => {
     const c = JSON.parse(txt);
+    pushUndo();
     zones = c.zones.map(r => r.split(""));
     ropes = c.ropes || [];
     buoys = c.buoys || [];
     path = c.path || [];
+    notes = c.notes || [];
     current = null;
     render();
   });
   ev.target.value = "";
 });
 
+// ---- reference images: local to this browser, never in course.json --------------
+let refImgs = [];
+const REFS_KEY = "swr-course-refs";
+try { refImgs = JSON.parse(localStorage.getItem(REFS_KEY)) || []; } catch (e) {}
+
+function saveRefs() {
+  try { localStorage.setItem(REFS_KEY, JSON.stringify(refImgs)); }
+  catch (e) { /* over quota: the session keeps working, persistence doesn't */ }
+}
+function renderRefs() {
+  const list = document.getElementById("reflist");
+  list.innerHTML = "";
+  refImgs.forEach((src, i) => {
+    const card = document.createElement("div");
+    card.className = "refcard";
+    card.draggable = true;
+    const img = document.createElement("img");
+    img.src = src;
+    img.addEventListener("click", () => {
+      const lb = document.getElementById("lightbox");
+      lb.querySelector("img").src = src;
+      lb.style.display = "flex";
+    });
+    const x = document.createElement("button");
+    x.className = "x";
+    x.textContent = "×";
+    x.addEventListener("click", ev => {
+      ev.stopPropagation();
+      refImgs.splice(i, 1);
+      saveRefs();
+      renderRefs();
+    });
+    card.addEventListener("dragstart", ev =>
+      ev.dataTransfer.setData("text/plain", String(i)));
+    card.addEventListener("dragover", ev => {
+      ev.preventDefault();
+      card.classList.add("dragover");
+    });
+    card.addEventListener("dragleave", () => card.classList.remove("dragover"));
+    card.addEventListener("drop", ev => {
+      ev.preventDefault();
+      card.classList.remove("dragover");
+      const from = parseInt(ev.dataTransfer.getData("text/plain"), 10);
+      if (isNaN(from) || from === i) return;
+      const [moved] = refImgs.splice(from, 1);
+      refImgs.splice(i, 0, moved);
+      saveRefs();
+      renderRefs();
+    });
+    card.appendChild(img);
+    card.appendChild(x);
+    list.appendChild(card);
+  });
+}
+function addRefFiles(files) {
+  for (const f of files) {
+    if (!f.type.startsWith("image/")) continue;
+    const rd = new FileReader();
+    rd.onload = () => {
+      refImgs.push(rd.result);
+      saveRefs();
+      renderRefs();
+    };
+    rd.readAsDataURL(f);
+  }
+}
+document.getElementById("addImg").addEventListener("click", () =>
+  document.getElementById("imgFile").click());
+document.getElementById("imgFile").addEventListener("change", ev => {
+  addRefFiles(ev.target.files);
+  ev.target.value = "";
+});
+document.addEventListener("paste", ev => {
+  const files = [...(ev.clipboardData || {}).items || []]
+    .filter(it => it.kind === "file")
+    .map(it => it.getAsFile());
+  if (files.length) addRefFiles(files);
+});
+document.getElementById("lightbox").addEventListener("click", ev =>
+  ev.currentTarget.style.display = "none");
+
+// waypoint diamonds toggle with the tool, so re-render on tool change
+for (const r of document.querySelectorAll('input[name="tool"]'))
+  r.addEventListener("change", render);
+
+renderRefs();
 render();
 </script>
 </body>
