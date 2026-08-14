@@ -600,7 +600,8 @@ def load_pattern():
 # ---- course: sand islands, shorelines, rope float-lines ----------------------
 # palette indices 8-13 (the course block in the colour map)
 SAND, SAND_SH, FOAM, WET_SAND, FLOAT_A, SHAL_BLUE, CALM, SHAL_SAND =     8, 9, 10, 11, 12, 13, 14, 15
-CHECK_DARK = 32  # start/finish checker black (BG-reserve palette block)
+CHECK_DARK = 32   # start/finish checker black (BG-reserve palette block)
+CHECK_WHITE = 33  # ...and its own true white (FOAM went pale blue)
 COURSE_COLORS = {
     SAND: (232, 214, 164), SAND_SH: (212, 190, 142),
     FOAM: (172, 214, 246), WET_SAND: (186, 164, 118),  # foam = lattice blue
@@ -781,7 +782,7 @@ def compose_canvas(pat, course):
                     x, y = (sx + t) & 1023, (sy - THICK // 2 + s) & 1023
                 else:
                     x, y = (sx - THICK // 2 + s) & 1023, (sy + t) & 1023
-                canvas[y][x] = FOAM if ((t // CELL) + (s // CELL)) & 1 \
+                canvas[y][x] = CHECK_WHITE if ((t // CELL) + (s // CELL)) & 1 \
                     else CHECK_DARK
     return canvas, coll
 
@@ -868,7 +869,8 @@ def build_mode7_data(canvas, palette):
     if raw_unique > 256:
         # class 1 = contains course colours (shore foam, sand, ropes, floats,
         # the start-line checker) - never merged into water
-        classes = [1 if any(8 <= (px & 0x7F) <= 15 or (px & 0x7F) == CHECK_DARK
+        classes = [1 if any(8 <= (px & 0x7F) <= 15
+                            or (px & 0x7F) in (CHECK_DARK, CHECK_WHITE)
                             for px in t) else 0 for t in tiles]
         alive, resolve, merges = quantize_tiles(tiles, counts, palette, classes)
         final = {old: new for new, old in enumerate(alive)}
@@ -934,7 +936,8 @@ def main():
     for idx, rgb in COURSE_COLORS.items():
         palette[idx] = rgb
     palette[SHAL_SAND] = palette[SAND]
-    palette[CHECK_DARK] = (16, 16, 20)  # start-line checker black
+    palette[CHECK_DARK] = (16, 16, 20)    # start-line checker black
+    palette[CHECK_WHITE] = (250, 250, 250) # start-line checker white
     rs, rc = int(P["rotStart"]), int(P["rotCount"])
     palette[SHAL_BLUE] = max((palette[rs + i] for i in range(rc)), key=sum)
     course = load_course()
@@ -973,7 +976,8 @@ def main():
     # per-PIXEL exemption: anything sand-coloured (beach, wet-sand line,
     # sandy shallows) plus the rope cord and floats escape the glow; foam,
     # pale shallows, calm wake and open water keep the crest highlights
-    exempt = (SAND, SAND_SH, WET_SAND, FLOAT_A, SHAL_SAND, CHECK_DARK)
+    exempt = (SAND, SAND_SH, WET_SAND, FLOAT_A, SHAL_SAND,
+              CHECK_DARK, CHECK_WHITE)
     for row in canvas:
         for x in range(1024):
             if row[x] in exempt:
