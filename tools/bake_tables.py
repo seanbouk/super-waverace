@@ -600,8 +600,8 @@ def load_pattern():
 # ---- course: sand islands, shorelines, rope float-lines ----------------------
 # palette indices 8-13 (the course block in the colour map)
 SAND, SAND_SH, FOAM, WET_SAND, FLOAT_A, SHAL_BLUE, CALM, SHAL_SAND =     8, 9, 10, 11, 12, 13, 14, 15
-CHECK_DARK = 32   # start/finish checker black (BG-reserve palette block)
-CHECK_WHITE = 33  # ...and its own true white (FOAM went pale blue)
+CHECK_DARK = 48   # start/finish checker black - NOT 32-47, which is the
+CHECK_WHITE = 49  # mode-1 sky palette row loaded over CGRAM at boot
 COURSE_COLORS = {
     SAND: (232, 214, 164), SAND_SH: (212, 190, 142),
     FOAM: (172, 214, 246), WET_SAND: (186, 164, 118),  # foam = lattice blue

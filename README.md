@@ -139,12 +139,13 @@ The line in the sand — update this table whenever an allocation changes.
 
 | Entries | Owner | Notes |
 |---------|-------|-------|
-| 0 | Backdrop | Sky above the horizon (dusk orange, set at runtime) |
+| 0 | Backdrop | Sky safe strip above the horizon (deep azure, set at runtime; shaded by COLDATA) |
 | 1–7 | Water | `1..N` rotating deep stripes (ping-pong colours), `N+1` peaks, `N+2` lattice. N ≤ 5 fits here |
-| 8–15 | Course | 8 sand, 9 sand shade, 10 foam, 11 wet sand/rope, 12 float magenta, 13 shallow blue, 14 calm wake, 15 shallow sand |
+| 8–15 | Course | 8 sand, 9 sand shade (unused), 10 foam (pale blue), 11 wet sand/rope, 12 float magenta, 13 shallow blue, 14 calm wake, 15 shallow sand (unused) |
 | 16–31 | UI text | Font palette for the mode-1 text band (palette row 1) |
-| 32–47 | Sky band | Palette row 2: the mode-1 sky gradient tiles |
-| 48–127 | BG reserve | Unallocated |
+| 32–47 | Sky band | Palette row 2: the mode-1 sky gradient tiles (loaded over CGRAM at boot — nothing else may live here) |
+| 48–49 | Start line | Checker black / true white (glow-exempt) |
+| 50–127 | BG reserve | Unallocated |
 | 128–143 | Ski + buoys | OBJ palette 0 (shared: ski, buoy yellows/reds, letters) |
 | 144–191 | NPC racers | OBJ palettes 1–3: green/purple/orange recolours of the ski palette (tiles shared) |
 | 192–255 | Sprites reserve | OBJ palettes 4–7 — do not touch from BG code |
