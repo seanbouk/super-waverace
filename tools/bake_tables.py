@@ -164,10 +164,16 @@ def phase_tables(phi, sky_ref):
     g_entries = []
     # sky gradient: the backdrop (deep azure) gets progressively more white
     # added toward the horizon - same COLDATA channel the crest glow rides,
-    # with the backdrop enabled in colour math (CGADSUB bit 5, main.c)
+    # with the backdrop enabled in colour math (CGADSUB bit 5, main.c).
+    # The 5-bit COLDATA steps band visibly, so the ramp runs in QUARTER
+    # steps: between integer levels, lines interleave k / k+1 in 4-line
+    # ordered-dither patterns (still one colour write per row) - the bands
+    # dissolve into fine stripes that blend on screen.
+    dither = ((0, 0, 0, 0), (0, 0, 0, 1), (0, 1, 0, 1), (0, 1, 1, 1))
     span = max(1, sky_ref - UI_LINES - 1)
     for i in range(n_sky - UI_LINES):
-        b = round(SKY_GRAD_MAX * min(1.0, i / span) ** 1.3)
+        q = round(4 * SKY_GRAD_MAX * min(1.0, i / span) ** 1.3)
+        b = (q >> 2) + dither[q & 3][i & 3]
         g_entries.append((0xE0 | min(31, b),))
     for x in sea_x:
         # crest glow: sin() is 1 exactly at wave tops, fades down the flanks
