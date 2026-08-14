@@ -688,40 +688,18 @@ def compose_canvas(pat, course):
                     n = ((x & 7) * 13 + (y & 7) * 29 + ((x & 7) * (y & 7))) % 17
                     canvas[y][x] = FOAM if n < cut else gap
 
-    # sand depth from the water (4-neighbour BFS over sand cells):
-    # 1 = coastline (wet body, foam fringe on the water edges), 2 = flat
-    # wet, 3 = wet/dry transition autotiled from its 4 neighbours with
-    # rounded corners, 4+ = flat plain dry sand
-    sdist = [[99] * 128 for _ in range(128)]
-    sfront = []
-    for cy in range(128):
-        for cx in range(128):
-            if zones[cy][cx] == "s" and (
-                    water(cy - 1, cx) or water(cy + 1, cx)
-                    or water(cy, cx - 1) or water(cy, cx + 1)):
-                sdist[cy][cx] = 1
-                sfront.append((cy, cx))
-    for step in (2, 3):
-        nxt = []
-        for cy, cx in sfront:
-            for dy, dx in ((-1, 0), (1, 0), (0, -1), (0, 1)):
-                ny, nx = (cy + dy) & 127, (cx + dx) & 127
-                if sdist[ny][nx] == 99 and zones[ny][nx] == "s":
-                    sdist[ny][nx] = step
-                    nxt.append((ny, nx))
-        sfront = nxt
-
+    # sand: the coastline cells (4-adjacent to water) get a wet-sand body
+    # with a foam fringe on the water edges; everything inland is flat
+    # plain dry sand
     for cy in range(128):
         zrow = zones[cy]
         for cx in range(128):
             if zrow[cx] != "s":
                 continue
             coll[cy * 128 + cx] = 1
-            sd = sdist[cy][cx]
-            if sd == 1:
-                # coastline: wet sand body, foam fringe facing the water
-                n, s_, w, e = water(cy - 1, cx), water(cy + 1, cx), \
-                    water(cy, cx - 1), water(cy, cx + 1)
+            n, s_, w, e = water(cy - 1, cx), water(cy + 1, cx), \
+                water(cy, cx - 1), water(cy, cx + 1)
+            if n or s_ or w or e:
                 for py in range(8):
                     y = cy * 8 + py
                     for px in range(8):
@@ -735,35 +713,6 @@ def compose_canvas(pat, course):
                         if e:
                             d = min(d, 7 - px)
                         canvas[y][cx * 8 + px] = FOAM if d <= 1 else WET_SAND
-            elif sd == 2:
-                for py in range(8):
-                    y = cy * 8 + py
-                    for px in range(8):
-                        canvas[y][cx * 8 + px] = WET_SAND
-            elif sd == 3:
-                # transition: wet bands toward the flat-wet row, plain sand
-                # inside; concave corners between adjacent wet sides get
-                # quarter-circle fillets so the line curves smoothly
-                wn = sdist[(cy - 1) & 127][cx] <= 2
-                ws = sdist[(cy + 1) & 127][cx] <= 2
-                ww = sdist[cy][(cx - 1) & 127] <= 2
-                we = sdist[cy][(cx + 1) & 127] <= 2
-                for py in range(8):
-                    y = cy * 8 + py
-                    for px in range(8):
-                        dn = py if wn else 9
-                        ds = 7 - py if ws else 9
-                        dw = px if ww else 9
-                        de = 7 - px if we else 9
-                        wet = min(dn, ds, dw, de) < 4
-                        if not wet:
-                            for a, b in ((dn, dw), (dn, de),
-                                         (ds, dw), (ds, de)):
-                                if a < 9 and b < 9 and \
-                                        (a - 4) * (a - 4) + (b - 4) * (b - 4) < 16:
-                                    wet = True
-                                    break
-                        canvas[y][cx * 8 + px] = WET_SAND if wet else SAND
             else:
                 for py in range(8):
                     y = cy * 8 + py
