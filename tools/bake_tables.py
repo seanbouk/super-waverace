@@ -176,13 +176,12 @@ def phase_tables(phi, sky_ref, switch):
         "horizon above the mode switch (n_sky={0} < {1})".format(n_sky, switch)
 
     g_entries = []
-    # safe strip: quarter-step ordered dither between COLDATA levels so the
-    # few backdrop lines blend seamlessly out of the tiled sky above
-    dither = ((0, 0, 0, 0), (0, 0, 0, 1), (0, 1, 0, 1), (0, 1, 1, 1))
+    # safe strip: SOLID blue - the exact bottom colour of the mode-1 sky
+    # band (backdrop + the same integer add its last anchor uses), flat to
+    # the horizon
+    strip = min(31, round(sky_add_at(switch, sky_ref)))
     for i in range(n_sky - switch):
-        q = round(4 * sky_add_at(switch + i, sky_ref))
-        b = (q >> 2) + dither[q & 3][i & 3]
-        g_entries.append((0xE0 | min(31, b),))
+        g_entries.append((0xE0 | strip,))
     for x in sea_x:
         # crest glow: sin() is 1 exactly at wave tops, fades down the flanks
         c = math.sin(K_WAVE * x + phi)
@@ -199,33 +198,37 @@ def phase_tables(phi, sky_ref, switch):
 
 
 def build_sky_band(switch, sky_ref):
-    """Mode-1 sky tiles: one 8x8 char per tile row from the UI band down to
-    the mode switch, drawing the same gradient as sky_add_at with a
-    16-colour palette and per-line 4px dithering (2D once rows stack).
-    Returns (tiles, palette bytes, n_rows)."""
-    n_rows = (switch - UI_LINES) // 8
+    """Mode-1 sky tiles: an azure gradient from the UI band down to the
+    mode switch, 16-colour palette with per-line 4px dithering (2D once
+    rows stack). Two exactness rules: (1) BG scroll is off by one (screen
+    line N samples MAP line N+1), so the tiles are authored map-line
+    indexed, one row taller than the visible band; (2) the 16 anchors are
+    the 5-bit backdrop plus INTEGER adds - the same arithmetic COLDATA
+    does - so the solid mode-7 strip below continues the last anchor
+    bit-exactly. Returns (tiles, palette bytes, n_map_rows)."""
+    n_rows = (switch - UI_LINES) // 8 + 1  # +1: the scroll off-by-one row
+    base5 = [c >> 3 for c in SKY_RGB]
 
-    def col_at(line):
-        a = 8.0 * sky_add_at(line, sky_ref)
-        return tuple(min(255.0, c + a) for c in SKY_RGB)
+    def anchor_add(k):
+        line = UI_LINES + (switch - UI_LINES) * k / 15.0
+        return min(31, round(sky_add_at(line, sky_ref)))
 
-    # 16 anchors spanning the drawn band; anchor 15 sits AT the switch line
-    # so the backdrop strip below continues the ramp seamlessly
-    anchors = [col_at(UI_LINES + (switch - UI_LINES) * k / 15.0)
-               for k in range(16)]
     pal = bytearray()
-    for r, g, b in anchors:
-        pal += struct.pack("<H", ((int(b) >> 3) << 10)
-                           | ((int(g) >> 3) << 5) | (int(r) >> 3))
+    for k in range(16):
+        a = anchor_add(k)
+        r, g, b = (min(31, c + a) for c in base5)
+        pal += struct.pack("<H", (b << 10) | (g << 5) | r)
     pats = ((0, 0, 0, 0), (1, 0, 0, 0), (1, 0, 1, 0), (1, 1, 1, 0))
     grid = [[0] * 8 for _ in range(n_rows * 8)]
-    for i in range(n_rows * 8):
-        p = 15.0 * i / max(1, switch - UI_LINES - 1)
+    for g in range(n_rows * 8):
+        # map line UI_LINES+g draws on SCREEN line UI_LINES+g-1
+        s = min(switch - 1, max(UI_LINES, UI_LINES + g - 1))
+        p = 15.0 * (s - UI_LINES) / max(1, switch - UI_LINES - 1)
         k = min(15, int(p))
         d = pats[min(3, int((p - k) * 4))]
         for x in range(8):
-            c = k + d[(x + i) & 3] # rotate the pattern per line: Bayer-ish
-            grid[i][x] = min(15, c)
+            c = k + d[(x + g) & 3] # rotate the pattern per line: Bayer-ish
+            grid[g][x] = min(15, c)
     return encode_4bpp(grid, 1, n_rows), bytes(pal), n_rows
 
 
