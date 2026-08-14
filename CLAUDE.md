@@ -77,8 +77,11 @@ Mesen.exe --testrunner --timeout=30 <rom> <script.lua>   # arg order-free
   the vblank that ends WaitForVBlank. Order in the main loop is load-bearing:
   sprite/OAM updates BEFORE WaitForVBlank; waveHdma (which reprograms all 8
   channel configs) immediately AFTER. Don't reorder.
-- **$210D is shared**: M7HOFS and the UI band's BG1 scroll. Sky/UI-band rows
-  of the built tables must stay zero (they're pre-zeroed, builder skips them).
+- **$210D/$210E are shared**: M7HOFS/M7VOFS and BG1's mode-1 scroll. Sky/UI
+  rows of the built tables must stay zero (pre-zeroed, builder skips them) —
+  the mode-1 region now extends to WAVE_SKY_SWITCH (the tiled sky band), and
+  its tiles render unscrolled BECAUSE of those zeros. Sky tiles live at
+  VRAM 0x5C00 (chars 192+, above the font), palette row 2 (CGRAM 32-47).
 - **HOFS must be signed 13-bit** (HOFS − M7X = −128 exactly); masking it
   positive breaks under fractional M7A (was the "occasional skew" bug).
 - **Write-twice M7 regs + paired-register HDMA**: modes 2 (p,p) and 3

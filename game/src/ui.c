@@ -1,10 +1,15 @@
 #include "ui.h"
 #include "wavedata.h"
 
-// HDMA table for $2105: mode 1 for the UI band, mode 7 for the rest
+extern char sky_gfx, sky_pal2; // baked mode-1 sky band (wavetables.asm)
+
+// HDMA table for $2105: mode 1 from the top (text band + tiled sky) down
+// to the baked switch line - just above the wave cycle's highest horizon -
+// then mode 7 for the sea. The strip between the switch and the true
+// horizon stays backdrop + COLDATA gradient (see bake_tables.py).
 static const u8 uiModeTable[] = {
-    WAVE_UI_LINES, 0x01, // BG mode 1 (text on BG1, 16 colours)
-    1, 0x07,             // then BG mode 7 for the remaining lines
+    WAVE_SKY_SWITCH, 0x01, // BG mode 1: text + sky tiles
+    1, 0x07,               // then BG mode 7 for the sea
     0x00
 };
 
@@ -27,6 +32,21 @@ void uiInit(void)
     consoleSetTextGfxPtr(0x5000);
     consoleSetTextMapPtr(0x7000);
     consoleInitDefaultText(1); // palette row 1 = CGRAM 16-31 (see colour map)
+
+    // mode-1 sky band: gradient tiles (chars WAVE_SKY_CHAR0+, VRAM above
+    // the font) on palette row 2 (CGRAM 32-47), one char per map row from
+    // tile row 3 down to the mode-switch line. Uses uiMap as scratch for
+    // the row DMAs, then the text init below repaints it.
+    dmaCopyVram((u8 *)&sky_gfx, 0x5000 + WAVE_SKY_CHAR0 * 16,
+                WAVE_SKY_ROWS * 32);
+    dmaCopyCGram((u8 *)&sky_pal2, 32, 32);
+    for (i = 0; i < WAVE_SKY_ROWS; i++)
+    {
+        u16 c;
+        for (c = 0; c < 32; c++)
+            uiMap[c] = 0x0800 | (WAVE_SKY_CHAR0 + i); // palette row 2
+        dmaCopyVram((u8 *)uiMap, 0x7000 + (UI_ROWS + i) * 32, 64);
+    }
 
     for (i = 0; i < UI_COLS * UI_ROWS; i++)
         uiMap[i] = UI_ATTR; // tile 0 = space

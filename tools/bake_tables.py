@@ -39,6 +39,13 @@ SKY_RGB = (16, 60, 150)  # backdrop / palette index 0 (deep azure zenith)
 # per-scanline additive sky gradient (COLDATA, riding the crest-glow HDMA
 # channel): 0 at the top of the sky, this much white added at the horizon
 SKY_GRAD_MAX = 17
+# The sky above the HIGHEST horizon of the wave cycle runs in MODE 1: real
+# 4bpp tiles (palette row 2) drawing the same gradient with 2D dithering -
+# far smoother than COLDATA's 5-bit steps. The mode switches back to 7 a
+# safe margin above the highest horizon; the strip between the switch and
+# the true (moving) horizon keeps the COLDATA backdrop gradient.
+SKY_SAFE = 6         # scanlines of margin above the highest horizon
+SKY_CHAR0 = 192      # first tile id for sky rows (VRAM 0x5C00, above font)
 
 DEFAULTS = {
     "camH": 34.0, "pitch": -10.0, "fovV": 25.0, "fovH": 60.0,
@@ -150,29 +157,30 @@ def repeat_blocks(n, value):
     return out
 
 
-def phase_tables(phi, sky_ref):
+def sky_add_at(line, sky_ref):
+    """The fixed-from-the-top sky light-field: COLDATA add units at an
+    absolute scanline, normalised against the deepest horizon of the whole
+    cycle (the moving horizon slices into it, it never breathes)."""
+    span = max(1, sky_ref - UI_LINES - 1)
+    return SKY_GRAD_MAX * min(1.0, (line - UI_LINES) / span) ** 1.3
+
+
+def phase_tables(phi, sky_ref, switch):
     """HDMA tables that stay camera-independent: sky/sea split + crest glow.
-    sky_ref = the deepest horizon line across all phases: the sky gradient
-    is normalised against it, so the light-field is FIXED from the top and
-    the moving horizon merely slices into it (it must not breathe with the
-    swell). Returns (tm, glow, n_sky)."""
+    Lines up to `switch` run in mode 1 (text band + tiled sky, no COLDATA
+    add); the safe strip from `switch` to this phase's horizon keeps the
+    backdrop + COLDATA gradient; then BG1 sea with crest glow.
+    Returns (tm, glow, n_sky)."""
     n_sky, sea_x = raycast_phase(phi)
-    assert n_sky >= UI_LINES, \
-        "sea reaches into the UI band (n_sky={0} < {1}) - raise camH/pitch".format(
-            n_sky, UI_LINES)
+    assert n_sky >= switch, \
+        "horizon above the mode switch (n_sky={0} < {1})".format(n_sky, switch)
 
     g_entries = []
-    # sky gradient: the backdrop (deep azure) gets progressively more white
-    # added toward the horizon - same COLDATA channel the crest glow rides,
-    # with the backdrop enabled in colour math (CGADSUB bit 5, main.c).
-    # The 5-bit COLDATA steps band visibly, so the ramp runs in QUARTER
-    # steps: between integer levels, lines interleave k / k+1 in 4-line
-    # ordered-dither patterns (still one colour write per row) - the bands
-    # dissolve into fine stripes that blend on screen.
+    # safe strip: quarter-step ordered dither between COLDATA levels so the
+    # few backdrop lines blend seamlessly out of the tiled sky above
     dither = ((0, 0, 0, 0), (0, 0, 0, 1), (0, 1, 0, 1), (0, 1, 1, 1))
-    span = max(1, sky_ref - UI_LINES - 1)
-    for i in range(n_sky - UI_LINES):
-        q = round(4 * SKY_GRAD_MAX * min(1.0, i / span) ** 1.3)
+    for i in range(n_sky - switch):
+        q = round(4 * sky_add_at(switch + i, sky_ref))
         b = (q >> 2) + dither[q & 3][i & 3]
         g_entries.append((0xE0 | min(31, b),))
     for x in sea_x:
@@ -181,12 +189,44 @@ def phase_tables(phi, sky_ref):
         b = round(P["crestGlow"] * max(0.0, c) ** P["glowGamma"]) if c > 0 else 0
         g_entries.append((0xE0 | min(31, b),))
 
-    # TM: UI band shows BG1 (mode-1 text), then backdrop sky, then BG1 sea
-    tab_tm = bytes(repeat_blocks(UI_LINES, 0x11)
-                   + repeat_blocks(n_sky - UI_LINES, SKY_TM)
+    # TM: BG1 through the whole mode-1 region (text band + tiled sky), then
+    # backdrop-only safe strip, then BG1 sea
+    tab_tm = bytes(repeat_blocks(switch, 0x11)
+                   + repeat_blocks(n_sky - switch, SKY_TM)
                    + bytearray((0x81, SEA_TM, 0x00)))
-    tab_g = hdma_table(UI_LINES, (0xE0,), g_entries) # UI band: add zero
+    tab_g = hdma_table(switch, (0xE0,), g_entries) # mode-1 region: add zero
     return tab_tm, tab_g, n_sky
+
+
+def build_sky_band(switch, sky_ref):
+    """Mode-1 sky tiles: one 8x8 char per tile row from the UI band down to
+    the mode switch, drawing the same gradient as sky_add_at with a
+    16-colour palette and per-line 4px dithering (2D once rows stack).
+    Returns (tiles, palette bytes, n_rows)."""
+    n_rows = (switch - UI_LINES) // 8
+
+    def col_at(line):
+        a = 8.0 * sky_add_at(line, sky_ref)
+        return tuple(min(255.0, c + a) for c in SKY_RGB)
+
+    # 16 anchors spanning the drawn band; anchor 15 sits AT the switch line
+    # so the backdrop strip below continues the ramp seamlessly
+    anchors = [col_at(UI_LINES + (switch - UI_LINES) * k / 15.0)
+               for k in range(16)]
+    pal = bytearray()
+    for r, g, b in anchors:
+        pal += struct.pack("<H", ((int(b) >> 3) << 10)
+                           | ((int(g) >> 3) << 5) | (int(r) >> 3))
+    pats = ((0, 0, 0, 0), (1, 0, 0, 0), (1, 0, 1, 0), (1, 1, 1, 0))
+    grid = [[0] * 8 for _ in range(n_rows * 8)]
+    for i in range(n_rows * 8):
+        p = 15.0 * i / max(1, switch - UI_LINES - 1)
+        k = min(15, int(p))
+        d = pats[min(3, int((p - k) * 4))]
+        for x in range(8):
+            c = k + d[(x + i) & 3] # rotate the pattern per line: Bayer-ish
+            grid[i][x] = min(15, c)
+    return encode_4bpp(grid, 1, n_rows), bytes(pal), n_rows
 
 
 def phase_raw(phi):
@@ -957,12 +997,19 @@ def main():
     arr_name = {"tm": "waveTM", "g": "waveG"}
     total = 0
     raw_d, raw_a, sky_counts, ski_rows, surf_hs = [], [], [], [], []
-    # deepest horizon across the cycle: the sky gradient's fixed reference
-    sky_ref = max(raycast_phase(2 * math.pi * p / phases)[0]
-                  for p in range(phases))
+    # horizon extremes across the cycle: deepest normalises the gradient,
+    # highest (minus a margin, floored to a tile row) sets the mode switch
+    horizons = [raycast_phase(2 * math.pi * p / phases)[0]
+                for p in range(phases)]
+    sky_ref = max(horizons)
+    sky_switch = ((min(horizons) - SKY_SAFE) // 8) * 8
+    assert UI_LINES + 8 <= sky_switch <= 127, \
+        "mode-1 sky band needs UI_LINES+8 <= switch <= 127 (HDMA count)"
+    sky_gfx, sky_pal2, sky_rows = build_sky_band(sky_switch, sky_ref)
+    assert SKY_CHAR0 + sky_rows <= 256, "sky tiles overflow the char space"
     for p in range(phases):
         phi = 2 * math.pi * p / phases
-        tm_tab, g_tab, n_sky = phase_tables(phi, sky_ref)
+        tm_tab, g_tab, n_sky = phase_tables(phi, sky_ref, sky_switch)
         tabs = {"tm": tm_tab, "g": g_tab}
         sky_counts.append(n_sky)
         d_words, a_words = phase_raw(phi)
@@ -1024,6 +1071,10 @@ def main():
     asm.append(db_lines(ski_pal))
     asm.append("npc_pals:")
     asm.append(db_lines(npc_pals))
+    asm.append("sky_gfx:")
+    asm.append(db_lines(sky_gfx))
+    asm.append("sky_pal2:")
+    asm.append(db_lines(sky_pal2))
     asm.append(".ends")
     asm.append("")
 
@@ -1053,6 +1104,10 @@ def main():
 #define WAVE_PC7_SIZE {{PC7SIZE}}
 #define WAVE_BUOY_COUNT {{NBUOYS}}
 #define WAVE_PATH_COUNT {{NPATH}}
+/* mode-1 sky band: tile rows under the text, mode 7 resumes at the switch */
+#define WAVE_SKY_SWITCH {{SKSW}}
+#define WAVE_SKY_ROWS {{SKRW}}
+#define WAVE_SKY_CHAR0 {{SKC0}}
 /* start grid (world units, ski positions; heading in binary degrees) */
 #define WAVE_START_X {{STX}}
 #define WAVE_START_Y {{STY}}
@@ -1089,6 +1144,9 @@ void waveRotateStep(u8 offset);
 """.replace("{{PC7SIZE}}", str(len(pc7))).replace("{{NBUOYS}}",
              str(len(course[2]) if course else 0)).replace("{{NPATH}}",
              str(len(course[3]) if course else 0))
+           .replace("{{SKSW}}", str(sky_switch))
+           .replace("{{SKRW}}", str(sky_rows))
+           .replace("{{SKC0}}", str(SKY_CHAR0))
            .replace("{{STX}}", str(start_slot[0]))
            .replace("{{STY}}", str(start_slot[1]))
            .replace("{{STTH}}", str(start_theta))

@@ -108,8 +108,16 @@ to the surface row so scale swaps never read as movement. A buoy tucked behind a
 crest rides up onto the wave in front rather than hiding. Rope floats are magenta
 so they never read as R buoys.
 
-**The UI band.** The top 24 scanlines run in BG mode 1 (HDMA on `$2105` switches the
-whole PPU mode mid-frame and back), giving 3 rows of tiled text. The PVSnesLib
+**The UI band and the sky.** The screen runs in BG mode 1 from the top down to a
+baked switch line just above the wave cycle's highest horizon (HDMA on `$2105`
+switches the whole PPU mode mid-frame), giving 3 rows of tiled text plus a tiled
+sky: a 16-colour azure gradient with 2D dithering (palette row 2), far smoother
+than per-scanline colour math could manage. The few lines between the switch and
+the true (moving) horizon stay backdrop-only, shaded by a per-scanline COLDATA
+ramp that continues the same gradient, so the seam is invisible. This works
+because the M7 HOFS/VOFS HDMA rows above the horizon are pre-zeroed — and those
+registers double as BG1's scroll in mode 1, so the sky tiles render unscrolled
+for free. The PVSnesLib
 console uploads its map to a hardcoded VRAM address inside the Mode 7 region, so
 `game/src/ui.c` owns its own map buffer and DMAs it in vblank; the library is still
 used for its font and palette. Shows position/heading/speed, build profiler,
@@ -135,7 +143,8 @@ The line in the sand — update this table whenever an allocation changes.
 | 1–7 | Water | `1..N` rotating deep stripes (ping-pong colours), `N+1` peaks, `N+2` lattice. N ≤ 5 fits here |
 | 8–15 | Course | 8 sand, 9 sand shade, 10 foam, 11 wet sand/rope, 12 float magenta, 13 shallow blue, 14 calm wake, 15 shallow sand |
 | 16–31 | UI text | Font palette for the mode-1 text band (palette row 1) |
-| 32–127 | BG reserve | Unallocated (future sky gfx) |
+| 32–47 | Sky band | Palette row 2: the mode-1 sky gradient tiles |
+| 48–127 | BG reserve | Unallocated |
 | 128–143 | Ski + buoys | OBJ palette 0 (shared: ski, buoy yellows/reds, letters) |
 | 144–191 | NPC racers | OBJ palettes 1–3: green/purple/orange recolours of the ski palette (tiles shared) |
 | 192–255 | Sprites reserve | OBJ palettes 4–7 — do not touch from BG code |
