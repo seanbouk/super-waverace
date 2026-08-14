@@ -688,9 +688,9 @@ def compose_canvas(pat, course):
                     n = ((x & 7) * 13 + (y & 7) * 29 + ((x & 7) * (y & 7))) % 17
                     canvas[y][x] = FOAM if n < cut else gap
 
-    # sand: the coastline cells (4-adjacent to water) get a wet-sand body
-    # with a foam fringe on the water edges; everything inland is flat
-    # plain dry sand
+    # sand: flat plain dry sand everywhere; coastline cells (4-adjacent to
+    # water) add the foam fringe on their water edges. Wet sand appears
+    # ONLY in the water-side surf band (foam over wet sand)
     for cy in range(128):
         zrow = zones[cy]
         for cx in range(128):
@@ -712,7 +712,7 @@ def compose_canvas(pat, course):
                             d = min(d, px)
                         if e:
                             d = min(d, 7 - px)
-                        canvas[y][cx * 8 + px] = FOAM if d <= 1 else WET_SAND
+                        canvas[y][cx * 8 + px] = FOAM if d <= 1 else SAND
             else:
                 for py in range(8):
                     y = cy * 8 + py
