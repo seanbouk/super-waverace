@@ -678,7 +678,9 @@ def compose_canvas(pat, course):
             if d < 1 or d > 2:
                 continue
             cut = SURF_CUT[d]
-            gap = SHAL_SAND if d == 1 else SHAL_BLUE  # super-shallow water
+            # super-shallow water: foam over WET sand (the dry-sand-coloured
+            # SHAL_SAND read as a light beach strip inside the foam line)
+            gap = WET_SAND if d == 1 else SHAL_BLUE
             for py in range(8):
                 y = cy * 8 + py
                 for px in range(8):
