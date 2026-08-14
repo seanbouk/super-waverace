@@ -603,7 +603,7 @@ SAND, SAND_SH, FOAM, WET_SAND, FLOAT_A, SHAL_BLUE, CALM, SHAL_SAND =     8, 9, 1
 CHECK_DARK = 32  # start/finish checker black (BG-reserve palette block)
 COURSE_COLORS = {
     SAND: (232, 214, 164), SAND_SH: (212, 190, 142),
-    FOAM: (250, 250, 244), WET_SAND: (186, 164, 118),
+    FOAM: (172, 214, 246), WET_SAND: (186, 164, 118),  # foam = lattice blue
     FLOAT_A: (216, 44, 214),  # magenta: not confusable with R buoys
     CALM: (22, 62, 122),   # flat wake band under ropes (non-rotating)
     # SHAL_BLUE is set at bake time to the lightest deep-water rotation
