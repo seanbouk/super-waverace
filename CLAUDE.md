@@ -82,6 +82,11 @@ Mesen.exe --testrunner --timeout=30 <rom> <script.lua>   # arg order-free
   the mode-1 region now extends to WAVE_SKY_SWITCH (the tiled sky band), and
   its tiles render unscrolled BECAUSE of those zeros. Sky tiles live at
   VRAM 0x5C00 (chars 192+, above the font), palette row 2 (CGRAM 32-47).
+- **BG vertical scroll is off by one**: at VOFS 0, screen line N samples MAP
+  line N+1. Any mode-1 tile band must write one extra map row below its
+  last visible row or the bottom line shows tile 0 (transparent -> a bare
+  backdrop seam, which is how the sky band's dark line at the mode switch
+  happened).
 - **HOFS must be signed 13-bit** (HOFS − M7X = −128 exactly); masking it
   positive breaks under fractional M7A (was the "occasional skew" bug).
 - **Write-twice M7 regs + paired-register HDMA**: modes 2 (p,p) and 3

@@ -40,11 +40,17 @@ void uiInit(void)
     dmaCopyVram((u8 *)&sky_gfx, 0x5000 + WAVE_SKY_CHAR0 * 16,
                 WAVE_SKY_ROWS * 32);
     dmaCopyCGram((u8 *)&sky_pal2, 32, 32);
-    for (i = 0; i < WAVE_SKY_ROWS; i++)
+    // one EXTRA row repeating the last char: BG scroll is off by one
+    // (screen line N samples map line N+1 at VOFS 0), so the band's last
+    // screen line reads the row below - unwritten, it showed as a dark
+    // backdrop seam at the mode switch
+    for (i = 0; i <= WAVE_SKY_ROWS; i++)
     {
         u16 c;
+        u16 ch = WAVE_SKY_CHAR0
+                 + (i < WAVE_SKY_ROWS ? i : WAVE_SKY_ROWS - 1);
         for (c = 0; c < 32; c++)
-            uiMap[c] = 0x0800 | (WAVE_SKY_CHAR0 + i); // palette row 2
+            uiMap[c] = 0x0800 | ch; // palette row 2
         dmaCopyVram((u8 *)uiMap, 0x7000 + (UI_ROWS + i) * 32, 64);
     }
 
