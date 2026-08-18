@@ -151,14 +151,20 @@ u8 lastLapSec, lastLapTenth;
 // projectPoint i/o
 u16 pjX, pjY, pjV, pjCol;
 u8 pjOk;
-// impact splash: two 16x16 plumes (hflipped mirror) thrown at the hull sides
-// when the ski lands. Anchored to the WATER surface row, not the hull, so a
-// thrown splash stays with the water while the ski flies on.
+// impact splash: two 16x16 halves that together span the hull's width, thrown
+// where the ski LANDED - the world position is recorded at impact and
+// projected like a buoy, so the splash stays put in the water and the ski
+// drives out of it, sliding down the screen and off the bottom.
 #define SPRAY_SPR (NPC_SPR + NPC_COUNT) // first of two spray sprites
-#define SPRAY_HOLD 6   // vblank frames per animation frame
+// Only ~24 world units of water are visible between the ski and the bottom of
+// the screen, so a splash left in the wake exits in about two loops - the
+// animation is paced to finish inside that window rather than be culled
+// mid-burst.
+#define SPRAY_HOLD 4   // vblank frames per animation frame
 #define SPRAY_MIN 160  // impact speed (8.8) below which landing is dry
 #define SPRAY_BIG 380  // ...and above which the plume runs its full length
-u8 sprayOn, sprayIdx, sprayAcc, sprayEnd;
+u8 sprayOn, sprayIdx, sprayAcc, sprayEnd, sprayNew;
+u16 sprayWX, sprayWY; // world position of the landing
 
 //---------------------------------------------------------------------------------
 static u16 scanline(void)
@@ -508,6 +514,7 @@ int main(void)
     sprayIdx = 0;
     sprayAcc = 0;
     sprayEnd = WAVE_SPRAY_FRAMES;
+    sprayNew = 0;
     paceEma = 3000; // seeded near typical pace; the EMA takes over at GO
     npcSpd[0] = SPD_CRUISE;
     npcSpd[1] = SPD_CRUISE;
@@ -666,6 +673,8 @@ int main(void)
                     sprayOn = 1;
                     sprayIdx = 0;
                     sprayAcc = 0;
+                    sprayNew = 1; // pin it to the world below, once skiW* is
+                                  // recomputed for this loop
                     sprayEnd = (-skiVv >= SPRAY_BIG) ? WAVE_SPRAY_FRAMES
                                                      : WAVE_SPRAY_FRAMES - 1;
                 }
@@ -714,6 +723,12 @@ int main(void)
         // momentum, so oblique hits scrape along instead of snagging
         skiWX = camPX + ((WAVE_SKI_DIST * camSinVal) >> 7);
         skiWY = camPY + ((WAVE_SKI_DIST * camCosVal) >> 7);
+        if (sprayNew) // a landing this loop: that water is where it happened
+        {
+            sprayNew = 0;
+            sprayWX = skiWX;
+            sprayWY = skiWY;
+        }
         collOfs = ((skiWY >> 5) & 127) * 128 + ((skiWX >> 5) & 127);
         collProbe();
         collHere = collVal;
@@ -1088,13 +1103,21 @@ int main(void)
         }
         if (sprayOn)
         {
+            // project the landing spot: as the ski drives on, the splash
+            // slides down the screen and is culled off the bottom edge
+            pjX = sprayWX;
+            pjY = sprayWY;
+            projectPoint();
+        }
+        if (sprayOn && pjOk)
+        {
+            // two halves meeting at the centre, so the splash spans the hull:
+            // each plume rises at its outer edge and the sheets join in the
+            // middle. Bottom row sits on the surface (sheet rule: margin 0)
             bq = WAVE_SPRAY_CHAR + (sprayIdx << 1);
-            // right plume as authored, left plume hflipped; bottom row of the
-            // slot lands on the surface row (sheet rule: margin 0)
-            oamSet(SPRAY_SPR << 2, SKI_X + 22, waterRow - 15, 3, 0, 0, bq, 0);
+            oamSet(SPRAY_SPR << 2, pjCol - 16, rdRow - 15, 3, 0, 0, bq, 0);
             oamSetEx(SPRAY_SPR << 2, OBJ_SMALL, OBJ_SHOW);
-            oamSet((SPRAY_SPR + 1) << 2, SKI_X - 6, waterRow - 15, 3, 1, 0,
-                   bq, 0);
+            oamSet((SPRAY_SPR + 1) << 2, pjCol, rdRow - 15, 3, 1, 0, bq, 0);
             oamSetEx((SPRAY_SPR + 1) << 2, OBJ_SMALL, OBJ_SHOW);
         }
         else
