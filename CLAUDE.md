@@ -157,6 +157,9 @@ painter to move the grid.
   new level — 0 out of the water, 1-3 by speed, top level on a landing (which
   also forces an immediate inject so the burst lands with you). Art is
   procedural (spray_cell: hash-dominated dither, per-cell vertical falloff).
+  The ladder hangs off waterRow, which rides the swell, so the scroll absorbs
+  the frame-to-frame change in waterRow — otherwise the whole wake is dragged
+  up and down with the ski instead of staying planted in the water.
   One-shot splashes were tried twice and CANNOT work: only ~24 world units of
   water are visible behind the ski, so anything world-anchored crosses the
   band in two loops and is never seen twice. NPC spray not done.

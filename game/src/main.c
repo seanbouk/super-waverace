@@ -168,7 +168,9 @@ u8 pjOk;
 #define SPRAY_MIN 160  // impact speed (8.8) below which a landing is dry
 #define SPRAY_BURST 1  // cells that carry the landing's peak intensity
 u8 sprInt[SPR_ROWS]; // intensity per cell row, 0 = nothing drawn
-u16 sprScroll;       // 8.8 pixels scrolled within the current cell
+s16 sprScroll;       // 8.8 pixels scrolled, signed: see the bob compensation
+s16 sprOfs;          // whole-pixel scroll for this frame
+u8 prevWater;        // last frame's waterline, to cancel the swell's bob
 u16 sprWet;          // smoothed "churning water" = in-water forward speed
 u8 sprBurst, sprLvl, sprKick;
 s16 sprY;
@@ -562,6 +564,7 @@ int main(void)
     sprBurst = 0;
     sprKick = 0;
     sprWet = 0;
+    prevWater = waveSkiRow[0];
     for (bi = 0; bi < SPR_ROWS; bi++)
         sprInt[bi] = 0;
     paceEma = 3000; // seeded near typical pace; the EMA takes over at GO
@@ -1133,7 +1136,14 @@ int main(void)
         if (apu < 0)
             apu = 0;
         sprWet += (s16)(apu - sprWet) >> 2; // ~4-loop smoothing
-        sprScroll += sprWet >> 1;
+        sprScroll += (s16)(sprWet >> 1);
+        // Cancel the bob: the ladder hangs off waterRow, which rides up and
+        // down with the swell, so without this the wake is dragged along with
+        // the ski instead of staying planted in the water. Moving up the
+        // screen (waterRow shrinking) pushes the scroll forward by the same
+        // number of rows, which holds the trailing cells still.
+        sprScroll += ((s16)prevWater - (s16)waterRow) << 8;
+        prevWater = waterRow;
         if (sprKick) // a landing: put the burst at the stern immediately
         {
             sprKick = 0;
@@ -1145,6 +1155,13 @@ int main(void)
             sprScroll -= SPRAY_CELL << 8;
             sprayInject();
         }
+        // a descent can push the scroll negative (the ski settling onto its
+        // own wake); one cell's worth is allowed, and cells that would land
+        // above the waterline are skipped below rather than dragged down
+        if (sprScroll < -(SPRAY_CELL << 8))
+            sprScroll = -(SPRAY_CELL << 8);
+        // whole pixels, biased so the shift stays on a positive value
+        sprOfs = ((sprScroll + 8192) >> 8) - 32;
         for (bi = 0; bi < SPR_ROWS; bi++)
         {
             // cells emerge from under the stern and march down; the top of
@@ -1155,12 +1172,12 @@ int main(void)
             // static cell the scroll offset left a growing bare gap between
             // the stern and the top of the band. Nothing is ever drawn above
             // waterRow, so spray can't appear beside the rider.
-            sprY = bi ? (s16)waterRow + (s16)(sprScroll >> 8)
-                            + (bi - 1) * SPRAY_CELL
+            sprY = bi ? (s16)waterRow + sprOfs + (bi - 1) * SPRAY_CELL
                       : (s16)waterRow;
             // cells may hang off the bottom - the screen edge clips them for
-            // free, which is what keeps the short band looking full
-            if (!sprInt[bi] || sprY > 223)
+            // free, which is what keeps the short band looking full - but
+            // never above the waterline, where they'd show beside the rider
+            if (!sprInt[bi] || sprY > 223 || sprY < (s16)waterRow)
             {
                 oamSetVisible((SPRAY_SPR + (bi << 1)) << 2, OBJ_HIDE);
                 oamSetVisible((SPRAY_SPR + (bi << 1) + 1) << 2, OBJ_HIDE);
