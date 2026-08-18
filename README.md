@@ -97,14 +97,18 @@ the blocked axis stops, the other keeps its momentum, so oblique contact slides
 along shores and ropes instead of snagging. An embedded ski (rounding creep while
 grinding + turning) is actively pushed back to open water.
 
-**Impact splash.** Landing throws a splash spanning the hull's width — two 16×16
-halves, the right one hflipped from the same art — sized by the vertical speed the
-physics is about to damp. There is no spray in the air because nothing spawns
-unless the ski is in the water. The splash is pinned to the **world** position of
-the landing and projected like a buoy, so the ski drives out of its own spray and
-it slides away down the screen; bouncing along a swell leaves a trail of bursts
-behind you. Only ~24 world units of water are visible between the ski and the
-bottom edge, so the animation is paced to finish inside the two loops it survives.
+**Wake spray.** Only ~24 world units of water are visible between the ski and the
+bottom of the screen, and the ski covers half that per loop — so a one-shot splash
+pinned to the water is gone before you can see it. Instead the wake is a
+**conveyor**: two columns of 16×16 dithered cells spanning the hull, a static
+source cell pinned at the waterline and the rest scrolling down at a fraction of
+your speed. Every whole-cell advance shifts an intensity ladder and writes a new
+value at the top — nothing out of the water, more with speed, a peak on landing
+(which forces an immediate inject, so the burst appears with the impact and then
+travels back down the band). Because the band is always populated, the ~17 Hz loop
+stops mattering: it reads as a continuous churn rather than an object to track.
+The OBJ window is bounded to the hull's submerged rows so this area is drawable at
+all — see `buildWinTab`.
 
 **Buoys.** Course markers (yellow L / red R — pass sides not yet enforced) live
 twice: a collision cell + painted base ripple in the texture, and a sprite projected

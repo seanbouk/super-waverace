@@ -150,13 +150,20 @@ painter to move the grid.
   main.c — calibrated to the REAL ~120 world/s player pace, see PLAN.md),
   checkered start line baked at path[0]. Next: gate judging (optional),
   multi-course, and the fixed-loop-rate backlog item.
-- Impact splash on the player only: two 16x16 halves spanning the hull width
-  (one art set, the right half hflipped), thrown on water entry and sized by
-  impact speed. The landing's WORLD position is recorded and projected like a
-  buoy, so the ski drives out of its own splash and the splash slides off the
-  bottom of the screen. Art is procedural (spray_frame in the bake: a fan of
-  blob fingers, mass humping 104->122->78 px across the 3 frames). NPC spray
-  deliberately not done — it needs a puff per scale band.
+- Wake spray on the player only: a CONVEYOR of 16x16 dithered cells (two
+  columns spanning the hull) under the stern. Cell 0 is a static source at
+  the waterline; the rest scroll down at a chosen fraction of speed (sprWet
+  >>1), and each whole-cell advance shifts the intensity ladder and injects a
+  new level — 0 out of the water, 1-3 by speed, top level on a landing (which
+  also forces an immediate inject so the burst lands with you). Art is
+  procedural (spray_cell: hash-dominated dither, per-cell vertical falloff).
+  One-shot splashes were tried twice and CANNOT work: only ~24 world units of
+  water are visible behind the ski, so anything world-anchored crosses the
+  band in two loops and is never seen twice. NPC spray not done.
+- The OBJ window is bounded to the hull's submerged rows (waterRow..sprTop+31)
+  instead of everything below the waterline, which is what frees the area
+  under the stern for sprites. Nothing is drawn above waterRow, so spray can
+  never appear beside the rider.
 - Buoy pass-sides (L/R) recorded but not judged;
   no sound (jam judges music — PVSnesLib has an .it tracker driver, unused);
   sand is collidable but there's no "run aground" state; no title screen.

@@ -8,8 +8,9 @@
       ch3 M7A+B, ch4 M7C+D, ch5 M7X+Y, ch6 HOFS+VOFS : paired-register
           mode-3 streams built each frame by camera.asm (B/D/VOFS ride along
           as pre-zeroed words)
-      ch7 WH0+WH1 ($2126)  : window waterline — clips the ski sprite below
-          the water surface row, so the hull visibly sinks and bobs
+      ch7 WH0+WH1 ($2126)  : window waterline — masks OBJ across the hull's
+          submerged rows only (waterline..sprite bottom), so the hull sinks
+          and bobs while the wake spray below the stern stays drawable
           (note: the vblank ISR's OAM DMA uses ch7's registers; waveHdma
           reprograms them right after WaitForVBlank, before render starts)
 
@@ -43,7 +44,7 @@ u8 camSinMag, camCosMag, camSinNeg, camCosNeg;
 u8 camTabs[7200];
 
 // ---- window waterline table (built each loop, tiny) ----
-u8 winTab[10];
+u8 winTab[16]; // room for the bounded mask's extra runs
 
 // ---- jet ski state (8.8 fixed unless noted) ----
 s16 skiY;         // height above mean sea level
@@ -100,7 +101,7 @@ s16 stepX, stepY;
 // buoys
 u16 rdV, rdRow, rdD;
 s16 bdx, bdy, bv, bu, bau, bh, bl;
-u16 bq, winRow, dly;
+u16 bq, dly;
 u8 bi;
 // race progress (phase 1: player only) + waypoint-chaser steering
 u8 nextWp, lapCount;
@@ -151,20 +152,26 @@ u8 lastLapSec, lastLapTenth;
 // projectPoint i/o
 u16 pjX, pjY, pjV, pjCol;
 u8 pjOk;
-// impact splash: two 16x16 halves that together span the hull's width, thrown
-// where the ski LANDED - the world position is recorded at impact and
-// projected like a buoy, so the splash stays put in the water and the ski
-// drives out of it, sliding down the screen and off the bottom.
-#define SPRAY_SPR (NPC_SPR + NPC_COUNT) // first of two spray sprites
-// Only ~24 world units of water are visible between the ski and the bottom of
-// the screen, so a splash left in the wake exits in about two loops - the
-// animation is paced to finish inside that window rather than be culled
-// mid-burst.
-#define SPRAY_HOLD 4   // vblank frames per animation frame
-#define SPRAY_MIN 160  // impact speed (8.8) below which landing is dry
-#define SPRAY_BIG 380  // ...and above which the plume runs its full length
-u8 sprayOn, sprayIdx, sprayAcc, sprayEnd, sprayNew;
-u16 sprayWX, sprayWY; // world position of the landing
+// ---- wake spray: a conveyor of dithered cells under the stern ----
+// A one-shot splash cannot work here: only ~24 world units of water are
+// visible behind the ski, so anything world-anchored crosses it in two loops
+// and is never seen twice. Instead a fixed ladder of 16x16 cells (two columns
+// spanning the hull) scrolls DOWN at a rate taken from speed; each time it
+// advances a whole cell the intensities shift down the ladder and a new one
+// is written at the top from the current state - zero out of the water, more
+// with speed, a burst on landing. The band is always populated, so the low
+// loop rate stops mattering: it reads as a continuous stream whose bands
+// travel backwards.
+#define SPR_ROWS 4                     // 1 static source + 3 scrolling
+#define SPRAY_SPR (NPC_SPR + NPC_COUNT) // 2 * SPR_ROWS sprites from here
+#define SPRAY_CELL 16                  // cell height in scanlines
+#define SPRAY_MIN 160  // impact speed (8.8) below which a landing is dry
+#define SPRAY_BURST 1  // cells that carry the landing's peak intensity
+u8 sprInt[SPR_ROWS]; // intensity per cell row, 0 = nothing drawn
+u16 sprScroll;       // 8.8 pixels scrolled within the current cell
+u16 sprWet;          // smoothed "churning water" = in-water forward speed
+u8 sprBurst, sprLvl, sprKick;
+s16 sprY;
 
 //---------------------------------------------------------------------------------
 static u16 scanline(void)
@@ -198,31 +205,74 @@ static void camTabsInitHeaders(void)
 }
 
 //---------------------------------------------------------------------------------
-static void buildWinTab(u8 row)
+// HDMA line runs for the OBJ window; counts cap at 127 per entry
+static u8 *winPut(u8 *w, u16 n, u8 l, u8 r)
 {
-    u8 *w = winTab;
-    if (row > 127)
+    while (n > 127)
     {
         *w++ = 127;
-        *w++ = 0xFF; // empty window (left > right): sprite visible
-        *w++ = 0x00;
-        row -= 127;
+        *w++ = l;
+        *w++ = r;
+        n -= 127;
     }
-    *w++ = row;
-    *w++ = 0xFF;
-    *w++ = 0x00;
-    *w++ = 1; // from the waterline down: full-width window = sprite clipped
-    *w++ = 0x00;
-    *w++ = 0xFF;
+    if (n)
+    {
+        *w++ = (u8)n;
+        *w++ = l;
+        *w++ = r;
+    }
+    return w;
+}
+
+//---------------------------------------------------------------------------------
+// The OBJ window masks ONLY the submerged rows of the hull (waterline `top` to
+// the sprite's last row `bot`) - about 5-10 rows. It used to mask everything
+// below the waterline, which made the whole lower screen a no-sprite zone and
+// forced buoys to push the line down (weakening the hull sink). Bounded this
+// way, the wake conveyor below the stern is drawable and nothing else has to
+// compromise.
+static void buildWinTab(u16 top, u16 bot)
+{
+    u8 *w = winTab;
+    w = winPut(w, top, 0xFF, 0x00); // above: empty window (left > right)
+    if (bot >= top)
+        w = winPut(w, bot - top + 1, 0x00, 0xFF); // submerged hull: masked
+    // clear again below; one line is enough, HDMA holds it for the rest
+    w = winPut(w, 1, 0xFF, 0x00);
     *w = 0x00;
+}
+
+//---------------------------------------------------------------------------------
+// Shift the cell ladder down and write a new intensity at the top. Intensity
+// comes from sprWet, a smoothed in-water speed, NOT an instantaneous sample:
+// the ski bounces, and one airborne moment sampled at the wrong instant used
+// to blank the whole band for several loops.
+static void sprayInject(void)
+{
+    u8 i;
+    for (i = SPR_ROWS - 1; i > 0; i--)
+        sprInt[i] = sprInt[i - 1];
+    if (sprBurst)
+    {
+        sprInt[0] = WAVE_SPRAY_LEVELS; // top level: a landing
+        sprBurst--;
+    }
+    else if (sprWet < 500) // stopped, or genuinely out of the water
+        sprInt[0] = 0;
+    else
+    {
+        sprLvl = (u8)(sprWet >> 11);
+        if (sprLvl > WAVE_SPRAY_LEVELS - 2)
+            sprLvl = WAVE_SPRAY_LEVELS - 2;
+        sprInt[0] = sprLvl + 1; // 0 is reserved for "nothing"
+    }
 }
 
 //---------------------------------------------------------------------------------
 // project a world point onto the screen the way buoys render: view-space
 // transform, surface-row lookup (rides the occluding crest), hardware-divider
 // column. in: pjX, pjY (world units). out: pjOk, and when visible pjV (view
-// depth: scale ladder), pjCol (screen centre x), rdRow (surface row); pushes
-// winRow down so the waterline window clips whatever gets drawn there.
+// depth: scale ladder), pjCol (screen centre x), rdRow (surface row).
 static void projectPoint(void)
 {
     pjOk = 0;
@@ -262,15 +312,13 @@ static void projectPoint(void)
     REG_WRDIVH = bq >> 8;
     REG_WRDIVB = (u8)(((u16)bv * 74) >> 8);
     dly = tick + phase; // cover the 16-cycle divide latency
-    dly += winRow;
+    dly += rdRow;
     bq = REG_RDDIV;
     if (bq > 140)
         return;
     bq = bu < 0 ? 128 - bq : 128 + bq;
     if (bq < 12 || bq > 232)
         return;
-    if (rdRow > winRow)
-        winRow = (u16)rdRow;
     pjV = (u16)bv;
     pjCol = bq;
     pjOk = 1;
@@ -436,7 +484,7 @@ int main(void)
     dmaCopyCGram((u8 *)&npc_pals, 144, 96);
     oamSet(0, SKI_X, 140, 3, 0, 0, 0, 0);
     oamSetEx(0, OBJ_LARGE, OBJ_SHOW);
-    for (bi = 1; bi < SPRAY_SPR + 2; bi++)
+    for (bi = 1; bi < SPRAY_SPR + 2 * SPR_ROWS; bi++)
         oamSetVisible(bi << 2, OBJ_HIDE); // NB: OAM ids are byte offsets (x4)
 
     setPaletteColor(0, RGB8(16, 60, 150)); // deep azure zenith
@@ -510,11 +558,12 @@ int main(void)
     npcFade[0] = 2;
     npcFade[1] = 1;
     npcFade[2] = 0;
-    sprayOn = 0; // BSS is not zero-initialised
-    sprayIdx = 0;
-    sprayAcc = 0;
-    sprayEnd = WAVE_SPRAY_FRAMES;
-    sprayNew = 0;
+    sprScroll = 0; // BSS is not zero-initialised
+    sprBurst = 0;
+    sprKick = 0;
+    sprWet = 0;
+    for (bi = 0; bi < SPR_ROWS; bi++)
+        sprInt[bi] = 0;
     paceEma = 3000; // seeded near typical pace; the EMA takes over at GO
     npcSpd[0] = SPD_CRUISE;
     npcSpd[1] = SPD_CRUISE;
@@ -534,7 +583,7 @@ int main(void)
     lastLapTenth = 0;
     loopVbl = snes_vblank_count; // BSS garbage would poison the first
     loopFrames = 0;              // countdown accumulation
-    buildWinTab(200);
+    buildWinTab(200, 210);
 
 // build-time debug: drive itself (the emulator test runner has no input)
 #define AUTOPILOT 0
@@ -664,19 +713,14 @@ int main(void)
             // what stops the buoyancy spring from pogo-ing off every wave
             if (!wasInWater)
             {
-                // ...and throws spray, sized by the impact still in skiVv.
-                // Every splash opens on the contact burst; soft landings just
-                // stop before the plume spreads, so one art set covers the
-                // whole range of arrivals
+                // ...and kicks the wake: the next few cells injected at the
+                // top of the ladder carry the peak intensity, so the burst
+                // is visibly thrown and then travels back down the band
                 if (-skiVv >= SPRAY_MIN)
                 {
-                    sprayOn = 1;
-                    sprayIdx = 0;
-                    sprayAcc = 0;
-                    sprayNew = 1; // pin it to the world below, once skiW* is
-                                  // recomputed for this loop
-                    sprayEnd = (-skiVv >= SPRAY_BIG) ? WAVE_SPRAY_FRAMES
-                                                     : WAVE_SPRAY_FRAMES - 1;
+                    sprBurst = SPRAY_BURST;
+                    sprKick = 1; // inject at once: the burst belongs at the
+                                 // stern on the frame you actually land
                 }
                 skiVv >>= 2;
             }
@@ -723,12 +767,6 @@ int main(void)
         // momentum, so oblique hits scrape along instead of snagging
         skiWX = camPX + ((WAVE_SKI_DIST * camSinVal) >> 7);
         skiWY = camPY + ((WAVE_SKI_DIST * camCosVal) >> 7);
-        if (sprayNew) // a landing this loop: that water is where it happened
-        {
-            sprayNew = 0;
-            sprayWX = skiWX;
-            sprayWY = skiWY;
-        }
         collOfs = ((skiWY >> 5) & 127) * 128 + ((skiWX >> 5) & 127);
         collProbe();
         collHere = collVal;
@@ -1061,7 +1099,6 @@ int main(void)
         oamSet(0, SKI_X, (u16)sprTop, 3, skiFlip, 0, skiLean ? 4 : 0, 0);
 
         // ---- buoys: project into view space, pick scale, ride the water ----
-        winRow = waterRow;
 #if WAVE_BUOY_COUNT > 0
         for (bi = 0; bi < WAVE_BUOY_COUNT; bi++)
         {
@@ -1088,45 +1125,62 @@ int main(void)
                 oamSetVisible((NPC_SPR + bi) << 2, OBJ_HIDE);
         }
 #endif
-        // ---- impact splash: advance in REAL frames (the loop rate breathes
-        // with scene load), then draw both plumes on the surface row ----
-        if (sprayOn)
+        // ---- wake conveyor: scroll, then re-fill the top cell ----
+        // scroll rate is a chosen fraction of speed, not the true water
+        // velocity: at race pace the real thing crosses the whole band in one
+        // loop, which just aliases into flicker. >>1 gives ~9px/loop flat out
+        apu = inWater ? vAlong : 0; // churn: only water throws spray
+        if (apu < 0)
+            apu = 0;
+        sprWet += (s16)(apu - sprWet) >> 2; // ~4-loop smoothing
+        sprScroll += sprWet >> 1;
+        if (sprKick) // a landing: put the burst at the stern immediately
         {
-            sprayAcc += (u8)loopFrames;
-            while (sprayAcc >= SPRAY_HOLD)
+            sprKick = 0;
+            sprScroll = 0;
+            sprayInject();
+        }
+        while (sprScroll >= (SPRAY_CELL << 8))
+        {
+            sprScroll -= SPRAY_CELL << 8;
+            sprayInject();
+        }
+        for (bi = 0; bi < SPR_ROWS; bi++)
+        {
+            // cells emerge from under the stern and march down; the top of
+            // cell 0 sits inside the window-masked band, so a new cell fades
+            // in from behind the hull instead of popping into view
+            // Cell 0 is a STATIC source pinned at the waterline; cells 1+ are
+            // the conveyor proper, sliding out from under it. Without the
+            // static cell the scroll offset left a growing bare gap between
+            // the stern and the top of the band. Nothing is ever drawn above
+            // waterRow, so spray can't appear beside the rider.
+            sprY = bi ? (s16)waterRow + (s16)(sprScroll >> 8)
+                            + (bi - 1) * SPRAY_CELL
+                      : (s16)waterRow;
+            // cells may hang off the bottom - the screen edge clips them for
+            // free, which is what keeps the short band looking full
+            if (!sprInt[bi] || sprY > 223)
             {
-                sprayAcc -= SPRAY_HOLD;
-                sprayIdx++;
+                oamSetVisible((SPRAY_SPR + (bi << 1)) << 2, OBJ_HIDE);
+                oamSetVisible((SPRAY_SPR + (bi << 1) + 1) << 2, OBJ_HIDE);
+                continue;
             }
-            if (sprayIdx >= sprayEnd)
-                sprayOn = 0;
-        }
-        if (sprayOn)
-        {
-            // project the landing spot: as the ski drives on, the splash
-            // slides down the screen and is culled off the bottom edge
-            pjX = sprayWX;
-            pjY = sprayWY;
-            projectPoint();
-        }
-        if (sprayOn && pjOk)
-        {
-            // two halves meeting at the centre, so the splash spans the hull:
-            // each plume rises at its outer edge and the sheets join in the
-            // middle. Bottom row sits on the surface (sheet rule: margin 0)
-            bq = WAVE_SPRAY_CHAR + (sprayIdx << 1);
-            oamSet(SPRAY_SPR << 2, pjCol - 16, rdRow - 15, 3, 0, 0, bq, 0);
-            oamSetEx(SPRAY_SPR << 2, OBJ_SMALL, OBJ_SHOW);
-            oamSet((SPRAY_SPR + 1) << 2, pjCol, rdRow - 15, 3, 1, 0, bq, 0);
-            oamSetEx((SPRAY_SPR + 1) << 2, OBJ_SMALL, OBJ_SHOW);
-        }
-        else
-        {
-            oamSetVisible(SPRAY_SPR << 2, OBJ_HIDE);
-            oamSetVisible((SPRAY_SPR + 1) << 2, OBJ_HIDE);
+            bq = WAVE_SPRAY_CELL + ((sprInt[bi] - 1) << 1);
+            oamSet((SPRAY_SPR + (bi << 1)) << 2, SKI_X, (u16)sprY, 3, 0, 0,
+                   bq, 0);
+            oamSetEx((SPRAY_SPR + (bi << 1)) << 2, OBJ_SMALL, OBJ_SHOW);
+            // right column hflipped so the two halves are not twins
+            oamSet((SPRAY_SPR + (bi << 1) + 1) << 2, SKI_X + 16, (u16)sprY, 3,
+                   1, 0, bq, 0);
+            oamSetEx((SPRAY_SPR + (bi << 1) + 1) << 2, OBJ_SMALL, OBJ_SHOW);
         }
 
-        buildWinTab((u8)winRow);
+        // mask only the hull's submerged rows (see buildWinTab)
+        sprY = sprTop + 31;
+        if (sprY > 223)
+            sprY = 223;
+        buildWinTab(waterRow, (u16)sprY);
 
         if ((tick & 3) == 0)
         {
