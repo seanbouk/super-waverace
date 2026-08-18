@@ -446,11 +446,80 @@ def buoy_grid(size, right):
     return g
 
 
+SPRAY_W, SPRAY_S = 8, 9  # ski palette: hull white + its shade
+
+
+def _hash01(i, k):
+    """Deterministic decorrelated [0,1) - a shared modulus made the droplets
+    march in straight diagonal rays instead of scattering."""
+    v = (i * 374761393 + k * 668265263) & 0xFFFFFFFF
+    v = ((v ^ (v >> 13)) * 1274126177) & 0xFFFFFFFF
+    return ((v >> 11) & 0xFFFF) / 65536.0
+
+
+def spray_frame(t):
+    """16x16 impact-splash plume for time t (the three frames grow then break
+    up). Thrown from the hull's side on the water (bottom-left of the slot) up
+    and outward; hflip serves the other side. A dense crown of white water
+    whose edge dissolves as it expands, plus ballistic droplets beyond it."""
+    size = 16
+    g = [[0] * size for _ in range(size)]
+    ox, oy = 4.0, size - 0.5
+    # The crown is drawn as overlapping round blobs along a rising arc, the
+    # way splash sprites are normally inked: the masses stay solid with a
+    # lumpy silhouette. (Dissolving an ellipse per-pixel instead punched
+    # holes through the middle and read as lace at 16px.)
+    # a fan of fingers, not one arc: a long low sheet skidding across the
+    # surface plus steeper plumes above it. They overlap into a solid mass at
+    # the hull and separate toward the tips, which gives the ragged fan
+    # silhouette a splash needs (a single arc read as a fin)
+    # the plume expands to a peak then collapses, so the mass humps rather
+    # than shrinking monotonically: contact is compact and dense, the middle
+    # frame is the biggest, the last one is breaking up
+    maxd = 12.0 * (0.72 + 0.42 * t)
+    age = (0.88 + (t - 0.45) * 0.28) if t <= 0.95 \
+        else max(0.45, 1.02 - (t - 0.95) * 0.88)
+    fall = 4.5 * max(0.0, t - 0.7)
+    for adeg, reach, br in ((12.0, 1.00, 4.2), (40.0, 0.95, 3.6),
+                            (68.0, 0.90, 3.0)):
+        a = math.radians(adeg)
+        steps = 9
+        for k in range(steps):
+            s = k / (steps - 1.0)
+            dist = s * reach * maxd
+            bx = ox + math.cos(a) * dist
+            by = oy - math.sin(a) * dist + fall * s
+            r = br * (1.0 - 0.50 * s) * age
+            if r < 0.7:
+                continue
+            for y in range(max(0, int(by - r) - 1), min(size, int(by + r) + 2)):
+                for x in range(max(0, int(bx - r) - 1),
+                               min(size, int(bx + r) + 2)):
+                    dd = math.hypot(x + 0.5 - bx, y + 0.5 - by)
+                    if dd <= r and g[y][x] != SPRAY_W:
+                        # proportional core keeps the mass white; an absolute
+                        # rim turned small blobs entirely into shade
+                        g[y][x] = SPRAY_W if dd < r * 0.62 else SPRAY_S
+    # airborne droplets: thrown along the same fan, gravity pulling the late
+    # ones back down
+    nd = 8 if t < 0.6 else 26
+    for i in range(nd):
+        a = math.radians(15.0 + 80.0 * _hash01(i, 1))
+        sp = 5.0 + 8.0 * _hash01(i, 2)
+        x = ox + math.cos(a) * sp * t
+        y = oy - (math.sin(a) * sp * t - 6.0 * t * t)
+        xi, yi = int(x), int(y)
+        if 0 <= xi < size and 0 <= yi < size and not g[yi][xi]:
+            g[yi][xi] = SPRAY_W if _hash01(i, 3) < 0.5 else SPRAY_S
+    return g
+
+
 def build_ski_sheet():
-    """128x96 sheet: player ski frames (straight + lean), buoys at 5 sizes,
-    and the NPC rear-view ski at 5 sizes (rows 64+, recoloured by palette).
+    """128x112 sheet: player ski frames (straight + lean), buoys at 5 sizes,
+    the NPC rear-view ski at 5 sizes (rows 64+, recoloured by palette), and
+    the impact-splash frames (row 96+).
     128px wide = 16 tiles/row, matching OAM's name-row stride exactly."""
-    sheet = [[0] * 128 for _ in range(96)]
+    sheet = [[0] * 128 for _ in range(112)]
     for f, shear in enumerate((0.0, 0.14)):
         grid = ski_frame(shear)
         for y in range(32):
@@ -484,7 +553,10 @@ def build_ski_sheet():
     blitg(ski_scaled(16), 64, 64, 16)  # name 136
     blitg(ski_scaled(12), 80, 64, 16)  # name 138
     blitg(ski_scaled(8), 96, 64, 16)   # name 140
-    tiles = encode_4bpp(sheet, 16, 12)
+    # impact splash: 3 frames, names 192 / 194 / 196 (row 12 = 12*16)
+    for f, t in enumerate((0.5, 1.0, 1.5)):
+        blitg(spray_frame(t), f * 16, 96, 16)
+    tiles = encode_4bpp(sheet, 16, 14)
 
     def pal_bytes(cols):
         out = bytearray()
@@ -1114,6 +1186,10 @@ def main():
 #define WAVE_PC7_SIZE {{PC7SIZE}}
 #define WAVE_BUOY_COUNT {{NBUOYS}}
 #define WAVE_PATH_COUNT {{NPATH}}
+/* OBJ sheet: byte size, and the impact-splash frames (16x16, names +2 each) */
+#define WAVE_SKI_SHEET {{SHB}}
+#define WAVE_SPRAY_CHAR 192
+#define WAVE_SPRAY_FRAMES 3
 /* mode-1 sky band: tile rows under the text, mode 7 resumes at the switch */
 #define WAVE_SKY_SWITCH {{SKSW}}
 #define WAVE_SKY_ROWS {{SKRW}}
@@ -1154,6 +1230,7 @@ void waveRotateStep(u8 offset);
 """.replace("{{PC7SIZE}}", str(len(pc7))).replace("{{NBUOYS}}",
              str(len(course[2]) if course else 0)).replace("{{NPATH}}",
              str(len(course[3]) if course else 0))
+           .replace("{{SHB}}", str(len(ski_tiles)))
            .replace("{{SKSW}}", str(sky_switch))
            .replace("{{SKRW}}", str(sky_rows))
            .replace("{{SKC0}}", str(SKY_CHAR0))

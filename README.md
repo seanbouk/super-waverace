@@ -97,6 +97,15 @@ the blocked axis stops, the other keeps its momentum, so oblique contact slides
 along shores and ropes instead of snagging. An embedded ski (rounding creep while
 grinding + turning) is actively pushed back to open water.
 
+**Impact splash.** Landing throws two 16×16 plumes out of the hull sides, mirrored
+by hflip from one art set, sized by the vertical speed the physics is about to
+damp. There is no spray in the air because nothing spawns unless the ski is in
+the water, and the plumes anchor to the *water surface row* rather than the hull,
+so a thrown splash stays with the water while the ski flies on — which is what
+makes bouncing along a swell read as a rhythm of splashes. Free of projection
+maths (the ski sits at a fixed screen column), so the whole effect is a timer and
+two OAM writes.
+
 **Buoys.** Course markers (yellow L / red R — pass sides not yet enforced) live
 twice: a collision cell + painted base ripple in the texture, and a sprite projected
 each frame — the distance table gives the screen row, the hardware divider gives the

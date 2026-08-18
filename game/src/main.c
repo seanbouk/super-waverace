@@ -151,6 +151,14 @@ u8 lastLapSec, lastLapTenth;
 // projectPoint i/o
 u16 pjX, pjY, pjV, pjCol;
 u8 pjOk;
+// impact splash: two 16x16 plumes (hflipped mirror) thrown at the hull sides
+// when the ski lands. Anchored to the WATER surface row, not the hull, so a
+// thrown splash stays with the water while the ski flies on.
+#define SPRAY_SPR (NPC_SPR + NPC_COUNT) // first of two spray sprites
+#define SPRAY_HOLD 6   // vblank frames per animation frame
+#define SPRAY_MIN 160  // impact speed (8.8) below which landing is dry
+#define SPRAY_BIG 380  // ...and above which the plume runs its full length
+u8 sprayOn, sprayIdx, sprayAcc, sprayEnd;
 
 //---------------------------------------------------------------------------------
 static u16 scanline(void)
@@ -416,12 +424,13 @@ int main(void)
 
     // ski + buoy + NPC sheet: 192 tiles at VRAM 0x6000 (through 0x6BFF -
     // the UI map moved to 0x7000 to make room), OBJ palette 0 (CGRAM 128+)
-    oamInitGfxSet(&ski_tiles, 6144, &ski_pal, 32, 0, 0x6000, OBJ_SIZE16_L32);
+    oamInitGfxSet(&ski_tiles, WAVE_SKI_SHEET, &ski_pal, 32, 0, 0x6000,
+                  OBJ_SIZE16_L32);
     // NPC racer recolours: OBJ palettes 1-3 (CGRAM 144-191), shared tiles
     dmaCopyCGram((u8 *)&npc_pals, 144, 96);
     oamSet(0, SKI_X, 140, 3, 0, 0, 0, 0);
     oamSetEx(0, OBJ_LARGE, OBJ_SHOW);
-    for (bi = 1; bi < NPC_SPR + NPC_COUNT; bi++)
+    for (bi = 1; bi < SPRAY_SPR + 2; bi++)
         oamSetVisible(bi << 2, OBJ_HIDE); // NB: OAM ids are byte offsets (x4)
 
     setPaletteColor(0, RGB8(16, 60, 150)); // deep azure zenith
@@ -495,6 +504,10 @@ int main(void)
     npcFade[0] = 2;
     npcFade[1] = 1;
     npcFade[2] = 0;
+    sprayOn = 0; // BSS is not zero-initialised
+    sprayIdx = 0;
+    sprayAcc = 0;
+    sprayEnd = WAVE_SPRAY_FRAMES;
     paceEma = 3000; // seeded near typical pace; the EMA takes over at GO
     npcSpd[0] = SPD_CRUISE;
     npcSpd[1] = SPD_CRUISE;
@@ -643,7 +656,21 @@ int main(void)
             // splash: hitting the water kills most vertical speed — this is
             // what stops the buoyancy spring from pogo-ing off every wave
             if (!wasInWater)
+            {
+                // ...and throws spray, sized by the impact still in skiVv.
+                // Every splash opens on the contact burst; soft landings just
+                // stop before the plume spreads, so one art set covers the
+                // whole range of arrivals
+                if (-skiVv >= SPRAY_MIN)
+                {
+                    sprayOn = 1;
+                    sprayIdx = 0;
+                    sprayAcc = 0;
+                    sprayEnd = (-skiVv >= SPRAY_BIG) ? WAVE_SPRAY_FRAMES
+                                                     : WAVE_SPRAY_FRAMES - 1;
+                }
                 skiVv >>= 2;
+            }
             // gentle spring toward floating a dip under, heavily water-damped
             skiVv += (surf88 - DIP - skiY) >> 4;
             skiVv -= skiVv >> 1;
@@ -1046,6 +1073,36 @@ int main(void)
                 oamSetVisible((NPC_SPR + bi) << 2, OBJ_HIDE);
         }
 #endif
+        // ---- impact splash: advance in REAL frames (the loop rate breathes
+        // with scene load), then draw both plumes on the surface row ----
+        if (sprayOn)
+        {
+            sprayAcc += (u8)loopFrames;
+            while (sprayAcc >= SPRAY_HOLD)
+            {
+                sprayAcc -= SPRAY_HOLD;
+                sprayIdx++;
+            }
+            if (sprayIdx >= sprayEnd)
+                sprayOn = 0;
+        }
+        if (sprayOn)
+        {
+            bq = WAVE_SPRAY_CHAR + (sprayIdx << 1);
+            // right plume as authored, left plume hflipped; bottom row of the
+            // slot lands on the surface row (sheet rule: margin 0)
+            oamSet(SPRAY_SPR << 2, SKI_X + 22, waterRow - 15, 3, 0, 0, bq, 0);
+            oamSetEx(SPRAY_SPR << 2, OBJ_SMALL, OBJ_SHOW);
+            oamSet((SPRAY_SPR + 1) << 2, SKI_X - 6, waterRow - 15, 3, 1, 0,
+                   bq, 0);
+            oamSetEx((SPRAY_SPR + 1) << 2, OBJ_SMALL, OBJ_SHOW);
+        }
+        else
+        {
+            oamSetVisible(SPRAY_SPR << 2, OBJ_HIDE);
+            oamSetVisible((SPRAY_SPR + 1) << 2, OBJ_HIDE);
+        }
+
         buildWinTab((u8)winRow);
 
         if ((tick & 3) == 0)

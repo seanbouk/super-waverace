@@ -101,7 +101,15 @@ Mesen.exe --testrunner --timeout=30 <rom> <script.lua>   # arg order-free
 - **Sprite sheet rule**: every art's bottom row IS its slot's bottom row
   (margin 0); screen anchors derive from slot size only (−31 large, −15
   small). Negative blit margins wrap via Python indexing and corrupt other
-  slots silently.
+  slots silently. The sheet is now 224 of the 256 OBJ names (0x6000-0x6DFF
+  words) — only 32 tiles spare before the UI map at 0x7000.
+- **Mesen's endFrame callback reads OAM that has ALREADY been updated for the
+  NEXT frame** (the NMI's OAM DMA runs before the callback fires), so
+  screenshots keyed on "OAM shows X" capture the frame before X appears.
+  Wait ~3 consecutive qualifying frames before grabbing, or you will
+  conclude a working sprite is invisible (this cost an hour on the spray).
+  Also note spray and the ski hull share palette entries 8/9, so a pixel
+  scan cannot tell them apart inside the hull's own x range.
 - **Windows line endings**: git checkout rewrites working files to CRLF;
   python patch scripts must read with universal newlines and write
   newline='\n'. Write files before asserting patch success, never after.
@@ -141,6 +149,12 @@ painter to move the grid.
   main.c — calibrated to the REAL ~120 world/s player pace, see PLAN.md),
   checkered start line baked at path[0]. Next: gate judging (optional),
   multi-course, and the fixed-loop-rate backlog item.
+- Impact splash on the player only: two 16x16 plumes (hflipped mirror) on
+  water entry, sized by impact speed, anchored to the water surface row so a
+  thrown splash stays put while the ski flies on. Art is procedural
+  (spray_frame in the bake: a fan of blob fingers, mass humping 104->122->78
+  px across the 3 frames). NPC spray deliberately not done — it needs a puff
+  per scale band.
 - Buoy pass-sides (L/R) recorded but not judged;
   no sound (jam judges music — PVSnesLib has an .it tracker driver, unused);
   sand is collidable but there's no "run aground" state; no title screen.
