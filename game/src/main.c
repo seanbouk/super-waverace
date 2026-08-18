@@ -167,6 +167,15 @@ u8 pjOk;
 #define SPRAY_CELL 16                  // cell height in scanlines
 #define SPRAY_MIN 160  // impact speed (8.8) below which a landing is dry
 #define SPRAY_BURST 1  // cells that carry the landing's peak intensity
+// churn thresholds, in the same 8.8 world/loop units as vAlong (top ~4600):
+// below WET_MIN the hull is not throwing water at all, and WET_SHIFT sets how
+// much more speed each art level wants (1 << 10 = 1024 per level)
+#define SPR_WET_MIN 1100
+#define SPR_WET_SHIFT 10
+// while anything is left on the ladder the scroll keeps ticking at least this
+// fast, so stopping (or reversing, or taking off) lets the wake wash away
+// instead of freezing on screen
+#define SPR_DRAIN 400
 u8 sprInt[SPR_ROWS]; // intensity per cell row, 0 = nothing drawn
 s16 sprScroll;       // 8.8 pixels scrolled, signed: see the bob compensation
 s16 sprOfs;          // whole-pixel scroll for this frame
@@ -259,11 +268,13 @@ static void sprayInject(void)
         sprInt[0] = WAVE_SPRAY_LEVELS; // top level: a landing
         sprBurst--;
     }
-    else if (sprWet < 500) // stopped, or genuinely out of the water
+    else if (sprWet < SPR_WET_MIN) // too slow, reversing, or airborne
         sprInt[0] = 0;
     else
     {
-        sprLvl = (u8)(sprWet >> 11);
+        // map the speed range ABOVE the threshold onto the art levels, so
+        // the ramp spans what you actually drive rather than starting at zero
+        sprLvl = (u8)((sprWet - SPR_WET_MIN) >> SPR_WET_SHIFT);
         if (sprLvl > WAVE_SPRAY_LEVELS - 2)
             sprLvl = WAVE_SPRAY_LEVELS - 2;
         sprInt[0] = sprLvl + 1; // 0 is reserved for "nothing"
@@ -719,7 +730,11 @@ int main(void)
                 // ...and kicks the wake: the next few cells injected at the
                 // top of the ladder carry the peak intensity, so the burst
                 // is visibly thrown and then travels back down the band
-                if (-skiVv >= SPRAY_MIN)
+                // gated on vAlong, not sprWet: forward speed survives a jump
+                // (no water drag in the air) whereas the smoothed churn has
+                // decayed to nothing by the time you land, so this keeps the
+                // big landings loud while a bob at a standstill stays dry
+                if (-skiVv >= SPRAY_MIN && vAlong >= SPR_WET_MIN)
                 {
                     sprBurst = SPRAY_BURST;
                     sprKick = 1; // inject at once: the burst belongs at the
@@ -1135,11 +1150,19 @@ int main(void)
         // Cost is irrelevant here - once per loop - so this can be any factor;
         // sums of shifts just keep it tidy: x>>1 half, x+(x>>1) 1.5x,
         // x-(x>>2) 0.75x, and so on.
-        apu = inWater ? vAlong : 0; // churn: only water throws spray
+        // churn: only water thrown FORWARD counts, so reverse and airborne
+        // both decay to nothing
+        apu = inWater ? vAlong : 0;
         if (apu < 0)
             apu = 0;
         sprWet += (s16)(apu - sprWet) >> 2; // ~4-loop smoothing
-        sprScroll += (s16)sprWet;
+        bj = 0;
+        for (bi = 0; bi < SPR_ROWS; bi++)
+            bj |= sprInt[bi]; // anything still showing?
+        apd = (s16)sprWet;
+        if (bj && apd < SPR_DRAIN)
+            apd = SPR_DRAIN; // wash the leftovers away after a stop
+        sprScroll += apd;
         // Cancel the bob: the ladder hangs off waterRow, which rides up and
         // down with the swell, so without this the wake is dragged along with
         // the ski instead of staying planted in the water. Moving up the
@@ -1147,6 +1170,10 @@ int main(void)
         // number of rows, which holds the trailing cells still.
         sprScroll += ((s16)prevWater - (s16)waterRow) << 8;
         prevWater = waterRow;
+        // coming back up to speed from an empty band: seed it now rather than
+        // waiting a whole cell's worth of scroll for the first inject
+        if (!bj && sprWet >= SPR_WET_MIN)
+            sprKick = 1;
         if (sprKick) // a landing: put the burst at the stern immediately
         {
             sprKick = 0;
