@@ -1129,14 +1129,17 @@ int main(void)
         }
 #endif
         // ---- wake conveyor: scroll, then re-fill the top cell ----
-        // scroll rate is a chosen fraction of speed, not the true water
-        // velocity: at race pace the real thing crosses the whole band in one
-        // loop, which just aliases into flicker. >>1 gives ~9px/loop flat out
+        // Scroll rate is a chosen multiple of speed, not the true water
+        // velocity (which crosses the whole band in a single loop and just
+        // aliases into flicker). 1:1 with sprWet is ~18px/loop flat out.
+        // Cost is irrelevant here - once per loop - so this can be any factor;
+        // sums of shifts just keep it tidy: x>>1 half, x+(x>>1) 1.5x,
+        // x-(x>>2) 0.75x, and so on.
         apu = inWater ? vAlong : 0; // churn: only water throws spray
         if (apu < 0)
             apu = 0;
         sprWet += (s16)(apu - sprWet) >> 2; // ~4-loop smoothing
-        sprScroll += (s16)(sprWet >> 1);
+        sprScroll += (s16)sprWet;
         // Cancel the bob: the ladder hangs off waterRow, which rides up and
         // down with the swell, so without this the wake is dragged along with
         // the ski instead of staying planted in the water. Moving up the
