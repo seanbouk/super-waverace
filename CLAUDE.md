@@ -121,7 +121,9 @@ Mesen.exe --testrunner --timeout=30 <rom> <script.lua>   # arg order-free
 `game/src/main.c` top: TURN_SPEED, THRUST (drag >>4 sets top speed =
 THRUST*16), GRAV, DIP, MAX_VV_UP/DOWN, splash retention (>>2 on entry),
 grip (vSide -= vSide>>3) and rudder (vAlong += |vSide|>>3). Buoy scale bands
-are a geometric ladder (192/268/382/534). Wave feel comes from
+are SCALE_V1..V4 (229/320/457/640) — derived, not tuned: 32 * WAVE_SKI_DIST
+/ v crossing the midpoint between neighbouring art sizes, anchored to the
+player's own 32px ski at WAVE_SKI_DIST. Wave feel comes from
 tools/wave_params.json via the wave lab. NPC race feel: npcFade[] (which
 player lap each racer fades) and the SPD_* tiers — percentages of paceEma
 (the player's measured pace), so they survive course redesigns; tune the

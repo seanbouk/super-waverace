@@ -262,28 +262,40 @@ static void projectPoint(void)
     pjOk = 1;
 }
 
+// Scale-ladder switch depths (view units), shared by every scaling object.
+// Anchored to the PLAYER's ski: its 32px art sits at WAVE_SKI_DIST, so the
+// correct on-screen size is 32 * WAVE_SKI_DIST / v, and each switch belongs
+// where that crosses the midpoint between neighbouring art sizes
+// (32/24 -> 28px, 24/16 -> 20, 16/12 -> 14, 12/8 -> 10). Hand-tuned values
+// were a whole notch early: an NPC ten units past the player's own ski
+// already shrank while level with him.
+#define SCALE_V1 229 // 32px art nearer than this
+#define SCALE_V2 320 // 24px
+#define SCALE_V3 457 // 16px
+#define SCALE_V4 640 // 12px, then 8px (beyond the 620 draw cutoff today)
+
 //---------------------------------------------------------------------------------
 // draw OAM sprite `oid` (byte-offset id!) at the projected point: five scales,
 // all bottom-anchored to the surface row so a scale change never reads as
 // movement. `right` picks the red R art over the yellow L art.
 static void drawLadder(u16 oid, u8 right)
 {
-    if (pjV < 192)
+    if (pjV < SCALE_V1)
     {
         oamSet(oid, pjCol - 16, rdRow - 31, 3, 0, 0, right ? 12 : 8, 0);
         oamSetEx(oid, OBJ_LARGE, OBJ_SHOW);
     }
-    else if (pjV < 268)
+    else if (pjV < SCALE_V2)
     {
         oamSet(oid, pjCol - 16, rdRow - 31, 3, 0, 0, right ? 68 : 64, 0);
         oamSetEx(oid, OBJ_LARGE, OBJ_SHOW);
     }
-    else if (pjV < 382)
+    else if (pjV < SCALE_V3)
     {
         oamSet(oid, pjCol - 8, rdRow - 15, 3, 0, 0, right ? 74 : 72, 0);
         oamSetEx(oid, OBJ_SMALL, OBJ_SHOW);
     }
-    else if (pjV < 534)
+    else if (pjV < SCALE_V4)
     {
         oamSet(oid, pjCol - 8, rdRow - 15, 3, 0, 0, right ? 78 : 76, 0);
         oamSetEx(oid, OBJ_SMALL, OBJ_SHOW);
@@ -301,22 +313,22 @@ static void drawLadder(u16 oid, u8 right)
 // is cropped at its waterline, so the bottom-anchored slot sits ON the water.
 static void drawSki(u16 oid, u8 pal)
 {
-    if (pjV < 192)
+    if (pjV < SCALE_V1)
     {
         oamSet(oid, pjCol - 16, rdRow - 31, 3, 0, 0, 128, pal);
         oamSetEx(oid, OBJ_LARGE, OBJ_SHOW);
     }
-    else if (pjV < 268)
+    else if (pjV < SCALE_V2)
     {
         oamSet(oid, pjCol - 16, rdRow - 31, 3, 0, 0, 132, pal);
         oamSetEx(oid, OBJ_LARGE, OBJ_SHOW);
     }
-    else if (pjV < 382)
+    else if (pjV < SCALE_V3)
     {
         oamSet(oid, pjCol - 8, rdRow - 15, 3, 0, 0, 136, pal);
         oamSetEx(oid, OBJ_SMALL, OBJ_SHOW);
     }
-    else if (pjV < 534)
+    else if (pjV < SCALE_V4)
     {
         oamSet(oid, pjCol - 8, rdRow - 15, 3, 0, 0, 138, pal);
         oamSetEx(oid, OBJ_SMALL, OBJ_SHOW);

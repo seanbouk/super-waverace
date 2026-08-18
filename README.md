@@ -101,8 +101,9 @@ grinding + turning) is actively pushed back to open water.
 twice: a collision cell + painted base ripple in the texture, and a sprite projected
 each frame — the distance table gives the screen row, the hardware divider gives the
 column. The SNES cannot scale sprites, so each buoy is authored at **five sizes**
-(8/12/16/24/32 px) switched at perspective-correct distances (a geometric ladder, so
-scale changes don't tick past at regular intervals). Flat-bottomed circles keep a
+(8/12/16/24/32 px) switched at perspective-correct distances — derived from the
+player's own ski (32 px at `WAVE_SKI_DIST`) rather than tuned by eye, so an object
+level with the player is drawn the same size as the player. Flat-bottomed circles keep a
 stable silhouette, every size carries its letter, and all sizes are bottom-anchored
 to the surface row so scale swaps never read as movement. A buoy tucked behind a
 crest rides up onto the wave in front rather than hiding. Rope floats are magenta
