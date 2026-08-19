@@ -66,9 +66,11 @@ Mesen.exe --testrunner --timeout=30 <rom> <script.lua>   # arg order-free
   bit-exact + dual-run-harness discipline (1826 calls, 0 mismatches); the
   mag/sign trig quads are seeded at init now, because skiWorld/skiSplit
   consume them BEFORE the first buildCamTables and BSS garbage reached the
-  first loop's physics. Measured: 500 -> 554 -> 579 loops per 2000 frames
-  (+16% total). Next: NPC steering products; also rowDepth's linear scan
-  wants a binary search.
+  first loop's physics. The NPC steering products (npcAim: wrapped deltas +
+  lateral bias + cross/dot; npcVel: velocity components) are asm too, same
+  discipline (2790 calls, 0 mismatches). Measured: 500 -> 554 -> 579 -> 620
+  loops per 2000 frames (+24% total). Remaining candidate: rowDepth's
+  linear scan wants a binary search.
 - **The projection-block profiler (P in the debug UI) wraps to garbage**
   (e.g. 5458) when the bracket straddles a frame edge without an NMI between
   its two scanline() reads. Trust mid-frame readings; for real before/after
@@ -116,6 +118,13 @@ Mesen.exe --testrunner --timeout=30 <rom> <script.lua>   # arg order-free
   its own direct page, so repointing D during the build is safe. LDA long,X
   exists; long,Y does NOT (that's why Y indexes DBR-relative ROM reads and X
   indexes the long,X WRAM stores).
+- **WLA-DX sizes immediates from the TEXTUALLY last sep/rep, not the runtime
+  path.** A `rep #$20` inside one branch arm makes the assembler encode the
+  OTHER arm's `lda #imm` as 3 bytes while the CPU executes it in 8-bit mode
+  — and the spare byte is $00 = BRK: an instant runaway (this crashed boot
+  when npcTrig gained an interior rep). Keep branchy 8-bit sections
+  single-mode, 16-bit work in a straight-line tail — the shape
+  buildCamTables' trig section always had.
 - **Wavelength must divide 1024** (map wrap); phases power of two;
   framesPerPhase in {1,2,4,8}; maxX < 4096 (16x8 multiplier headroom).
 - **Sprite sheet rule**: every art's bottom row IS its slot's bottom row

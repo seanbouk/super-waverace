@@ -44,6 +44,9 @@ extern void skiWorld(void);   // skiWX/WY = camP + (skiDist8 * trig) >> 7
 extern void skiThrustF(void); // skiVX/VY += (thrF8 * trig) >> 6
 extern void skiThrustR(void); // skiVX/VY -= (thrR8 * trig) >> 6
 extern void camPivot(void);   // camP += (skiDist8 * (prev - cur trig)) >> 7
+extern void npcAim(void); // aimT/aimP/aimBias + npcTrig -> wpdx/wpdy (bias-
+                          // aimed), apc = cross, apd = dot
+extern void npcVel(void); // apc/apd = ((bq >> 5) * npcSin/Cos) >> 2
 
 // ---- camera state shared with camera.asm (accessed via long addressing) ----
 u8 camTheta;
@@ -136,6 +139,9 @@ u16 npcSpd[NPC_COUNT];                  // current speed, 8.8 world/loop
 u8 npcTheta[NPC_COUNT], npcWp[NPC_COUNT];
 s8 npcBias[NPC_COUNT]; // per-racer lateral aim offset: no shared line
 u8 npcA; // npcTrig interface
+u8 npcSinMag, npcSinNeg, npcCosMag, npcCosNeg; // sign-magnitude, for the asm
+u16 aimTX, aimTY, aimPX, aimPY; // npcAim interface: target / position
+s16 aimBias;                    // ...and the lateral line offset
 s16 npcSin, npcCos;
 u8 bj; // separation pass
 u16 ox, oy;
@@ -869,20 +875,15 @@ int main(void)
         if (raceState) // frozen on the grid until GO
             for (bi = 0; bi < NPC_COUNT; bi++)
             {
-                wpdx = (s16)((pathX[npcWp[bi]] - npcX[bi]) & 4095);
-                if (wpdx > 2048)
-                    wpdx -= 4096;
-                wpdy = (s16)((pathY[npcWp[bi]] - npcY[bi]) & 4095);
-                if (wpdy > 2048)
-                    wpdy -= 4096;
+                aimTX = pathX[npcWp[bi]];
+                aimTY = pathY[npcWp[bi]];
+                aimPX = npcX[bi];
+                aimPY = npcY[bi];
+                aimBias = npcBias[bi]; // aims off the shared line (perp of
+                                       // heading): followers never stack up
                 npcA = npcTheta[bi];
                 npcTrig();
-                // each racer aims a little off the shared line (perp of
-                // its heading) so three followers never stack up on it
-                wpdx += (npcBias[bi] * npcCos) >> 7;
-                wpdy -= (npcBias[bi] * npcSin) >> 7;
-                apc = (wpdy >> 4) * npcSin - (wpdx >> 4) * npcCos;
-                apd = (wpdx >> 4) * npcSin + (wpdy >> 4) * npcCos;
+                npcAim(); // wpdx/wpdy (bias-aimed), apc cross, apd dot
                 if (apd < 0)
                 {
                     // target behind: commit to one side
@@ -900,11 +901,8 @@ int main(void)
                 bq = npcSpd[bi];
                 if (apd < 0 || apu > apd)
                     bq >>= 1;
-                // velocity along the (pre-turn) heading; >>5 before the
-                // product keeps doubled speeds 16-bit, 8.8 accums as fracX
-                apu = (s16)(bq >> 5);
-                apc = (apu * npcSin) >> 2;
-                apd = (apu * npcCos) >> 2;
+                // velocity along the (pre-turn) heading, 8.8 accums
+                npcVel(); // apc/apd = ((bq >> 5) * trig) >> 2
                 npcFX[bi] += apc;
                 stepX = npcFX[bi] >> 8;
                 npcFX[bi] &= 0x00FF;

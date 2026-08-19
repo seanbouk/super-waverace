@@ -41,7 +41,7 @@
 .DEFINE DP_CT     $08
 
 .RAMSECTION ".camdp" BANK 0 SLOT 1 ALIGN 256
-camDP dsb 48 ; 0-15 buildCamTables, 16-31 projectPoint, 32-47 ski helpers
+camDP dsb 64 ; 0-15 build, 16-31 projectPoint, 32-39 ski, 40-51 npc
 .ENDS
 
 ; projectPoint's direct-page frame (shares camDP; the build owns 0-15)
@@ -57,6 +57,14 @@ camDP dsb 48 ; 0-15 buildCamTables, 16-31 projectPoint, 32-47 ski helpers
 .DEFINE SK_B   $22
 .DEFINE SK_T   $24
 .DEFINE SK_T2  $26
+
+; npc steering helpers' frame
+.DEFINE NA_DX  $28
+.DEFINE NA_DY  $2A
+.DEFINE NA_X4  $2C
+.DEFINE NA_Y4  $2E
+.DEFINE NA_T   $30
+.DEFINE NA_T2  $32
 
 ;----------------------------------------------------------------------------
 ; one product: (16-bit word at wave_raw?,y) * (s0.8 mag at dp) >> 8
@@ -865,15 +873,26 @@ npcTrig:
     lda.l npcA
     and #$00FF
     tax
+    ; NOTE the mode discipline (mirrors buildCamTables): the branchy 8-bit
+    ; sections contain no interior rep - WLA sizes immediates from the
+    ; TEXTUALLY last sep/rep, so a rep inside one arm makes the assembler
+    ; encode the other arm's lda #imm as 3 bytes while the CPU runs it in
+    ; 8-bit mode... and the spare byte is $00 = BRK
     sep #$20
     lda.l camSinTab,x
+    bpl _np_sp
+    eor #$FF
+    inc a
+    sta.l npcSinMag
+    lda #$01
+    sta.l npcSinNeg
+    bra _np_sd
+_np_sp:
+    sta.l npcSinMag
+    lda #$00
+    sta.l npcSinNeg
+_np_sd:
     rep #$20
-    and #$00FF
-    bit #$0080
-    beq _np_sin_pos
-    ora #$FF00
-_np_sin_pos:
-    sta.l npcSin
     lda.l npcA
     and #$00FF
     clc
@@ -882,14 +901,188 @@ _np_sin_pos:
     tax
     sep #$20
     lda.l camSinTab,x
+    bpl _np_cp
+    eor #$FF
+    inc a
+    sta.l npcCosMag
+    lda #$01
+    sta.l npcCosNeg
+    bra _np_cd
+_np_cp:
+    sta.l npcCosMag
+    lda #$00
+    sta.l npcCosNeg
+_np_cd:
+    ; signed s16 values from the sign-magnitude form, one straight-line
+    ; 16-bit tail
     rep #$20
+    lda.l npcSinMag
     and #$00FF
-    bit #$0080
-    beq _np_cos_pos
-    ora #$FF00
-_np_cos_pos:
+    sta.l npcSin
+    lda.l npcSinNeg
+    and #$00FF
+    beq _np_sv
+    lda.l npcSin
+    eor #$FFFF
+    inc a
+    sta.l npcSin
+_np_sv:
+    lda.l npcCosMag
+    and #$00FF
     sta.l npcCos
+    lda.l npcCosNeg
+    and #$00FF
+    beq _np_cv
+    lda.l npcCos
+    eor #$FFFF
+    inc a
+    sta.l npcCos
+_np_cv:
     plx
+    plp
+    rtl
+
+;----------------------------------------------------------------------------
+; npcAim - the racer's steering geometry: wrapped deltas from position
+; (aimPX/PY) to target (aimTX/TY), nudged sideways by aimBias along the
+; heading's perpendicular, then cross (apc) and dot (apd) against the
+; heading trig from npcTrig. Bit-exact port of the C. The steering
+; DECISIONS made from apc/apd stay in C.
+npcAim:
+    php
+    phd
+    rep #$20
+    pea camDP
+    pld
+    lda.l aimTX
+    sec
+    sbc.l aimPX
+    and #$0FFF
+    cmp #2049
+    bcc _na_dx
+    ora #$F000
+_na_dx:
+    sta.b NA_DX
+    lda.l aimTY
+    sec
+    sbc.l aimPY
+    and #$0FFF
+    cmp #2049
+    bcc _na_dy
+    ora #$F000
+_na_dy:
+    sta.b NA_DY
+    ; wpdx += (bias * cos) >> 7 ; wpdy -= (bias * sin) >> 7
+    lda.l aimBias
+    sta.b NA_T2
+    SMUL NA_T2, npcCosMag, npcCosNeg
+    ASR1
+    ASR1
+    ASR1
+    ASR1
+    ASR1
+    ASR1
+    ASR1
+    clc
+    adc.b NA_DX
+    sta.b NA_DX
+    SMUL NA_T2, npcSinMag, npcSinNeg
+    ASR1
+    ASR1
+    ASR1
+    ASR1
+    ASR1
+    ASR1
+    ASR1
+    sta.b NA_T
+    lda.b NA_DY
+    sec
+    sbc.b NA_T
+    sta.b NA_DY
+    ; cross = (dy>>4)*sin - (dx>>4)*cos ; dot = (dx>>4)*sin + (dy>>4)*cos
+    lda.b NA_DX
+    ASR1
+    ASR1
+    ASR1
+    ASR1
+    sta.b NA_X4
+    lda.b NA_DY
+    ASR1
+    ASR1
+    ASR1
+    ASR1
+    sta.b NA_Y4
+    SMUL NA_Y4, npcSinMag, npcSinNeg
+    sta.b NA_T
+    SMUL NA_X4, npcCosMag, npcCosNeg
+    sta.b NA_T2
+    lda.b NA_T
+    sec
+    sbc.b NA_T2
+    sta.l apc
+    SMUL NA_X4, npcSinMag, npcSinNeg
+    sta.b NA_T
+    SMUL NA_Y4, npcCosMag, npcCosNeg
+    clc
+    adc.b NA_T
+    sta.l apd
+    lda.b NA_DX
+    sta.l wpdx
+    lda.b NA_DY
+    sta.l wpdy
+    pld
+    plp
+    rtl
+
+;----------------------------------------------------------------------------
+; npcVel - velocity components along the heading: apc/apd = ((bq>>5) * trig)
+; >> 2 from the racer speed in bq (always positive, so only the trig signs
+; matter)
+npcVel:
+    php
+    rep #$20
+    lda.l bq
+    lsr a
+    lsr a
+    lsr a
+    lsr a
+    lsr a
+    sep #$20
+    sta.l $004202
+    lda.l npcSinMag
+    sta.l $004203
+    lda.l npcSinNeg
+    lsr a
+    rep #$20
+    lda.l $004216
+    bcc _nv_s
+    eor #$FFFF
+    inc a
+_nv_s:
+    ASR1
+    ASR1
+    sta.l apc
+    lda.l bq
+    lsr a
+    lsr a
+    lsr a
+    lsr a
+    lsr a
+    sep #$20
+    sta.l $004202
+    lda.l npcCosMag
+    sta.l $004203
+    lda.l npcCosNeg
+    lsr a
+    rep #$20
+    lda.l $004216
+    bcc _nv_c
+    eor #$FFFF
+    inc a
+_nv_c:
+    ASR1
+    ASR1
+    sta.l apd
     plp
     rtl
 
