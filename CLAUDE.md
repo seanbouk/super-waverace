@@ -61,9 +61,14 @@ Mesen.exe --testrunner --timeout=30 <rom> <script.lua>   # arg order-free
   8 multiplies each) is asm now: ported bit-exactly (same floor semantics),
   verified by a dual-run harness (6797 calls, 0 output mismatches) because
   fixed-frame OAM comparison is invalid — a faster loop shifts the tick/frame
-  alignment and everything physics-driven moves. Measured: 500 -> 554 loops
-  per 2000 frames (+11%). Next asm candidates: ski velocity split/merge,
-  NPC steering products; also rowDepth's linear scan wants a binary search.
+  alignment and everything physics-driven moves. The ski math bundle
+  (split/merge, thrust, world position, camera pivot) is asm too — same
+  bit-exact + dual-run-harness discipline (1826 calls, 0 mismatches); the
+  mag/sign trig quads are seeded at init now, because skiWorld/skiSplit
+  consume them BEFORE the first buildCamTables and BSS garbage reached the
+  first loop's physics. Measured: 500 -> 554 -> 579 loops per 2000 frames
+  (+16% total). Next: NPC steering products; also rowDepth's linear scan
+  wants a binary search.
 - **The projection-block profiler (P in the debug UI) wraps to garbage**
   (e.g. 5458) when the bracket straddles a frame edge without an NMI between
   its two scanline() reads. Trust mid-frame readings; for real before/after

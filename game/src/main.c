@@ -35,6 +35,15 @@ extern void npcTrig(void);   // camera.asm: npcA (u8 heading) -> npcSin/npcCos
 // in: pjX, pjY (world units). out: pjOk, and when visible pjV (view depth:
 // scale ladder), pjCol (screen centre x), rdRow (surface row).
 extern void projectPoint(void);
+// camera.asm ski-math leaves (tcc's 16-bit multiply is a ~100-cycle library
+// call; these use the hardware multiplier, bit-exact to the old C). The
+// decisions stay here: grip between split/merge, throttle keys, pivot test.
+extern void skiSplit(void);   // vAlong/vSide from skiVX/VY along the heading
+extern void skiMerge(void);   // skiVX/VY back from vAlong/vSide
+extern void skiWorld(void);   // skiWX/WY = camP + (skiDist8 * trig) >> 7
+extern void skiThrustF(void); // skiVX/VY += (thrF8 * trig) >> 6
+extern void skiThrustR(void); // skiVX/VY -= (thrR8 * trig) >> 6
+extern void camPivot(void);   // camP += (skiDist8 * (prev - cur trig)) >> 7
 
 // ---- camera state shared with camera.asm (accessed via long addressing) ----
 u8 camTheta;
@@ -59,6 +68,9 @@ s16 skiVX, skiVY; // world-space velocity
 s16 fracX, fracY; // sub-texel position accumulators
 u8 skiLean;       // 0 straight, 1 leaning
 u8 skiFlip;       // lean direction (hflip)
+// constants handed to the asm ski helpers (the multiplier wants u8; all
+// three fit today - see the init asserts-by-comment)
+u8 skiDist8, thrF8, thrR8;
 
 #define TURN_SPEED 2
 #define THRUST 144 // applied at >>6: top speed = THRUST*32 (8.8 world/loop)
@@ -477,10 +489,20 @@ int main(void)
     npcTrig();
     camSinVal = npcSin;
     camCosVal = npcCos;
+    // the mag/sign quads normally come from buildCamTables, but skiWorld
+    // and skiSplit consume them BEFORE the first build - seed them here or
+    // the first loop computes ski math from BSS garbage
+    camSinMag = (u8)(npcSin < 0 ? -npcSin : npcSin);
+    camSinNeg = npcSin < 0 ? 1 : 0;
+    camCosMag = (u8)(npcCos < 0 ? -npcCos : npcCos);
+    camCosNeg = npcCos < 0 ? 1 : 0;
     camPX = (u16)(WAVE_START_X - ((WAVE_SKI_DIST * npcSin) >> 7)) & 4095;
     camPY = (u16)(WAVE_START_Y - ((WAVE_SKI_DIST * npcCos) >> 7)) & 4095;
     skiLean = 0; // BSS is not zero-initialised: garbage here reached
     skiFlip = 0; // oamSet as flip bits until the first steer input
+    skiDist8 = WAVE_SKI_DIST; // 200 - must stay < 256 for the multiplier
+    thrF8 = THRUST;           // 144 - ditto
+    thrR8 = THRUST / 2;
     skiY = -1536; // spawn below any wave: wet from frame one, bobs up
     skiVv = 0;
     skiVX = 0;
@@ -709,13 +731,11 @@ int main(void)
             // (>>6 not >>7: doubled thrust and top speed)
             if ((pad0 & KEY_B) && tick > 20) // grace while the spawn settles
             {
-                skiVX += (THRUST * camSinVal) >> 6;
-                skiVY += (THRUST * camCosVal) >> 6;
+                skiThrustF();
             }
             if (pad0 & KEY_Y) // reverse: half thrust, backwards
             {
-                skiVX -= ((THRUST / 2) * camSinVal) >> 6;
-                skiVY -= ((THRUST / 2) * camCosVal) >> 6;
+                skiThrustR();
             }
             // water drag
             skiVX -= skiVX >> 4;
@@ -736,8 +756,7 @@ int main(void)
         // collide at the SKI's position (200 world units ahead of camera),
         // one axis at a time: the blocked axis stops, the other keeps its
         // momentum, so oblique hits scrape along instead of snagging
-        skiWX = camPX + ((WAVE_SKI_DIST * camSinVal) >> 7);
-        skiWY = camPY + ((WAVE_SKI_DIST * camCosVal) >> 7);
+        skiWorld();
         collOfs = ((skiWY >> 5) & 127) * 128 + ((skiWX >> 5) & 127);
         collProbe();
         collHere = collVal;
@@ -1011,17 +1030,14 @@ int main(void)
 #endif
 
         // split velocity into forward/side components along the heading
-        // (>>5 pre-shift: doubled speeds would overflow the old >>4 * 127)
-        vAlong = ((skiVX >> 5) * camSinVal + (skiVY >> 5) * camCosVal) >> 2;
-        vSide = ((skiVX >> 5) * camCosVal - (skiVY >> 5) * camSinVal) >> 2;
+        skiSplit();
         if (inWater)
         {
             // gravel grip: kill a chunk of the slip each loop, and let the
             // rudder convert some of it into forward drive (momentum keeps)
             vAlong += (vSide < 0 ? -vSide : vSide) >> 3;
             vSide -= vSide >> 3;
-            skiVX = ((vAlong >> 5) * camSinVal + (vSide >> 5) * camCosVal) >> 2;
-            skiVY = ((vAlong >> 5) * camCosVal - (vSide >> 5) * camSinVal) >> 2;
+            skiMerge();
         }
         phaseAcc = (phaseAcc + WAVE_BASE_ROLL
                     + (((vAlong >> 4) * WAVE_STEPS_PER_TEXEL) >> 4))
@@ -1050,8 +1066,7 @@ int main(void)
         // orbit the camera so the ski's world position stays fixed
         if (camSinVal != prevSin || camCosVal != prevCos)
         {
-            camPX += (WAVE_SKI_DIST * (prevSin - camSinVal)) >> 7;
-            camPY += (WAVE_SKI_DIST * (prevCos - camCosVal)) >> 7;
+            camPivot();
         }
         prevSin = camSinVal;
         prevCos = camCosVal;

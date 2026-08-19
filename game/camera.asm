@@ -41,7 +41,7 @@
 .DEFINE DP_CT     $08
 
 .RAMSECTION ".camdp" BANK 0 SLOT 1 ALIGN 256
-camDP dsb 32 ; 0-15 buildCamTables, 16-31 projectPoint
+camDP dsb 48 ; 0-15 buildCamTables, 16-31 projectPoint, 32-47 ski helpers
 .ENDS
 
 ; projectPoint's direct-page frame (shares camDP; the build owns 0-15)
@@ -51,6 +51,12 @@ camDP dsb 32 ; 0-15 buildCamTables, 16-31 projectPoint
 .DEFINE PJ_U   $16
 .DEFINE PJ_AU  $18
 .DEFINE PJ_T1  $1A
+
+; ski math helpers' frame
+.DEFINE SK_A   $20
+.DEFINE SK_B   $22
+.DEFINE SK_T   $24
+.DEFINE SK_T2  $26
 
 ;----------------------------------------------------------------------------
 ; one product: (16-bit word at wave_raw?,y) * (s0.8 mag at dp) >> 8
@@ -604,6 +610,247 @@ _pj_col:
     sta.l pjOk
 _pj_out:
     pld
+    plp
+    rtl
+
+;----------------------------------------------------------------------------
+; one signed product: A := (s16 at dp \1, |x| <= 255) * (trig \2 with sign
+; \3), exactly as tcc computes it (magnitudes stay under 2^15, so the
+; sign-and-magnitude trick is bit-identical to a signed multiply)
+.MACRO SMUL
+    rep #$20
+    lda.b \1
+    sta.b DP_TMP         ; sign source
+    bpl _sp\@
+    eor #$FFFF
+    inc a
+_sp\@:
+    sep #$20
+    sta.l $004202        ; |x|
+    lda.l \2
+    sta.l $004203        ; * mag
+    lda.b DP_TMP + 1     ; sign(x) -> carry
+    asl a
+    lda.l \3
+    adc #0               ; bit 0 = sign(x) XOR trig sign
+    lsr a                ; -> carry (also pads the mul wait)
+    rep #$20
+    lda.l $004216
+    bcc _sq\@
+    eor #$FFFF
+    inc a
+_sq\@:
+.ENDM
+
+; the ski's heading transform, one direction: given inputs \1 \2 (s16
+; globals), \3 := ((\1>>5)*sin + (\2>>5)*cos) >> 2 and
+; \4 := ((\1>>5)*cos - (\2>>5)*sin) >> 2 - the exact shape (and floor
+; semantics) of the old C split/merge, which are the same formula with
+; the operand pairs swapped: split(vx,vy)->(along,side),
+; merge(along,side)->(vx,vy)
+.MACRO SKICORE
+    rep #$20
+    lda.l \1
+    ASR1
+    ASR1
+    ASR1
+    ASR1
+    ASR1
+    sta.b SK_A
+    lda.l \2
+    ASR1
+    ASR1
+    ASR1
+    ASR1
+    ASR1
+    sta.b SK_B
+    SMUL SK_A, camSinMag, camSinNeg
+    sta.b SK_T
+    SMUL SK_B, camCosMag, camCosNeg
+    clc
+    adc.b SK_T
+    ASR1
+    ASR1
+    sta.l \3
+    SMUL SK_A, camCosMag, camCosNeg
+    sta.b SK_T
+    SMUL SK_B, camSinMag, camSinNeg
+    sta.b SK_T2
+    lda.b SK_T
+    sec
+    sbc.b SK_T2
+    ASR1
+    ASR1
+    sta.l \4
+.ENDM
+
+; A := (u8 magnitude at \1 * trig \2 with sign \3) >> \4, floor semantics
+.MACRO TRIGK
+    sep #$20
+    lda.l \1
+    sta.l $004202
+    lda.l \2
+    sta.l $004203
+    lda.l \3
+    lsr a                ; trig sign -> carry (pads the mul wait)
+    rep #$20
+    lda.l $004216
+    bcc _tk\@
+    eor #$FFFF
+    inc a
+_tk\@:
+    .REPT \4
+    ASR1
+    .ENDR
+.ENDM
+
+;----------------------------------------------------------------------------
+; skiSplit - vAlong/vSide from skiVX/skiVY along the camera heading
+; skiMerge - skiVX/skiVY back from vAlong/vSide (the C keeps the grip
+; conditional between the two calls)
+skiSplit:
+    php
+    phd
+    rep #$20
+    pea camDP
+    pld
+    SKICORE skiVX, skiVY, vAlong, vSide
+    pld
+    plp
+    rtl
+
+skiMerge:
+    php
+    phd
+    rep #$20
+    pea camDP
+    pld
+    SKICORE vAlong, vSide, skiVX, skiVY
+    pld
+    plp
+    rtl
+
+;----------------------------------------------------------------------------
+; skiWorld - skiWX/Y = camPX/Y + (skiDist8 * sin/cos) >> 7
+skiWorld:
+    php
+    TRIGK skiDist8, camSinMag, camSinNeg, 7
+    clc
+    adc.l camPX
+    sta.l skiWX
+    TRIGK skiDist8, camCosMag, camCosNeg, 7
+    clc
+    adc.l camPY
+    sta.l skiWY
+    plp
+    rtl
+
+;----------------------------------------------------------------------------
+; skiThrustF - skiVX/Y += (thrF8 * sin/cos) >> 6   (full throttle)
+; skiThrustR - skiVX/Y -= (thrR8 * sin/cos) >> 6   (reverse, half power)
+skiThrustF:
+    php
+    TRIGK thrF8, camSinMag, camSinNeg, 6
+    clc
+    adc.l skiVX
+    sta.l skiVX
+    TRIGK thrF8, camCosMag, camCosNeg, 6
+    clc
+    adc.l skiVY
+    sta.l skiVY
+    plp
+    rtl
+
+skiThrustR:
+    php
+    TRIGK thrR8, camSinMag, camSinNeg, 6
+    pha
+    lda.l skiVX
+    sec
+    sbc 1,s
+    sta.l skiVX
+    pla
+    TRIGK thrR8, camCosMag, camCosNeg, 6
+    pha
+    lda.l skiVY
+    sec
+    sbc 1,s
+    sta.l skiVY
+    pla
+    plp
+    rtl
+
+;----------------------------------------------------------------------------
+; camPivot - orbit the camera so the ski stays fixed through a heading
+; change: camPX/Y += (skiDist8 * (prevSin/Cos - camSin/CosVal)) >> 7.
+; The 16-bit wrap of the product matches tcc's s16 multiply bit-for-bit.
+camPivot:
+    php
+    rep #$20
+    lda.l prevSin
+    sec
+    sbc.l camSinVal
+    pha                  ; signed diff (|diff| <= 254 fits the multiplier)
+    bpl _cv_sp
+    eor #$FFFF
+    inc a
+_cv_sp:
+    sep #$20
+    sta.l $004202
+    lda.l skiDist8
+    sta.l $004203
+    rep #$20             ; 3
+    pla                  ; 5: mul wait padded; A = signed diff
+    bpl _cv_pp
+    lda.l $004216
+    eor #$FFFF
+    inc a
+    bra _cv_pq
+_cv_pp:
+    lda.l $004216
+_cv_pq:
+    ASR1
+    ASR1
+    ASR1
+    ASR1
+    ASR1
+    ASR1
+    ASR1
+    clc
+    adc.l camPX
+    sta.l camPX
+    lda.l prevCos
+    sec
+    sbc.l camCosVal
+    pha
+    bpl _cv_sq
+    eor #$FFFF
+    inc a
+_cv_sq:
+    sep #$20
+    sta.l $004202
+    lda.l skiDist8
+    sta.l $004203
+    rep #$20
+    pla
+    bpl _cv_pr
+    lda.l $004216
+    eor #$FFFF
+    inc a
+    bra _cv_ps
+_cv_pr:
+    lda.l $004216
+_cv_ps:
+    ASR1
+    ASR1
+    ASR1
+    ASR1
+    ASR1
+    ASR1
+    ASR1
+    clc
+    adc.l camPY
+    sta.l camPY
     plp
     rtl
 
