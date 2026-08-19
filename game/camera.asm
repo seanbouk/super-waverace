@@ -41,8 +41,16 @@
 .DEFINE DP_CT     $08
 
 .RAMSECTION ".camdp" BANK 0 SLOT 1 ALIGN 256
-camDP dsb 16
+camDP dsb 32 ; 0-15 buildCamTables, 16-31 projectPoint
 .ENDS
+
+; projectPoint's direct-page frame (shares camDP; the build owns 0-15)
+.DEFINE PJ_DX  $10
+.DEFINE PJ_DY  $12
+.DEFINE PJ_V   $14
+.DEFINE PJ_U   $16
+.DEFINE PJ_AU  $18
+.DEFINE PJ_T1  $1A
 
 ;----------------------------------------------------------------------------
 ; one product: (16-bit word at wave_raw?,y) * (s0.8 mag at dp) >> 8
@@ -352,6 +360,250 @@ _rd_found:
     sta.l rdD
 _rd_done:
     plx
+    plp
+    rtl
+
+;----------------------------------------------------------------------------
+; one arithmetic shift right (the 65816 only has logical LSR)
+.MACRO ASR1
+    cmp #$8000
+    ror a
+.ENDM
+
+; one projection term: dest +/-= (bdelta * trig) >> 7, computed EXACTLY as
+; the old C did - bh = d >> 4 (floor), bl = d & 15, (bh*S)>>3 + (bl*S)>>7
+; with floor shifts throughout - so the port is bit-identical, not merely
+; close. \1 = trig magnitude global, \2 = trig sign global, \3 = delta dp
+; offset, \4 = dest dp offset, \5 = 1 to subtract the term (bu -= dy*sin)
+.MACRO PJTERM
+    ; high part: (bh * S) >> 3
+    rep #$20
+    lda.b \3
+    ASR1
+    ASR1
+    ASR1
+    ASR1                 ; bh = d >> 4, floor
+    sta.b DP_TMP         ; keep signed bh (its sign bit drives the negate)
+    bpl _pos\@
+    eor #$FFFF
+    inc a
+_pos\@:
+    sep #$20
+    sta.l $004202        ; |bh| (<= 44 after the +/-700 cull)
+    lda.l \1
+    sta.l $004203        ; * mag
+    lda.b DP_TMP + 1     ; sign(bh) from the high byte...
+    asl a                ; ...into carry
+    lda.l \2             ; trig sign (0/1)
+    adc #0               ; A = trigNeg + sign(bh): bit 0 = XOR
+    lsr a                ; effective sign -> carry (also pads the mul wait)
+    rep #$20
+    lda.l $004216        ; |bh| * mag
+    bcc _hp\@
+    eor #$FFFF
+    inc a
+_hp\@:
+    ASR1
+    ASR1
+    ASR1                 ; (bh * S) >> 3, floor
+    sta.b PJ_T1
+    ; low part: (bl * S) >> 7
+    lda.b \3
+    and #$000F           ; bl (always positive)
+    sep #$20
+    sta.l $004202
+    lda.l \1
+    sta.l $004203        ; * mag
+    lda.l \2
+    lsr a                ; trig sign -> carry (pads the mul wait)
+    rep #$20
+    lda.l $004216        ; bl * mag
+    bcc _lp\@
+    eor #$FFFF
+    inc a
+_lp\@:
+    ASR1
+    ASR1
+    ASR1
+    ASR1
+    ASR1
+    ASR1
+    ASR1                 ; (bl * S) >> 7, floor
+    clc
+    adc.b PJ_T1          ; the full term
+    .IF \5 == 0
+    clc
+    adc.b \4
+    sta.b \4
+    .ELSE
+    sta.b PJ_T1
+    lda.b \4
+    sec
+    sbc.b PJ_T1
+    sta.b \4
+    .ENDIF
+.ENDM
+
+;----------------------------------------------------------------------------
+; projectPoint - project a world point into the buoy/NPC view (exact port of
+; the former C routine; identical floor semantics, so OAM output is
+; bit-identical). Culls: wrapped delta beyond +/-700, view depth outside
+; 176..620, |u| > 480, no surface row, column off screen.
+; in:  pjX, pjY (world), camPX/Y, camSinMag/Neg, camCosMag/Neg, camPhaseOff
+; out: pjOk; when 1: pjV (view depth), pjCol (screen centre x), rdRow
+projectPoint:
+    php
+    phd
+    rep #$20
+    pea camDP
+    pld
+    sep #$20
+    lda #0
+    sta.l pjOk
+    rep #$20
+    ; dx = wrap(pjX - camPX), reject beyond +/-700
+    lda.l pjX
+    sec
+    sbc.l camPX
+    and #$0FFF
+    cmp #2049
+    bcc _pj_dx
+    ora #$F000           ; 12-bit value: | $F000 == - 4096
+_pj_dx:
+    sta.b PJ_DX
+    clc
+    adc #700
+    cmp #1401
+    bcc _pj_dxok
+    jmp _pj_out          ; too far for a short branch past the term macros
+_pj_dxok:
+    ; dy likewise
+    lda.l pjY
+    sec
+    sbc.l camPY
+    and #$0FFF
+    cmp #2049
+    bcc _pj_dy
+    ora #$F000
+_pj_dy:
+    sta.b PJ_DY
+    clc
+    adc #700
+    cmp #1401
+    bcc _pj_dyok
+    jmp _pj_out
+_pj_dyok:
+    ; view transform: v = (dx*sin + dy*cos) >> 7, u = (dx*cos - dy*sin) >> 7
+    stz.b PJ_V
+    stz.b PJ_U
+    PJTERM camSinMag, camSinNeg, PJ_DX, PJ_V, 0
+    PJTERM camCosMag, camCosNeg, PJ_DX, PJ_U, 0
+    PJTERM camCosMag, camCosNeg, PJ_DY, PJ_V, 0
+    PJTERM camSinMag, camSinNeg, PJ_DY, PJ_U, 1
+    ; depth cull: 176 <= v <= 620
+    lda.b PJ_V
+    sec
+    sbc #176
+    cmp #445
+    bcs _pj_far
+    ; lateral cull: |u| <= 480
+    lda.b PJ_U
+    bpl _pj_au
+    eor #$FFFF
+    inc a
+_pj_au:
+    sta.b PJ_AU
+    cmp #481
+    bcs _pj_far
+    ; surface row for this depth
+    lda.b PJ_V
+    sta.l rdV
+    jsl rowDepth
+    lda.l rdRow
+    cmp #$FFFF
+    bne _pj_row
+_pj_far:
+    jmp _pj_out          ; culls past the divider block: out of short range
+_pj_row:
+    ; column = |u|*64 / ((v*74) >> 8) via the hardware divider
+    lda.b PJ_AU
+    asl a
+    asl a
+    asl a
+    asl a
+    asl a
+    asl a
+    sta.l $004204        ; WRDIVL/H
+    lda.b PJ_V
+    sep #$20
+    sta.l $004202        ; lo(v)
+    lda #74
+    sta.l $004203
+    rep #$20             ; (rep + loads pad the mul wait)
+    lda.b PJ_V
+    xba
+    and #$00FF           ; hi(v): 0..2
+    sta.b DP_TMP
+    lda.l $004216        ; lo(v) * 74
+    xba
+    and #$00FF           ; >> 8
+    sta.b PJ_T1
+    lda.b DP_TMP
+    beq _pj_div
+    lda.b PJ_T1
+    clc
+    adc #74              ; + hi * 74 (hi is 1 or 2)
+    sta.b PJ_T1
+    lda.b DP_TMP
+    cmp #2
+    bne _pj_div
+    lda.b PJ_T1
+    clc
+    adc #74
+    sta.b PJ_T1
+_pj_div:
+    sep #$20
+    lda.b PJ_T1
+    sta.l $004206        ; divisor byte: division starts, 16-cycle latency
+    rep #$20             ; 3
+    nop                  ; +14 = 17 cycles: latency covered
+    nop
+    nop
+    nop
+    nop
+    nop
+    nop
+    lda.l $004214        ; quotient
+    cmp #141
+    bcs _pj_out
+    sta.b DP_TMP
+    ; column = u < 0 ? 128 - q : 128 + q
+    lda.b PJ_U
+    bmi _pj_neg
+    lda.b DP_TMP
+    clc
+    adc #128
+    bra _pj_col
+_pj_neg:
+    lda #128
+    sec
+    sbc.b DP_TMP
+_pj_col:
+    ; edge cull: 12 <= column <= 232 (unsigned wrap rejects negatives)
+    sta.b DP_TMP
+    sec
+    sbc #12
+    cmp #221
+    bcs _pj_out
+    lda.b DP_TMP
+    sta.l pjCol
+    lda.b PJ_V
+    sta.l pjV
+    sep #$20
+    lda #1
+    sta.l pjOk
+_pj_out:
+    pld
     plp
     rtl
 

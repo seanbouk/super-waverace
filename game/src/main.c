@@ -29,6 +29,12 @@ extern void buildCamTables(void);
 extern void collProbe(void); // camera.asm: reads the collision byte-map
 extern void rowDepth(void);  // camera.asm: screen row for a view depth
 extern void npcTrig(void);   // camera.asm: npcA (u8 heading) -> npcSin/npcCos
+// camera.asm: project a world point onto the screen the way buoys render -
+// view-space transform, surface-row lookup (rides the occluding crest, so a
+// buoy tucked behind a wave rides up onto it), hardware-divider column.
+// in: pjX, pjY (world units). out: pjOk, and when visible pjV (view depth:
+// scale ladder), pjCol (screen centre x), rdRow (surface row).
+extern void projectPoint(void);
 
 // ---- camera state shared with camera.asm (accessed via long addressing) ----
 u8 camTheta;
@@ -93,6 +99,7 @@ u8 skip, waterRow, inWater, wasInWater;
 s16 prevSin, prevCos;
 u16 profStartLine, profLines, profFrames;
 u16 vbl0, loopVbl, loopFrames;
+u16 pjPfA, pjPfV, pjPfLines; // projection-block profile (DEBUG_UI only)
 // collision
 u16 collOfs;
 u8 collVal, collHere;
@@ -100,7 +107,6 @@ u16 skiWX, skiWY;
 s16 stepX, stepY;
 // buoys
 u16 rdV, rdRow, rdD;
-s16 bdx, bdy, bv, bu, bau, bh, bl;
 u16 bq, dly;
 u8 bi;
 // race progress (phase 1: player only) + waypoint-chaser steering
@@ -280,62 +286,6 @@ static void sprayInject(void)
             sprLvl = WAVE_SPRAY_LEVELS - 2;
         sprInt[0] = sprLvl + 1; // 0 is reserved for "nothing"
     }
-}
-
-//---------------------------------------------------------------------------------
-// project a world point onto the screen the way buoys render: view-space
-// transform, surface-row lookup (rides the occluding crest), hardware-divider
-// column. in: pjX, pjY (world units). out: pjOk, and when visible pjV (view
-// depth: scale ladder), pjCol (screen centre x), rdRow (surface row).
-static void projectPoint(void)
-{
-    pjOk = 0;
-    bdx = (s16)((pjX - camPX) & 4095);
-    if (bdx > 2048)
-        bdx -= 4096;
-    bdy = (s16)((pjY - camPY) & 4095);
-    if (bdy > 2048)
-        bdy -= 4096;
-    if (bdx > 700 || bdx < -700 || bdy > 700 || bdy < -700)
-        return;
-    // full-precision view transform: split each delta so the 16-bit products
-    // stay exact (a plain >>4 pre-shift quantised motion to 16-unit jumps)
-    bh = bdx >> 4;
-    bl = bdx & 15;
-    bv = ((bh * camSinVal) >> 3) + ((bl * camSinVal) >> 7);
-    bu = ((bh * camCosVal) >> 3) + ((bl * camCosVal) >> 7);
-    bh = bdy >> 4;
-    bl = bdy & 15;
-    bv += ((bh * camCosVal) >> 3) + ((bl * camCosVal) >> 7);
-    bu -= ((bh * camSinVal) >> 3) + ((bl * camSinVal) >> 7);
-    if (bv < 176 || bv > 620)
-        return;
-    bau = bu < 0 ? -bu : bu;
-    if (bau > 480)
-        return;
-    rdV = (u16)bv;
-    rowDepth(); // surface row for this depth, and what's shown there
-    if (rdRow == 0xFFFF)
-        return;
-    // never hide behind waves: rdRow is the occluding crest's row when the
-    // point is tucked behind one, so it rides up onto the wave in front -
-    // correct for waves half its height
-    // screen column: px = u * 221 / v via the hardware divider
-    bq = (u16)bau << 6;
-    REG_WRDIVL = bq & 0xFF;
-    REG_WRDIVH = bq >> 8;
-    REG_WRDIVB = (u8)(((u16)bv * 74) >> 8);
-    dly = tick + phase; // cover the 16-cycle divide latency
-    dly += rdRow;
-    bq = REG_RDDIV;
-    if (bq > 140)
-        return;
-    bq = bu < 0 ? 128 - bq : 128 + bq;
-    if (bq < 12 || bq > 232)
-        return;
-    pjV = (u16)bv;
-    pjCol = bq;
-    pjOk = 1;
 }
 
 // Scale-ladder switch depths (view units), shared by every scaling object.
@@ -529,6 +479,8 @@ int main(void)
     camCosVal = npcCos;
     camPX = (u16)(WAVE_START_X - ((WAVE_SKI_DIST * npcSin) >> 7)) & 4095;
     camPY = (u16)(WAVE_START_Y - ((WAVE_SKI_DIST * npcCos) >> 7)) & 4095;
+    skiLean = 0; // BSS is not zero-initialised: garbage here reached
+    skiFlip = 0; // oamSet as flip bits until the first steer input
     skiY = -1536; // spawn below any wave: wet from frame one, bobs up
     skiVv = 0;
     skiVX = 0;
@@ -1118,6 +1070,10 @@ int main(void)
         oamSet(0, SKI_X, (u16)sprTop, 3, skiFlip, 0, skiLean ? 4 : 0, 0);
 
         // ---- buoys: project into view space, pick scale, ride the water ----
+#if DEBUG_UI
+        pjPfA = scanline(); // profile the projection block (buoys + NPCs)
+        pjPfV = snes_vblank_count;
+#endif
 #if WAVE_BUOY_COUNT > 0
         for (bi = 0; bi < WAVE_BUOY_COUNT; bi++)
         {
@@ -1143,6 +1099,9 @@ int main(void)
             else
                 oamSetVisible((NPC_SPR + bi) << 2, OBJ_HIDE);
         }
+#endif
+#if DEBUG_UI
+        pjPfLines = (snes_vblank_count - pjPfV) * 262 + scanline() - pjPfA;
 #endif
         // ---- wake conveyor: scroll, then re-fill the top cell ----
         // Scroll rate is a chosen multiple of speed, not the true water
@@ -1249,8 +1208,8 @@ int main(void)
             uiPrintNum(24, 0, lapCount, 1);
             uiPrint(25, 0, ".");
             uiPrintNum(26, 0, nextWp, 2);
-            uiPrint(21, 1, "T");
-            uiPrintNum(22, 1, lastLap, 4);
+            uiPrint(21, 1, "P"); // projection block cost, scanlines
+            uiPrintNum(22, 1, pjPfLines, 4);
 #endif
             uiPrint(0, 1, "BUILD");
             uiPrintNum(5, 1, profLines, 4);
@@ -1259,12 +1218,6 @@ int main(void)
             uiPrint(17, 1, inWater ? "WET" : "AIR");
             uiPrint(27, 1, "F");
             uiPrintNum(28, 1, loopFrames, 1);
-            // scanline costs: A = loop top to build start (logic),
-            // B = build end to WaitForVBlank (sprites/buoys/UI)
-            uiPrint(0, 0, "A");
-            uiPrintNum(1, 0, secA, 4);
-            uiPrint(6, 0, "B");
-            uiPrintNum(7, 0, secB, 4);
             // physics state, in 16ths of a texel: K = ski height,
             // S = water surface, V = vertical speed (8.8 raw)
             uiPrint(0, 2, "K");

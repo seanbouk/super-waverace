@@ -56,7 +56,22 @@ Mesen.exe --testrunner --timeout=30 <rom> <script.lua>   # arg order-free
   neighbouring sprites' OAM entries (the ski vanished this way).
 - **tcc-816 cannot read far ROM data.** Any ROM table access from C goes via a
   tiny asm helper with globals (see collProbe / rowDepth in camera.asm).
-- **BSS is NOT zero-initialised.** Clear arrays explicitly (camTabs).
+- **tcc-816 compiles every 16-bit multiply into a ~100+ cycle library call**
+  — the reason hot math lives in camera.asm. projectPoint (17 calls/loop,
+  8 multiplies each) is asm now: ported bit-exactly (same floor semantics),
+  verified by a dual-run harness (6797 calls, 0 output mismatches) because
+  fixed-frame OAM comparison is invalid — a faster loop shifts the tick/frame
+  alignment and everything physics-driven moves. Measured: 500 -> 554 loops
+  per 2000 frames (+11%). Next asm candidates: ski velocity split/merge,
+  NPC steering products; also rowDepth's linear scan wants a binary search.
+- **The projection-block profiler (P in the debug UI) wraps to garbage**
+  (e.g. 5458) when the bracket straddles a frame edge without an NMI between
+  its two scanline() reads. Trust mid-frame readings; for real before/after
+  numbers, count loop ticks over a fixed frame window (tickrate.lua pattern).
+- **BSS is NOT zero-initialised.** Clear arrays explicitly (camTabs). This
+  bit AGAIN with skiFlip: never initialised, garbage until the first steer,
+  so the ski rendered v-flipped through the countdown — latent since the
+  sprite was born, only seen when a timing change moved the frames sampled.
 - **PVSnesLib console text**: consoleUpdate DMAs its map to hardcoded VRAM
   $0800 — inside Mode 7's region. Never use consoleDrawText/consoleUpdate;
   ui.c owns the text map. The lib is still used for font+palette init only.
