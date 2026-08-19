@@ -66,6 +66,11 @@ camDP dsb 64 ; 0-15 build, 16-31 projectPoint, 32-39 ski, 40-51 npc
 .DEFINE NA_T   $30
 .DEFINE NA_T2  $32
 
+; rowDepth binary search frame
+.DEFINE RD_LO  $34
+.DEFINE RD_HI  $36
+.DEFINE RD_MID $38
+
 ;----------------------------------------------------------------------------
 ; one product: (16-bit word at wave_raw?,y) * (s0.8 mag at dp) >> 8
 ; PRODLO: full sequence loading lo+hi; leaves hi byte in $4202 for PRODHI
@@ -348,34 +353,79 @@ buildDone:
 ; if none), rdD = distance actually shown at that row (occlusion check).
 rowDepth:
     php
+    phd
     rep #$30
     phx
+    pea camDP
+    pld
+    ; d[] is non-increasing down-screen, so "lowest row with d >= rdV" is
+    ; the last-true of a monotone predicate: binary search, 8 probes flat
+    ; instead of up to 223 linear steps. Single mode (16-bit) throughout.
     lda.l camPhaseOff
     clc
     adc #446
     tax
+    lda.l wave_rawd,x    ; P(223): bottom row already deep enough?
+    cmp.l rdV
+    bcc _rd_srch
+    sta.l rdD
     lda #223
     sta.l rdRow
-_rd_loop:
-    lda.l wave_rawd,x
+    bra _rd_done
+_rd_srch:
+    lda.l camPhaseOff
+    tax
+    lda.l wave_rawd,x    ; P(0): anything at all in range?
     cmp.l rdV
-    bcs _rd_found
-    dex
-    dex
-    lda.l rdRow
-    dec a
-    sta.l rdRow
-    bpl _rd_loop
+    bcs _rd_bin
     lda #$FFFF
     sta.l rdRow
     bra _rd_done
-_rd_found:
+_rd_bin:
+    lda #0               ; invariant: P(lo) true, P(hi) false
+    sta.b RD_LO
+    lda #223
+    sta.b RD_HI
+_rd_iter:
+    lda.b RD_LO
+    clc
+    adc.b RD_HI
+    lsr a
+    sta.b RD_MID
+    asl a                ; row -> byte offset
+    clc
+    adc.l camPhaseOff
+    tax
+    lda.l wave_rawd,x
+    cmp.l rdV
+    bcc _rd_hi
+    lda.b RD_MID
+    sta.b RD_LO
+    bra _rd_step
+_rd_hi:
+    lda.b RD_MID
+    sta.b RD_HI
+_rd_step:
+    lda.b RD_HI
+    sec
+    sbc.b RD_LO
+    cmp #2
+    bcs _rd_iter
+    lda.b RD_LO
+    sta.l rdRow
+    asl a
+    clc
+    adc.l camPhaseOff
+    tax
     lda.l wave_rawd,x
     sta.l rdD
 _rd_done:
     plx
+    pld
     plp
     rtl
+
+
 
 ;----------------------------------------------------------------------------
 ; one arithmetic shift right (the 65816 only has logical LSR)

@@ -68,9 +68,12 @@ Mesen.exe --testrunner --timeout=30 <rom> <script.lua>   # arg order-free
   consume them BEFORE the first buildCamTables and BSS garbage reached the
   first loop's physics. The NPC steering products (npcAim: wrapped deltas +
   lateral bias + cross/dot; npcVel: velocity components) are asm too, same
-  discipline (2790 calls, 0 mismatches). Measured: 500 -> 554 -> 579 -> 620
-  loops per 2000 frames (+24% total). Remaining candidate: rowDepth's
-  linear scan wants a binary search.
+  discipline (2790 calls, 0 mismatches). rowDepth is a binary search now
+  (8 probes flat instead of up to 223 linear steps; verified EXHAUSTIVELY -
+  all 14240 phase x depth inputs, 0 mismatches against the retired scan).
+  Measured: 500 -> 554 -> 579 -> 620 -> 652 loops per 2000 frames (+30%
+  total; loop averages ~3.07 vblanks). The hot-math porting pass is done -
+  what remains in C is control flow, arrays and PVSnesLib calls.
 - **The projection-block profiler (P in the debug UI) wraps to garbage**
   (e.g. 5458) when the bracket straddles a frame edge without an NMI between
   its two scanline() reads. Trust mid-frame readings; for real before/after
