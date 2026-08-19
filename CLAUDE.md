@@ -160,9 +160,9 @@ painter to move the grid.
   The ladder hangs off waterRow, which rides the swell, so the scroll absorbs
   the frame-to-frame change in waterRow — otherwise the whole wake is dragged
   up and down with the ski instead of staying planted in the water.
-  Speed gating: SPR_WET_MIN is the churn threshold (no foam below it, so
-  reverse/airborne/idle are dry), SPR_WET_SHIFT spaces the art levels above
-  it, and SPR_DRAIN keeps the ladder advancing while anything is still on it
+  Speed gating: SPRAY_WET_MIN is the churn threshold (no foam below it, so
+  reverse/airborne/idle are dry), SPRAY_WET_SHIFT spaces the art levels above
+  it, and SPRAY_DRAIN keeps the ladder advancing while anything is still on it
   — without that a sudden stop freezes the wake on screen forever, since the
   scroll (and therefore the whole inject/shift cycle) is speed-driven. The
   landing burst gates on vAlong, NOT sprWet: forward speed survives a jump

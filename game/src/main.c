@@ -162,27 +162,28 @@ u8 pjOk;
 // with speed, a burst on landing. The band is always populated, so the low
 // loop rate stops mattering: it reads as a continuous stream whose bands
 // travel backwards.
-#define SPR_ROWS 4                     // 1 static source + 3 scrolling
-#define SPRAY_SPR (NPC_SPR + NPC_COUNT) // 2 * SPR_ROWS sprites from here
+#define SPRAY_ROWS 4                     // 1 static source + 3 scrolling
+#define SPRAY_SPR (NPC_SPR + NPC_COUNT) // 2 * SPRAY_ROWS sprites from here
 #define SPRAY_CELL 16                  // cell height in scanlines
-#define SPRAY_MIN 160  // impact speed (8.8) below which a landing is dry
-#define SPRAY_BURST 1  // cells that carry the landing's peak intensity
+#define SPRAY_IMPACT_MIN 160 // vertical landing speed (8.8) for a burst
+#define SPRAY_BURST_CELLS 1  // cells that carry the landing's peak intensity
 // churn thresholds, in the same 8.8 world/loop units as vAlong (top ~4600):
 // below WET_MIN the hull is not throwing water at all, and WET_SHIFT sets how
 // much more speed each art level wants (1 << 10 = 1024 per level)
-#define SPR_WET_MIN 1100
-#define SPR_WET_SHIFT 10
+#define SPRAY_WET_MIN 1100
+#define SPRAY_WET_SHIFT 10
 // while anything is left on the ladder the scroll keeps ticking at least this
 // fast, so stopping (or reversing, or taking off) lets the wake wash away
 // instead of freezing on screen
-#define SPR_DRAIN 400
-u8 sprInt[SPR_ROWS]; // intensity per cell row, 0 = nothing drawn
+#define SPRAY_DRAIN 400
+u8 sprInt[SPRAY_ROWS]; // intensity per cell row, 0 = nothing drawn
 s16 sprScroll;       // 8.8 pixels scrolled, signed: see the bob compensation
 s16 sprOfs;          // whole-pixel scroll for this frame
 u8 prevWater;        // last frame's waterline, to cancel the swell's bob
 u16 sprWet;          // smoothed "churning water" = in-water forward speed
 u8 sprBurst, sprLvl, sprKick;
-s16 sprY;
+s16 sprY, sprChurn, sprRate; // block-local scratch: this effect was
+u8 sprAny;                   // unreadable borrowing apu/apd/bj
 
 //---------------------------------------------------------------------------------
 static u16 scanline(void)
@@ -261,20 +262,20 @@ static void buildWinTab(u16 top, u16 bot)
 static void sprayInject(void)
 {
     u8 i;
-    for (i = SPR_ROWS - 1; i > 0; i--)
+    for (i = SPRAY_ROWS - 1; i > 0; i--)
         sprInt[i] = sprInt[i - 1];
     if (sprBurst)
     {
         sprInt[0] = WAVE_SPRAY_LEVELS; // top level: a landing
         sprBurst--;
     }
-    else if (sprWet < SPR_WET_MIN) // too slow, reversing, or airborne
+    else if (sprWet < SPRAY_WET_MIN) // too slow, reversing, or airborne
         sprInt[0] = 0;
     else
     {
         // map the speed range ABOVE the threshold onto the art levels, so
         // the ramp spans what you actually drive rather than starting at zero
-        sprLvl = (u8)((sprWet - SPR_WET_MIN) >> SPR_WET_SHIFT);
+        sprLvl = (u8)((sprWet - SPRAY_WET_MIN) >> SPRAY_WET_SHIFT);
         if (sprLvl > WAVE_SPRAY_LEVELS - 2)
             sprLvl = WAVE_SPRAY_LEVELS - 2;
         sprInt[0] = sprLvl + 1; // 0 is reserved for "nothing"
@@ -497,7 +498,7 @@ int main(void)
     dmaCopyCGram((u8 *)&npc_pals, 144, 96);
     oamSet(0, SKI_X, 140, 3, 0, 0, 0, 0);
     oamSetEx(0, OBJ_LARGE, OBJ_SHOW);
-    for (bi = 1; bi < SPRAY_SPR + 2 * SPR_ROWS; bi++)
+    for (bi = 1; bi < SPRAY_SPR + 2 * SPRAY_ROWS; bi++)
         oamSetVisible(bi << 2, OBJ_HIDE); // NB: OAM ids are byte offsets (x4)
 
     setPaletteColor(0, RGB8(16, 60, 150)); // deep azure zenith
@@ -576,7 +577,7 @@ int main(void)
     sprKick = 0;
     sprWet = 0;
     prevWater = waveSkiRow[0];
-    for (bi = 0; bi < SPR_ROWS; bi++)
+    for (bi = 0; bi < SPRAY_ROWS; bi++)
         sprInt[bi] = 0;
     paceEma = 3000; // seeded near typical pace; the EMA takes over at GO
     npcSpd[0] = SPD_CRUISE;
@@ -734,9 +735,9 @@ int main(void)
                 // (no water drag in the air) whereas the smoothed churn has
                 // decayed to nothing by the time you land, so this keeps the
                 // big landings loud while a bob at a standstill stays dry
-                if (-skiVv >= SPRAY_MIN && vAlong >= SPR_WET_MIN)
+                if (-skiVv >= SPRAY_IMPACT_MIN && vAlong >= SPRAY_WET_MIN)
                 {
-                    sprBurst = SPRAY_BURST;
+                    sprBurst = SPRAY_BURST_CELLS;
                     sprKick = 1; // inject at once: the burst belongs at the
                                  // stern on the frame you actually land
                 }
@@ -1152,17 +1153,17 @@ int main(void)
         // x-(x>>2) 0.75x, and so on.
         // churn: only water thrown FORWARD counts, so reverse and airborne
         // both decay to nothing
-        apu = inWater ? vAlong : 0;
-        if (apu < 0)
-            apu = 0;
-        sprWet += (s16)(apu - sprWet) >> 2; // ~4-loop smoothing
-        bj = 0;
-        for (bi = 0; bi < SPR_ROWS; bi++)
-            bj |= sprInt[bi]; // anything still showing?
-        apd = (s16)sprWet;
-        if (bj && apd < SPR_DRAIN)
-            apd = SPR_DRAIN; // wash the leftovers away after a stop
-        sprScroll += apd;
+        sprChurn = inWater ? vAlong : 0;
+        if (sprChurn < 0)
+            sprChurn = 0;
+        sprWet += (s16)(sprChurn - sprWet) >> 2; // ~4-loop smoothing
+        sprAny = 0;
+        for (bi = 0; bi < SPRAY_ROWS; bi++)
+            sprAny |= sprInt[bi]; // anything still showing?
+        sprRate = (s16)sprWet;
+        if (sprAny && sprRate < SPRAY_DRAIN)
+            sprRate = SPRAY_DRAIN; // wash the leftovers away after a stop
+        sprScroll += sprRate;
         // Cancel the bob: the ladder hangs off waterRow, which rides up and
         // down with the swell, so without this the wake is dragged along with
         // the ski instead of staying planted in the water. Moving up the
@@ -1172,7 +1173,7 @@ int main(void)
         prevWater = waterRow;
         // coming back up to speed from an empty band: seed it now rather than
         // waiting a whole cell's worth of scroll for the first inject
-        if (!bj && sprWet >= SPR_WET_MIN)
+        if (!sprAny && sprWet >= SPRAY_WET_MIN)
             sprKick = 1;
         if (sprKick) // a landing: put the burst at the stern immediately
         {
@@ -1190,9 +1191,11 @@ int main(void)
         // above the waterline are skipped below rather than dragged down
         if (sprScroll < -(SPRAY_CELL << 8))
             sprScroll = -(SPRAY_CELL << 8);
-        // whole pixels, biased so the shift stays on a positive value
+        // whole pixels; the +8192 bias keeps the shift on a positive
+        // value (tcc's signed >> is arithmetic - paceEma and sprWet rely
+        // on it - the bias just makes this line's rounding self-evident)
         sprOfs = ((sprScroll + 8192) >> 8) - 32;
-        for (bi = 0; bi < SPR_ROWS; bi++)
+        for (bi = 0; bi < SPRAY_ROWS; bi++)
         {
             // cells emerge from under the stern and march down; the top of
             // cell 0 sits inside the window-masked band, so a new cell fades

@@ -8,8 +8,8 @@ fake a sinusoidal ocean on hardware that can only rotate and scale a flat plane.
 🌊 Playable: a full 3-lap race against three rubber-banded NPC racers — start
 grid, 3-2-1-GO countdown, live positions, lap times, chequered start line and
 a FINISH banner — on the rolling sea, around an island course with shorelines,
-rope float-lines and L/R buoys, collision with slide-along. Verified on real
-hardware (pre-race build). See `docs/PLAN.md` "Race mode" for what's left
+rope float-lines and L/R buoys, collision with slide-along, and speed-driven
+wake spray under the hull. Verified on real hardware (pre-race build). See `docs/PLAN.md` "Race mode" for what's left
 (gate judging, multi-course) and for important performance findings. Target:
 [SNES DEV Game Jam 2026](https://itch.io/jam/snes-dev-game-jam-2026) — LoROM,
 ≤512KB, no enhancement chips, no SRAM, NTSC+PAL. See `docs/PLAN.md` for history.
@@ -101,14 +101,20 @@ grinding + turning) is actively pushed back to open water.
 bottom of the screen, and the ski covers half that per loop — so a one-shot splash
 pinned to the water is gone before you can see it. Instead the wake is a
 **conveyor**: two columns of 16×16 dithered cells spanning the hull, a static
-source cell pinned at the waterline and the rest scrolling down at a fraction of
-your speed. Every whole-cell advance shifts an intensity ladder and writes a new
-value at the top — nothing out of the water, more with speed, a peak on landing
-(which forces an immediate inject, so the burst appears with the impact and then
-travels back down the band). Because the band is always populated, the ~17 Hz loop
-stops mattering: it reads as a continuous churn rather than an object to track.
-The OBJ window is bounded to the hull's submerged rows so this area is drawable at
-all — see `buildWinTab`.
+source cell pinned at the waterline and the rest scrolling down at a rate taken
+from your speed. Every whole-cell advance shifts an intensity ladder and writes a
+new value at the top — dry below a churn threshold (so idling, reversing and
+airborne throw nothing), denser with speed above it, and a peak burst on a hard
+landing (injected immediately, so it appears with the impact and then travels back
+down the band). Two details keep it honest: the scroll absorbs the frame-to-frame
+movement of the waterline, so the trailing foam stays planted in the water while
+the swell bobs the ski; and a minimum drain rate keeps the ladder advancing while
+anything is left on it, so stopping washes the wake away instead of freezing it
+(the scroll drives the whole inject cycle — at zero speed it would otherwise never
+clear). Because the band is always populated, the ~17 Hz loop stops mattering: it
+reads as continuous churn rather than an object to track. The OBJ window is
+bounded to the hull's submerged rows so this area is drawable at all — see
+`buildWinTab`.
 
 **Buoys.** Course markers (yellow L / red R — pass sides not yet enforced) live
 twice: a collision cell + painted base ripple in the texture, and a sprite projected
