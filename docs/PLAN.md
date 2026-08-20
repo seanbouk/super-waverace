@@ -155,3 +155,42 @@ Phases (each headless-verifiable in Mesen; ✅ = done):
 5. **Gate judging / penalties** (optional) — waypoints already carry the
    gate geometry; check crossing side against buoyType.
 6. **Multi-course** — bake N courses, runtime loader, course select.
+
+---
+
+## Performance pass (Aug 2026) + post-jam options
+
+The three planned C->asm ports plus a rowDepth binary search, each verified
+bit-exact (dual-run harnesses; rowDepth exhaustively over all 14240 inputs)
+and measured as loop ticks over an identical 2000-frame window:
+
+| build                    | loops/2000f | avg vblanks |
+|--------------------------|------------|-------------|
+| C baseline               | 500        | 4.0         |
+| + projectPoint asm       | 554        | 3.6         |
+| + ski math asm           | 579        | 3.45        |
+| + NPC steering asm       | 620        | ~3.2        |
+| + rowDepth binary search | 652        | ~3.07       |
+
+The hot math is gone from C; what remains is control flow, array indexing
+and PVSnesLib call overhead (oamSet marshalling is the likeliest next bite,
+diminishing returns). A LOCKED 2-vblank/30Hz loop is not reachable with more
+of the same on stock hardware - it is SA-1 territory.
+
+**Post-jam chip analysis (agreed direction):**
+- **SA-1 is the pick**: same 65816 ISA (camera.asm ports nearly verbatim),
+  ~4x clock + parallelism, own multiplier, HDMA can source from BW-RAM.
+  1P 60Hz plausible, 2P 30Hz realistic.
+- DSP-1 is the wrong tool: its Mode 7 raster command assumes a FLAT plane;
+  as a generic math port its I/O overhead cancels the gains. Skip.
+- Super FX works (GSU builds the HDMA tables in its own RAM, HDMA reads them
+  from the cart bus; 60Hz plausible) but is a second toolchain + big rewrite.
+
+**Two-player split-screen cost sketch** (deferred; no unknowns, ~all pieces
+are variants of existing systems): one extra baked viewport table set (both
+halves are identical viewports at different rows) + per-player wave phase
+accumulators; buildCamTables parameterised per half (camBlk1Ct/SrcOff/DstOff
+plumbing half-exists); per-viewport projection bounds with cull margins at
+the split (no per-sprite clipping exists - Mario Kart pops at the seam too);
+second HUD band via the mode-split HDMA; duplicated player state; P2 sky =
+backdrop+COLDATA gradient. Stock = ~15Hz (rough); with SA-1 = 30Hz solid.

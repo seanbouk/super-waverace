@@ -34,9 +34,12 @@ Mesen.exe --testrunner --timeout=30 <rom> <script.lua>   # arg order-free
 
 - Lua: end with `emu.exit(code)`; screenshots via `emu.takeScreenshot()` +
   `io.open` (io works in callbacks; `emu.log` is invisible headless).
-- Known-good scripts in the session scratchpad pattern: register ONE
-  `endFrame` callback, save PNGs at target frame counts (see git history:
-  multishot.lua / farshot.lua). Claude can Read the PNGs to verify visually.
+- Reusable harness scripts are COMMITTED in tools/mesen/ (see its README):
+  raceshot/startshot (screenshot sweeps), tickrate (the only trustworthy
+  before/after perf number), counters (dual-run harness readout), oamdump.
+  Pattern: ONE endFrame callback, save PNGs at target frames, emu.exit();
+  Claude can Read the PNGs to verify visually. WRAM addresses come from
+  superwaverace.sym and MOVE between builds - always re-grep.
 - **Scripted controller input does NOT work in testrunner mode.** To test
   driving, flip `#define AUTOPILOT 1` in `game/src/main.c` (steers around
   the racing-line waypoints at full throttle — laps in ~750-900 ticks) and
@@ -180,8 +183,9 @@ painter to move the grid.
   (OBJ palettes 1-3 recolours; UI map at VRAM 0x7000); full race flow
   (countdown/positions/finish, schedule rubber-banding via SPD_* tiers in
   main.c — calibrated to the REAL ~120 world/s player pace, see PLAN.md),
-  checkered start line baked at path[0]. Next: gate judging (optional),
-  multi-course, and the fixed-loop-rate backlog item.
+  checkered start line baked at path[0]. The asm performance pass is done
+  (see PLAN.md: 500 -> 652 loops/2000 frames, ~3.07 vblanks avg; locked 30Hz
+  = SA-1, post-jam). Next: gate judging (optional), multi-course.
 - Wake spray on the player only: a CONVEYOR of 16x16 dithered cells (two
   columns spanning the hull) under the stern. Cell 0 is a static source at
   the waterline; the rest scroll down at a chosen fraction of speed (sprWet
