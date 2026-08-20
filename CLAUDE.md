@@ -164,6 +164,8 @@ Mesen.exe --testrunner --timeout=30 <rom> <script.lua>   # arg order-free
 
 `game/src/main.c` top: TURN_SPEED, THRUST (drag >>4 sets top speed =
 THRUST*16), GRAV, DIP, MAX_VV_UP/DOWN, splash retention (>>2 on entry),
+power ladder thrTab[6] in init (96..192, [3]=THRUST=the anchor feel; u8 -
+multiplier input - and [5]*32 must stay under the 8192 overflow envelope),
 grip (vSide -= vSide>>3) and rudder (vAlong += |vSide|>>3). Buoy scale bands
 are SCALE_V1..V4 (229/320/457/640) — derived, not tuned: 32 * WAVE_SKI_DIST
 / v crossing the midpoint between neighbouring art sizes, anchored to the
@@ -210,8 +212,22 @@ painter to move the grid.
   instead of everything below the waterline, which is what frees the area
   under the stern for sprites. Nothing is drawn above waterRow, so spray can
   never appear beside the rider.
-- Buoy pass-sides (L/R) recorded but not judged;
-  no sound (jam judges music — PVSnesLib has an .it tracker driver, unused);
+- Power gates (buoy judging) done: the bake sorts buoys into racing-line
+  order with the line direction at each (gateX/Y/Left/Nx/Ny/Wp) and LINTS
+  labels against the side the racing line actually passes (cross > 0 = L,
+  verified 14/14 on the authored course - never re-derive the handedness,
+  the mirror flip makes reasoning about it treacherous). Runtime judges ONE
+  armed gate: the along-track dot flips sign on the crossing tick (immune to
+  tunnelling at any speed, unlike painted areas), the cross product picks
+  the side; correct +1 power (cap 5), wrong resets to 0, thrTab rescales
+  thrust. The gate arms only near its own segment (gRel window) so the
+  infinite perpendicular can't slice a distant course leg; a gate left
+  behind un-crossed is judged wherever you are (the buoy is a limit, not a
+  target - any width of pass counts). Deltas pre-shift >>4 so the s8*s16
+  products fit. HUD power bar redraws ONLY on change - 7 uiPrint/tick cost
+  a measured 4% of the loop (652 -> 624); guarded it's 645 (~1%, the gate
+  math). NPC balance vs the power ladder not yet revisited.
+  No sound (jam judges music — PVSnesLib has an .it tracker driver, unused);
   sand is collidable but there's no "run aground" state; no title screen.
 - PAL: accepted trade = runs slower (30Hz loop becomes 25Hz); must still boot.
 - Real-hardware verified: EXTBG rendering, full HDMA stack, general play.

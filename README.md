@@ -9,8 +9,11 @@ fake a sinusoidal ocean on hardware that can only rotate and scale a flat plane.
 grid, 3-2-1-GO countdown, live positions, lap times, chequered start line and
 a FINISH banner — on the rolling sea, around an island course with shorelines,
 rope float-lines and L/R buoys, collision with slide-along, and speed-driven
-wake spray under the hull. Verified on real hardware (pre-race build). See `docs/PLAN.md` "Race mode" for what's left
-(gate judging, multi-course) and for important performance findings. Target:
+wake spray under the hull. Buoys are judged: passing each one on its correct
+side builds a 0–5 power chain (HUD bar) that scales thrust and top speed from
+67% to 133%; a wrong-side pass resets it to 0 — you earn your speed. Verified
+on real hardware (pre-race build). See `docs/PLAN.md` "Race mode" for what's
+left (multi-course) and for important performance findings. Target:
 [SNES DEV Game Jam 2026](https://itch.io/jam/snes-dev-game-jam-2026) — LoROM,
 ≤512KB, no enhancement chips, no SRAM, NTSC+PAL. See `docs/PLAN.md` for history.
 

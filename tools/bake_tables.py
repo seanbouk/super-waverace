@@ -674,6 +674,45 @@ def load_course():
     return zones, ropes, buoys, rpath
 
 
+def order_gates(course):
+    """Buoys sorted into racing-line order, each with the line direction at
+    its nearest point — the runtime power-gate data. A gate is judged when
+    the player crosses the buoy's perpendicular: sign(cross(dir, player -
+    buoy)) picks the side, and the racing line itself passes every buoy at
+    cross > 0 for L, < 0 for R (verified against the authored course), so
+    that IS the correct-side convention. Also lints: if the racing line
+    passes a buoy on the wrong side of its own label, the course is asking
+    the player to leave the line — almost certainly a painting mistake."""
+    buoys, rpath = course[2], course[3]
+    if not buoys or len(rpath) < 2:
+        return []
+    n = len(rpath)
+    gates = []
+    for i, (bx, by, side) in enumerate(buoys):
+        best = None
+        for k in range(n):
+            ax, ay = rpath[k]
+            dx, dy = rpath[(k + 1) % n][0] - ax, rpath[(k + 1) % n][1] - ay
+            L2 = dx * dx + dy * dy
+            t = 0.0 if L2 == 0 else min(1.0, max(0.0, (
+                (bx - ax) * dx + (by - ay) * dy) / L2))
+            px, py = ax + t * dx, ay + t * dy
+            d2 = (bx - px) ** 2 + (by - py) ** 2
+            if best is None or d2 < best[0]:
+                best = (d2, k, t, dx, dy, px, py)
+        d2, k, t, dx, dy, px, py = best
+        L = math.hypot(dx, dy) or 1.0
+        nx, ny = round(dx / L * 64), round(dy / L * 64)
+        line_side = dx * (py - by) - dy * (px - bx)  # cross(dir, line - buoy)
+        want_left = side != "R"
+        if (line_side > 0) != want_left:
+            print("WARNING: buoy {0} is labelled {1} but the racing line "
+                  "passes it on the other side".format(i, side))
+        gates.append((k + t, bx, by, 1 if want_left else 0, nx, ny, k))
+    gates.sort()
+    return [g[1:] for g in gates]
+
+
 def compose_canvas(pat, course):
     """Full 1024x1024 index canvas: tiled water pattern, then sand zones,
     auto-shore foam (on the sand side), and rope float-lines.
@@ -1193,6 +1232,14 @@ extern u16 buoyY[WAVE_BUOY_COUNT + 1];
 extern u8 buoyType[WAVE_BUOY_COUNT + 1];
 extern u16 pathX[WAVE_PATH_COUNT + 1];
 extern u16 pathY[WAVE_PATH_COUNT + 1];
+/* power gates: the buoys again, sorted into racing-line order, with the
+   line direction at each (s8, unit * 64) and the segment they belong to */
+extern u16 gateX[WAVE_BUOY_COUNT + 1];
+extern u16 gateY[WAVE_BUOY_COUNT + 1];
+extern u8 gateLeft[WAVE_BUOY_COUNT + 1];
+extern s8 gateNx[WAVE_BUOY_COUNT + 1];
+extern s8 gateNy[WAVE_BUOY_COUNT + 1];
+extern u8 gateWp[WAVE_BUOY_COUNT + 1];
 
 void waveTablesInit(void);
 void waveRotateStep(u8 offset);
@@ -1231,7 +1278,11 @@ void waveRotateStep(u8 offset);
         f.write("u8 waveSkiRow[WAVE_PHASES];\ns8 waveSurfH[WAVE_PHASES];\n\n")
         f.write("u16 buoyX[WAVE_BUOY_COUNT + 1];\nu16 buoyY[WAVE_BUOY_COUNT + 1];\n")
         f.write("u8 buoyType[WAVE_BUOY_COUNT + 1];\n")
-        f.write("u16 pathX[WAVE_PATH_COUNT + 1];\nu16 pathY[WAVE_PATH_COUNT + 1];\n\n")
+        f.write("u16 pathX[WAVE_PATH_COUNT + 1];\nu16 pathY[WAVE_PATH_COUNT + 1];\n")
+        f.write("u16 gateX[WAVE_BUOY_COUNT + 1];\nu16 gateY[WAVE_BUOY_COUNT + 1];\n")
+        f.write("u8 gateLeft[WAVE_BUOY_COUNT + 1];\n")
+        f.write("s8 gateNx[WAVE_BUOY_COUNT + 1];\ns8 gateNy[WAVE_BUOY_COUNT + 1];\n")
+        f.write("u8 gateWp[WAVE_BUOY_COUNT + 1];\n\n")
         f.write("void waveTablesInit(void)\n{\n")
         for name in ("tm", "g"):
             f.write("\n".join(inits[name]) + "\n")
@@ -1249,6 +1300,13 @@ void waveRotateStep(u8 offset);
             for i, (px, py) in enumerate(course[3]):
                 f.write("    pathX[{0}] = {1};\n".format(i, (px * 4) & 4095))
                 f.write("    pathY[{0}] = {1};\n".format(i, (py * 4) & 4095))
+            for i, (gx, gy, left, nx, ny, wp) in enumerate(order_gates(course)):
+                f.write("    gateX[{0}] = {1};\n".format(i, (gx * 4) & 4095))
+                f.write("    gateY[{0}] = {1};\n".format(i, (gy * 4) & 4095))
+                f.write("    gateLeft[{0}] = {1};\n".format(i, left))
+                f.write("    gateNx[{0}] = {1};\n".format(i, nx))
+                f.write("    gateNy[{0}] = {1};\n".format(i, ny))
+                f.write("    gateWp[{0}] = {1};\n".format(i, wp))
         f.write("}\n\n")
         f.write("void waveRotateStep(u8 offset)\n{\n    switch (offset)\n    {\n")
         for o in range(rot_count):

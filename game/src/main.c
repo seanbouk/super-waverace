@@ -165,6 +165,13 @@ u16 npcDist[NPC_COUNT], pDist, spdTgt;
 // monotone progress (total waypoints consumed): laps are counted at the
 // START LINE (waypoint 0), so nextWp alone no longer orders the field
 u16 pProg, npcProg[NPC_COUNT];
+// power (buoy chain): pass the armed buoy on its correct side -> +1 (cap
+// 5), wrong side -> back to 0. thrTab rescales THRUST per level, so both
+// acceleration and top speed ride the chain; [3] is the pre-power feel.
+// RAM, filled at init: tcc cannot read far ROM const data.
+u8 power, nextGate, gateNeg, gj, pwDrawn;
+u8 thrTab[6];
+s16 gRel, gAlong, gLat;
 s16 rubDiff;
 // race + lap clocks: REAL frames from snes_vblank_count (the loop rate
 // varies, so loop ticks are not time); digits maintained incrementally
@@ -507,8 +514,18 @@ int main(void)
     skiLean = 0; // BSS is not zero-initialised: garbage here reached
     skiFlip = 0; // oamSet as flip bits until the first steer input
     skiDist8 = WAVE_SKI_DIST; // 200 - must stay < 256 for the multiplier
-    thrF8 = THRUST;           // 144 - ditto
-    thrR8 = THRUST / 2;
+    thrTab[0] = 96;     // power ladder: 67%..133% of the old fixed THRUST.
+    thrTab[1] = 112;    // u8 (multiplier input), and top speed = t*32 keeps
+    thrTab[2] = 128;    // even [5] inside the >>5/>>2 overflow envelope
+    thrTab[3] = THRUST; // 144: power 3 = the pre-power feel
+    thrTab[4] = 168;
+    thrTab[5] = 192;
+    power = 0; // you earn your speed: the chain starts empty
+    nextGate = 0;
+    gateNeg = 0;
+    pwDrawn = 255; // force the bar's first draw
+    thrF8 = thrTab[0];
+    thrR8 = thrF8 >> 1;
     skiY = -1536; // spawn below any wave: wet from frame one, bobs up
     skiVv = 0;
     skiVX = 0;
@@ -869,6 +886,62 @@ int main(void)
         }
         lapTicks++;
 
+#if WAVE_BUOY_COUNT > 0
+        // ---- power gates: judge the armed buoy (racing-line order) when
+        // the player crosses its perpendicular. The along-track dot product
+        // flips sign on the crossing tick no matter how fast you move -
+        // unlike a painted area, it cannot be tunnelled through. The buoy
+        // is a LIMIT, not a target: any lateral distance counts, only the
+        // side matters. The gate arms only near its own segment (gRel), so
+        // the infinite perpendicular can never slice a distant course leg;
+        // a gate left behind un-crossed (odd line) is judged where you are.
+        for (gj = 0; gj < 2; gj++) // a tight pair can cross in one tick
+        {
+            gRel = (s16)nextWp - (s16)gateWp[nextGate];
+            if (gRel < 0)
+                gRel += WAVE_PATH_COUNT;
+            if (gRel > WAVE_PATH_COUNT / 2)
+                gRel -= WAVE_PATH_COUNT;
+            if (gRel < 0)
+                break; // gate segments ahead: not in reach yet
+            wpdx = (s16)((skiWX - gateX[nextGate]) & 4095);
+            if (wpdx > 2048)
+                wpdx -= 4096;
+            wpdy = (s16)((skiWY - gateY[nextGate]) & 4095);
+            if (wpdy > 2048)
+                wpdy -= 4096;
+            wpdx >>= 4; // +-128: the s8*s16 products below stay in s16
+            wpdy >>= 4;
+            if (gRel <= 2)
+            {
+                gAlong = wpdx * gateNx[nextGate] + wpdy * gateNy[nextGate];
+                if (gAlong < 0)
+                {
+                    gateNeg = 1; // seen behind the line: armed
+                    break;
+                }
+                if (!gateNeg)
+                    break; // never seen behind: leave to the overdue path
+            }
+            // crossed (or overdue at gRel >= 3): judge the side, L wants
+            // cross(dir, player - buoy) positive (bake-verified convention)
+            gLat = gateNx[nextGate] * wpdy - gateNy[nextGate] * wpdx;
+            if ((gLat >= 0) == (gateLeft[nextGate] != 0))
+            {
+                if (power < 5)
+                    power++;
+            }
+            else
+                power = 0;
+            thrF8 = thrTab[power];
+            thrR8 = thrF8 >> 1;
+            gateNeg = 0;
+            nextGate++;
+            if (nextGate >= WAVE_BUOY_COUNT)
+                nextGate = 0;
+        }
+#endif
+
         // ---- NPC racers: kinematic waypoint followers (the autopilot's
         // steering brain), collision-probed so they cannot cross land ----
         posAcc = 1;
@@ -1221,6 +1294,11 @@ int main(void)
             uiPrintNum(24, 0, lapCount, 1);
             uiPrint(25, 0, ".");
             uiPrintNum(26, 0, nextWp, 2);
+#if WAVE_BUOY_COUNT > 0
+            uiPrint(28, 0, "G"); // power level + armed gate
+            uiPrintNum(29, 0, power, 1);
+            uiPrintNum(30, 0, nextGate, 2);
+#endif
             uiPrint(21, 1, "P"); // projection block cost, scanlines
             uiPrintNum(22, 1, pjPfLines, 4);
 #endif
@@ -1272,6 +1350,17 @@ int main(void)
             uiPrint(25, 0, ":");
             uiPrintNum(26, 0, rSecT, 1);
             uiPrintNum(27, 0, rSecU, 1);
+#if WAVE_BUOY_COUNT > 0
+            // power bar: 5 cells fill as the buoy chain grows. Redrawn
+            // only on change: uiPrint per tick is real cost under tcc
+            if (pwDrawn != power)
+            {
+                pwDrawn = power;
+                uiPrint(0, 1, "PW");
+                for (gj = 0; gj < 5; gj++)
+                    uiPrint(3 + gj, 1, gj < power ? "=" : "-");
+            }
+#endif
             // centre banner: countdown / GO! / FINISH!
             if (raceState == 0)
             {

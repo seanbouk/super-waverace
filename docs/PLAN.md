@@ -152,8 +152,19 @@ Phases (each headless-verifiable in Mesen; ✅ = done):
    - Backlog item: restore a fixed-rate loop (likely = move the per-loop C
      hot paths to asm with the hardware multiplier, as camera.asm did for
      the build). Would change all feel tuning - schedule it deliberately.
-5. **Gate judging / penalties** (optional) — waypoints already carry the
-   gate geometry; check crossing side against buoyType.
+5. ✅ **Gate judging → the power system** — every buoy is a judged gate:
+   pass on its correct side for +1 power (0-5), wrong side resets to 0, and
+   thrust/top speed scale 67%..133% with power (power 3 = the old fixed
+   feel; you start at 0 and earn your speed). Detection is a sign flip of
+   the along-track dot product against the buoy's perpendicular — immune to
+   tunnelling at any speed — with the buoy as a LIMIT, not a target: any
+   lateral distance counts, only the side matters. The bake orders buoys
+   along the racing line and lints labels against the side the line really
+   passes. HUD 5-cell power bar. Verified headless: autopilot chains to 5,
+   resets only at genuinely tight buoys, gates advance in strict order
+   across laps; loop cost ~1% (652 -> 645 ticks/2000 frames).
+   NOT yet rebalanced: NPC pace tiers ride paceEma so they self-adjust, but
+   the race schedule assumed the old constant player speed — revisit.
 6. **Multi-course** — bake N courses, runtime loader, course select.
 
 ---
