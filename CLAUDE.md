@@ -110,6 +110,18 @@ Mesen.exe --testrunner --timeout=30 <rom> <script.lua>   # arg order-free
   the mode-1 region now extends to WAVE_SKY_SWITCH (the tiled sky band), and
   its tiles render unscrolled BECAUSE of those zeros. Sky tiles live at
   VRAM 0x5C00 (chars 192+, above the font), palette row 2 (CGRAM 32-47).
+- **Clouds are BG2, not BG1**: scrolling BG1 would need per-row HDMA table
+  writes AND would slide the gradient dither. BG2 (mode-1 sky rows only,
+  TM 0x13 there; text band stays 0x11) has its own scroll: BG2HOFS =
+  camTheta, one write-twice per frame — 256px map vs 256 binary degrees =
+  the loop matches a full turn exactly. Write BOTH bytes back-to-back in
+  vblank: all BG scroll regs share the prev-byte latch, and the HDMA's
+  $210D stream poisons it mid-frame. Mode 7 ignores BG2 map/char bases
+  (BG2 = EXTBG there), so they're free to point anywhere: chars 128-191
+  at 0x5800 (64 max, bake-asserted), map 0x7400, palette row 3 (white =
+  CGRAM 49 = the checker white; shade = 50). BG2VOFS is set to -1 once
+  at init (the scroll off-by-one), and blank map entries are 0x0000 =
+  font space = transparent.
 - **BG vertical scroll is off by one**: at VOFS 0, screen line N samples MAP
   line N+1. Any mode-1 tile band must write one extra map row below its
   last visible row or the bottom line shows tile 0 (transparent -> a bare

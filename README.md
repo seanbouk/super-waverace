@@ -11,7 +11,8 @@ a FINISH banner — on the rolling sea, around an island course with shorelines,
 rope float-lines and L/R buoys, collision with slide-along, and speed-driven
 wake spray under the hull. Buoys are judged: passing each one on its correct
 side builds a 0–5 power chain (HUD bar) that scales thrust and top speed from
-67% to 133%; a wrong-side pass resets it to 0 — you earn your speed. Verified
+67% to 133%; a wrong-side pass resets it to 0 — you earn your speed. Dithered
+clouds drift through the sky with a heading-linked parallax. Verified
 on real hardware (pre-race build). See `docs/PLAN.md` "Race mode" for what's
 left (multi-course) and for important performance findings. Target:
 [SNES DEV Game Jam 2026](https://itch.io/jam/snes-dev-game-jam-2026) — LoROM,
@@ -23,7 +24,10 @@ left (multi-course) and for important performance findings. Target:
 bites while the hull is in the water (hovercraft scrabble). D-pad **left/right**
 steers; turn authority scales with speed (none when stopped). The ski floats on a
 buoyancy spring: sitting still it bobs with the swell; at speed it skims crest to
-crest, catching air where thrust and steering stop working.
+crest, catching air where thrust and steering stop working. Pass **left of L
+buoys and right of R buoys** to build the 0–5 power chain (the PW bar): each
+correct pass raises your thrust and top speed, one wrong-side pass drops you
+back to 0.
 
 ## How the effects work
 
@@ -140,7 +144,12 @@ the true (moving) horizon stay backdrop-only, shaded by a per-scanline COLDATA
 ramp that continues the same gradient, so the seam is invisible. This works
 because the M7 HOFS/VOFS HDMA rows above the horizon are pre-zeroed — and those
 registers double as BG1's scroll in mode 1, so the sky tiles render unscrolled
-for free. The PVSnesLib
+for free. Clouds ride BG2 over the gradient: a strip of dithered cumulus
+(transparent tiles, palette row 3, priority bit set) whose horizontal scroll is
+simply the camera heading — a 256px map against 256 binary degrees of heading
+means one full turn wraps the clouds exactly once, a perfect parallax loop for
+one register write per frame. BG2's map/char bases are ignored in mode 7 (where
+BG2 is the EXTBG layer), so the overlay costs the sea nothing. The PVSnesLib
 console uploads its map to a hardcoded VRAM address inside the Mode 7 region, so
 `game/src/ui.c` owns its own map buffer and DMAs it in vblank; the library is still
 used for its font and palette. Shows position/heading/speed, build profiler,
@@ -168,7 +177,8 @@ The line in the sand — update this table whenever an allocation changes.
 | 16–31 | UI text | Font palette for the mode-1 text band (palette row 1) |
 | 32–47 | Sky band | Palette row 2: the mode-1 sky gradient tiles (loaded over CGRAM at boot — nothing else may live here) |
 | 48–49 | Start line | Checker black / true white (glow-exempt) |
-| 50–127 | BG reserve | Unallocated |
+| 50 | Clouds | BG2 cloud underside shade (cloud white is 49, shared with the start line) |
+| 51–127 | BG reserve | Unallocated |
 | 128–143 | Ski + buoys | OBJ palette 0 (shared: ski, buoy yellows/reds, letters) |
 | 144–191 | NPC racers | OBJ palettes 1–3: green/purple/orange recolours of the ski palette (tiles shared) |
 | 192–255 | Sprites reserve | OBJ palettes 4–7 — do not touch from BG code |

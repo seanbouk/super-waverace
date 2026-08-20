@@ -46,6 +46,10 @@ SKY_GRAD_MAX = 17
 # the true (moving) horizon keeps the COLDATA backdrop gradient.
 SKY_SAFE = 6         # scanlines of margin above the highest horizon
 SKY_CHAR0 = 192      # first tile id for sky rows (VRAM 0x5C00, above font)
+CLOUD_CHAR0 = 128    # BG2 cloud chars: VRAM 0x5800, between font and sky
+CLOUD_ROW0 = 4       # strip's top map/screen tile row (scanline 32)
+CLOUD_TROWS = 4      # strip height in tile rows
+CLOUD_SHADE = (204, 222, 242)  # CGRAM 50: soft cloud underside
 
 DEFAULTS = {
     "camH": 34.0, "pitch": -10.0, "fovV": 25.0, "fovH": 60.0,
@@ -188,9 +192,11 @@ def phase_tables(phi, sky_ref, switch):
         b = round(P["crestGlow"] * max(0.0, c) ** P["glowGamma"]) if c > 0 else 0
         g_entries.append((0xE0 | min(31, b),))
 
-    # TM: BG1 through the whole mode-1 region (text band + tiled sky), then
-    # backdrop-only safe strip, then BG1 sea
-    tab_tm = bytes(repeat_blocks(switch, 0x11)
+    # TM: BG1 for the text band (BG2 clouds must never ride under the HUD),
+    # BG1+BG2 through the tiled sky (the scrolling cloud overlay), then
+    # backdrop-only safe strip, then the sea
+    tab_tm = bytes(repeat_blocks(UI_LINES, 0x11)
+                   + repeat_blocks(switch - UI_LINES, 0x13)
                    + repeat_blocks(n_sky - switch, SKY_TM)
                    + bytearray((0x81, SEA_TM, 0x00)))
     tab_g = hdma_table(switch, (0xE0,), g_entries) # mode-1 region: add zero
@@ -230,6 +236,56 @@ def build_sky_band(switch, sky_ref):
             c = k + d[(x + g) & 3] # rotate the pattern per line: Bayer-ish
             grid[g][x] = min(15, c)
     return encode_4bpp(grid, 1, n_rows), bytes(pal), n_rows
+
+
+def build_clouds():
+    """BG2 cloud overlay: a 256x32 strip of dithered cumulus on palette
+    row 3 (0 transparent, 1 = the start line's true white at CGRAM 49,
+    2 = CLOUD_SHADE at CGRAM 50 - both in the 50-127 BG reserve, nothing
+    else lives there). X wraps, so the 256px map loops seamlessly - and
+    256px against 256 binary degrees of heading means one full turn
+    scrolls exactly one map: the loop matches turn for turn.
+    Returns (tiles, map words as LE bytes, char count)."""
+    W, H = 256, CLOUD_TROWS * 8
+    grid = [[0] * W for _ in range(H)]
+    # (base x, flat-bottom row, puffs as (dx, cy, rx, ry) ellipses)
+    clouds = [
+        (16, 22, [(-16, 17, 15, 7), (0, 12, 14, 9), (15, 16, 12, 6)]),
+        (104, 18, [(-18, 13, 13, 6), (-3, 9, 12, 8), (11, 12, 14, 7),
+                   (24, 15, 9, 5)]),
+        (204, 21, [(-15, 16, 12, 6), (0, 11, 13, 8), (14, 15, 11, 6)]),
+    ]
+    for bx, base, puffs in clouds:
+        for y in range(H):
+            if y > base:
+                continue # flat cumulus bottom
+            for dx in range(-40, 41):
+                f = 0.0
+                for px, cy, rx, ry in puffs:
+                    d = math.hypot((dx - px) / rx, (y - cy) / ry)
+                    f = max(f, 1.0 - d)
+                if f <= 0.02:
+                    continue
+                # solid body, hash-dithered fringe
+                if f > 0.30 or _hash01(bx + dx + 97 * y, y * 31 + dx) < f * 2.4:
+                    grid[y][(bx + dx) & 255] = 2 if y >= base - 2 else 1
+    raw = encode_4bpp(grid, 32, CLOUD_TROWS)
+    blank = bytes(32)
+    chars, index, mapw = [], {}, bytearray()
+    for i in range(32 * CLOUD_TROWS):
+        t = raw[i * 32:i * 32 + 32]
+        if t == blank:
+            mapw += struct.pack("<H", 0) # font space char: transparent
+            continue
+        if t not in index:
+            index[t] = len(chars)
+            chars.append(t)
+        # priority bit set: mode 1 draws BG2-high above BG1-low (the sky)
+        mapw += struct.pack("<H", 0x2000 | 0x0C00
+                            | (CLOUD_CHAR0 + index[t]))
+    assert len(chars) <= SKY_CHAR0 - CLOUD_CHAR0, \
+        "cloud tiles overflow into the sky chars ({0})".format(len(chars))
+    return b"".join(chars), bytes(mapw), len(chars)
 
 
 def phase_raw(phi):
@@ -1166,6 +1222,13 @@ def main():
     asm.append(db_lines(sky_gfx))
     asm.append("sky_pal2:")
     asm.append(db_lines(sky_pal2))
+    cloud_gfx, cloud_map, cloud_chars = build_clouds()
+    assert (CLOUD_ROW0 + CLOUD_TROWS) * 8 <= sky_switch, \
+        "cloud strip reaches below the mode switch"
+    asm.append("cloud_gfx:")
+    asm.append(db_lines(cloud_gfx))
+    asm.append("cloud_map:")
+    asm.append(db_lines(cloud_map))
     asm.append(".ends")
     asm.append("")
 
@@ -1204,6 +1267,12 @@ def main():
 #define WAVE_SKY_SWITCH {{SKSW}}
 #define WAVE_SKY_ROWS {{SKRW}}
 #define WAVE_SKY_CHAR0 {{SKC0}}
+/* BG2 cloud overlay: char/map strip geometry + the CGRAM 50 shade */
+#define WAVE_CLOUD_CHAR0 {{CLC0}}
+#define WAVE_CLOUD_ROW0 {{CLR0}}
+#define WAVE_CLOUD_TROWS {{CLTR}}
+#define WAVE_CLOUD_CHARS {{CLCH}}
+#define WAVE_CLOUD_SHADE 0x{{CLSH}}
 /* start grid (world units, ski positions; heading in binary degrees) */
 #define WAVE_START_X {{STX}}
 #define WAVE_START_Y {{STY}}
@@ -1253,6 +1322,13 @@ void waveRotateStep(u8 offset);
            .replace("{{SKSW}}", str(sky_switch))
            .replace("{{SKRW}}", str(sky_rows))
            .replace("{{SKC0}}", str(SKY_CHAR0))
+           .replace("{{CLC0}}", str(CLOUD_CHAR0))
+           .replace("{{CLR0}}", str(CLOUD_ROW0))
+           .replace("{{CLTR}}", str(CLOUD_TROWS))
+           .replace("{{CLCH}}", str(cloud_chars))
+           .replace("{{CLSH}}", "{0:04X}".format(
+               ((CLOUD_SHADE[2] >> 3) << 10) | ((CLOUD_SHADE[1] >> 3) << 5)
+               | (CLOUD_SHADE[0] >> 3)))
            .replace("{{STX}}", str(start_slot[0]))
            .replace("{{STY}}", str(start_slot[1]))
            .replace("{{STTH}}", str(start_theta))

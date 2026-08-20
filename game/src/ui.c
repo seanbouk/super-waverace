@@ -2,6 +2,9 @@
 #include "wavedata.h"
 
 extern char sky_gfx, sky_pal2; // baked mode-1 sky band (wavetables.asm)
+extern char cloud_gfx, cloud_map; // BG2 cloud overlay strip
+
+#define REG_BG2VOFS (*(vuint8 *)0x2110)
 
 // HDMA table for $2105: mode 1 from the top (text band + tiled sky) down
 // to the baked switch line - just above the wave cycle's highest horizon -
@@ -50,6 +53,28 @@ void uiInit(void)
             uiMap[c] = 0x0800 | (WAVE_SKY_CHAR0 + i); // palette row 2
         dmaCopyVram((u8 *)uiMap, 0x7000 + (UI_ROWS + i) * 32, 64);
     }
+
+    // BG2 cloud overlay (mode-1 sky rows only; the TM table keeps it off
+    // the text band, and mode 7 ignores BG2's map/char bases entirely -
+    // there BG2 is the EXTBG layer). Chars share BG1's 0x5000 base
+    // (cloud tiles at WAVE_CLOUD_CHAR0, between the font and the sky
+    // rows); map at 0x7400. Map words carry the priority bit: mode 1
+    // draws BG2-high above BG1-low, so the clouds sit ON the gradient.
+    bgSetGfxPtr(1, 0x5000);
+    bgSetMapPtr(1, 0x7400, SC_32x32);
+    dmaCopyVram((u8 *)&cloud_gfx, 0x5000 + WAVE_CLOUD_CHAR0 * 16,
+                WAVE_CLOUD_CHARS * 32);
+    for (i = 0; i < UI_COLS * UI_ROWS; i++)
+        uiMap[i] = 0; // char 0 = font space: transparent
+    for (i = 0; i < 16; i++) // clear the whole 32x32 map...
+        dmaCopyVram((u8 *)uiMap, 0x7400 + i * 64, 128);
+    dmaCopyVram((u8 *)&cloud_map, 0x7400 + WAVE_CLOUD_ROW0 * 32,
+                WAVE_CLOUD_TROWS * 64); // ...then drop the strip in
+    setPaletteColor(50, WAVE_CLOUD_SHADE); // row 3: 49 is the checker white
+    // BG scroll off-by-one (screen line N samples map line N+1): VOFS -1
+    // makes screen row == map row exactly for the strip
+    REG_BG2VOFS = 0xFF;
+    REG_BG2VOFS = 0x03;
 
     for (i = 0; i < UI_COLS * UI_ROWS; i++)
         uiMap[i] = UI_ATTR; // tile 0 = space
