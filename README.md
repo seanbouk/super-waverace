@@ -146,9 +146,8 @@ because the M7 HOFS/VOFS HDMA rows above the horizon are pre-zeroed — and thos
 registers double as BG1's scroll in mode 1, so the sky tiles render unscrolled
 for free. Clouds ride BG2 over the gradient: a strip of dithered cumulus
 (transparent tiles, palette row 3, priority bit set) whose horizontal scroll is
-simply the camera heading — a 256px map against 256 binary degrees of heading
-means one full turn wraps the clouds exactly once, a perfect parallax loop for
-one register write per frame. BG2's map/char bases are ignored in mode 7 (where
+simply the camera heading ×4 — the 256px map wraps exactly four times per full
+turn, a perfect parallax loop for one register write per frame. BG2's map/char bases are ignored in mode 7 (where
 BG2 is the EXTBG layer), so the overlay costs the sea nothing. The PVSnesLib
 console uploads its map to a hardcoded VRAM address inside the Mode 7 region, so
 `game/src/ui.c` owns its own map buffer and DMAs it in vblank; the library is still

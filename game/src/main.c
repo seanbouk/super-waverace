@@ -1391,11 +1391,12 @@ int main(void)
 
         WaitForVBlank();
         // cloud parallax: BG2 (the mode-1 sky overlay) scrolls with the
-        // heading - a 256px map against 256 binary degrees means one full
-        // turn wraps the clouds exactly once. Written in vblank, both
+        // heading at 4px per binary degree (from the 8.8 heading, so it
+        // stays smooth mid-turn) - the 256px map wraps exactly 4 times
+        // per full turn, still a perfect loop. Written in vblank, both
         // bytes back-to-back (the shared BGOFS prev-latch makes a split
         // pair inherit garbage from the HDMA's $210D stream)
-        REG_BG2HOFS = camTheta;
+        REG_BG2HOFS = (u8)(camTheta16 >> 6);
         REG_BG2HOFS = 0;
         uiFlush();
         waveHdma(phase, camBufOff);

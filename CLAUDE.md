@@ -113,8 +113,9 @@ Mesen.exe --testrunner --timeout=30 <rom> <script.lua>   # arg order-free
 - **Clouds are BG2, not BG1**: scrolling BG1 would need per-row HDMA table
   writes AND would slide the gradient dither. BG2 (mode-1 sky rows only,
   TM 0x13 there; text band stays 0x11) has its own scroll: BG2HOFS =
-  camTheta, one write-twice per frame — 256px map vs 256 binary degrees =
-  the loop matches a full turn exactly. Write BOTH bytes back-to-back in
+  camTheta16 >> 6 (4px per binary degree, smooth from the 8.8 heading),
+  one write-twice per frame — the 256px map wraps exactly 4x per full
+  turn, still a perfect loop. Write BOTH bytes back-to-back in
   vblank: all BG scroll regs share the prev-byte latch, and the HDMA's
   $210D stream poisons it mid-frame. Mode 7 ignores BG2 map/char bases
   (BG2 = EXTBG there), so they're free to point anywhere: chars 128-191
