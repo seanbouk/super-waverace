@@ -125,7 +125,9 @@ void uiHudSmall(u16 x, u16 y, u16 pal, char *s)
     u16 *p = uiMap + y * UI_COLS + x;
     while (*s)
     {
-        *p++ = *s == ' ' ? 0 : pal | (WAVE_HUD_CHAR0 + hudIdx(*s));
+        // blank = the FONT's space (UI_ATTR): map word 0 would be char 0
+        // = the UI map itself read as tile data since the 0x4000 rebase
+        *p++ = *s == ' ' ? UI_ATTR : pal | (WAVE_HUD_CHAR0 + hudIdx(*s));
         s++;
     }
 }
@@ -139,8 +141,8 @@ void uiHudBig(u16 x, char *s)
     {
         if (*s == ' ')
         {
-            *t++ = 0;
-            *b++ = 0;
+            *t++ = UI_ATTR; // font space, see uiHudSmall
+            *b++ = UI_ATTR;
         }
         else
         {
@@ -166,8 +168,8 @@ void uiHudBigClear(u16 x, u16 w)
     u16 *b = uiMap + 3 * UI_COLS + x;
     while (w--)
     {
-        *t++ = 0;
-        *b++ = 0;
+        *t++ = UI_ATTR; // font space, see uiHudSmall
+        *b++ = UI_ATTR;
     }
 }
 
