@@ -133,7 +133,12 @@ s16 wpdx, wpdy, apc, apd, apu;
 // NPC racers (phase 2): kinematic waypoint followers, on the OAM sprites
 // after the ski and the course buoys
 #define NPC_COUNT 3
-#define NPC_SPR (1 + WAVE_BUOY_COUNT) // first NPC sprite index
+// OAM ORDER IS SPRITE-VS-SPRITE PRIORITY (lower id = in front; the
+// priority field only orders against backgrounds). Layout: player pair
+// (0 bottom, 1 top), buoys 2.., then the NPC PAIRS - assigned by depth
+// each tick, nearest racer first, so passes stack correctly and a
+// racer's two halves always sit in the same layer.
+#define NPC_SPR (2 + WAVE_BUOY_COUNT) // first NPC id; 2 consecutive each
 #define NPC_TURN 2 // binary degrees/loop = the player's full turn rate
 u16 npcX[NPC_COUNT], npcY[NPC_COUNT]; // world units, wrap & 4095
 s16 npcFX[NPC_COUNT], npcFY[NPC_COUNT]; // sub-unit accumulators (8.8)
@@ -190,8 +195,10 @@ char pwBuf[6]; // power pip string, built on change
 #define LIGHT_SPR (SPRAY_SPR + 2 * SPRAY_ROWS)
 u8 ltState, ltT, ltRed; // 0 showing, 2 rising, 3 done
 s16 ltY;
-// upper halves of the stacked tall racers: player, then the 3 NPCs
-#define TOP_SPR (LIGHT_SPR + 6)
+// per-NPC projection results, buffered so the OAM pairs can be assigned
+// nearest-first (see the OAM-order note at NPC_SPR)
+u16 npjV[NPC_COUNT], npjC[NPC_COUNT], npjR[NPC_COUNT];
+u8 npjOk[NPC_COUNT], nord[NPC_COUNT], ns, nt;
 // set to 1 to restore the dev readouts (position/physics/profiler)
 #define DEBUG_UI 0
 // projectPoint i/o
@@ -208,7 +215,7 @@ u8 pjOk;
 // loop rate stops mattering: it reads as a continuous stream whose bands
 // travel backwards.
 #define SPRAY_ROWS 4                     // 1 static source + 3 scrolling
-#define SPRAY_SPR (NPC_SPR + NPC_COUNT) // 2 * SPRAY_ROWS sprites from here
+#define SPRAY_SPR (NPC_SPR + 2 * NPC_COUNT) // 2*SPRAY_ROWS sprites from here
 #define SPRAY_CELL 16                  // cell height in scanlines
 #define SPRAY_IMPACT_MIN 160 // vertical landing speed (8.8) for a burst
 #define SPRAY_BURST_CELLS 1  // cells that carry the landing's peak intensity
@@ -509,12 +516,11 @@ int main(void)
     oamSet(0, SKI_X, 140, 3, 0, 0, 64, 0);
     oamSetEx(0, OBJ_LARGE, OBJ_SHOW);
     OAM_TALL(0);
-    oamSet(TOP_SPR << 2, SKI_X, 108, 3, 0, 0, 0, 0);
-    oamSetEx(TOP_SPR << 2, OBJ_LARGE, OBJ_SHOW);
-    OAM_TALL(TOP_SPR << 2);
-    for (bi = 1; bi < TOP_SPR + 4; bi++)
-        if (bi != TOP_SPR)
-            oamSetVisible(bi << 2, OBJ_HIDE); // NB: ids are byte offsets (x4)
+    oamSet(4, SKI_X, 108, 3, 0, 0, 0, 0); // player top: id 1, right
+    oamSetEx(4, OBJ_LARGE, OBJ_SHOW);     // behind the bottom half
+    OAM_TALL(4);
+    for (bi = 2; bi < LIGHT_SPR + 6; bi++)
+        oamSetVisible(bi << 2, OBJ_HIDE); // NB: ids are byte offsets (x4)
 
     setPaletteColor(0, RGB8(16, 60, 150)); // deep azure zenith
 
@@ -1209,9 +1215,9 @@ int main(void)
         // waterline maths anchor to it), the rider's top half sits above
         oamSet(0, SKI_X, (u16)sprTop, 3, skiFlip, 0, skiLean ? 68 : 64, 0);
         OAM_TALL(0);
-        oamSet(TOP_SPR << 2, SKI_X, (u16)(sprTop - 32), 3, skiFlip, 0,
+        oamSet(4, SKI_X, (u16)(sprTop - 32), 3, skiFlip, 0,
                skiLean ? 4 : 0, 0);
-        OAM_TALL(TOP_SPR << 2);
+        OAM_TALL(4);
 
         // ---- buoys: project into view space, pick scale, ride the water ----
 #if DEBUG_UI
@@ -1225,9 +1231,9 @@ int main(void)
             pjY = buoyY[bi];
             projectPoint();
             if (pjOk)
-                drawLadder((1 + bi) << 2, buoyType[bi]);
+                drawLadder((2 + bi) << 2, buoyType[bi]);
             else
-                oamSetVisible((1 + bi) << 2, OBJ_HIDE);
+                oamSetVisible((2 + bi) << 2, OBJ_HIDE);
         }
 #endif
 #if WAVE_PATH_COUNT > 0
@@ -1277,18 +1283,53 @@ int main(void)
 
         // NPC racers ride the exact same pipeline: rear-view ski art,
         // one recolour palette per racer
+        // project all three first, then hand out the OAM pairs NEAREST
+        // FIRST: sprite-vs-sprite priority is OAM order, so a passing
+        // racer must take the earlier pair or its halves layer wrongly
         for (bi = 0; bi < NPC_COUNT; bi++)
         {
             pjX = npcX[bi];
             pjY = npcY[bi];
             projectPoint();
-            if (pjOk)
-                drawSki((NPC_SPR + bi) << 2, (TOP_SPR + 1 + bi) << 2,
-                        (u8)(1 + bi));
+            npjOk[bi] = pjOk;
+            npjV[bi] = pjOk ? pjV : 0xFFFF; // culled: sorts last, hidden
+            npjC[bi] = pjCol;
+            npjR[bi] = rdRow;
+            nord[bi] = bi;
+        }
+        if (npjV[nord[0]] > npjV[nord[1]]) // 3-element sort network
+        {
+            nt = nord[0];
+            nord[0] = nord[1];
+            nord[1] = nt;
+        }
+        if (npjV[nord[1]] > npjV[nord[2]])
+        {
+            nt = nord[1];
+            nord[1] = nord[2];
+            nord[2] = nt;
+        }
+        if (npjV[nord[0]] > npjV[nord[1]])
+        {
+            nt = nord[0];
+            nord[0] = nord[1];
+            nord[1] = nt;
+        }
+        for (ns = 0; ns < NPC_COUNT; ns++)
+        {
+            bi = nord[ns];
+            if (npjOk[bi])
+            {
+                pjV = npjV[bi];
+                pjCol = npjC[bi];
+                rdRow = npjR[bi];
+                drawSki((NPC_SPR + (ns << 1)) << 2,
+                        (NPC_SPR + (ns << 1) + 1) << 2, (u8)(1 + bi));
+            }
             else
             {
-                oamSetVisible((NPC_SPR + bi) << 2, OBJ_HIDE);
-                oamSetVisible((TOP_SPR + 1 + bi) << 2, OBJ_HIDE);
+                oamSetVisible((NPC_SPR + (ns << 1)) << 2, OBJ_HIDE);
+                oamSetVisible((NPC_SPR + (ns << 1) + 1) << 2, OBJ_HIDE);
             }
         }
 #endif
