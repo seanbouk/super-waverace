@@ -191,6 +191,14 @@ Mesen.exe --testrunner --timeout=30 <rom> <script.lua>   # arg order-free
   (0x4400), HUD font (0x4800) and cloud chars into the once-free 0x4000
   bank; BG1/BG3 char bases are 0x4000 now, so font ids are 256+ (UI_ATTR
   0x0500) and sky ids 448+ (still physically at 0x5000/0x5C00).
+- **Sprite-vs-sprite priority is OAM INDEX ONLY** (lower id in front; the
+  priority field orders against BGs, never other sprites). Consequence:
+  multi-sprite entities need ADJACENT ids, and entities that overlap at
+  varying depths need their OAM slots assigned by depth per tick. Layout:
+  player pair 0-1, buoys 2-15, NPC pairs 16-21 handed out nearest-first
+  (projections buffered, 3-element sort network), spray 22-29, lamps
+  30-35. A half-covered stacked racer reads as a racer floating by
+  exactly the seam height - that's how this bug presents.
 - **Mesen: `emu.takeScreenshot()` lags `emu.read(snesSpriteRam)` by exactly 3
   frames** (measured by dumping 21 consecutive frames of OAM state against
   pixel counts). Screenshots keyed on "OAM shows X" therefore capture frames
