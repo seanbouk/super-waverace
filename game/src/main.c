@@ -25,6 +25,7 @@
 
 extern char sea_patterns, sea_map, sea_palette;
 extern char ski_tiles, ski_pal, npc_pals;
+extern char tall_tiles; // OBJ name table 2: the stacked tall racers
 extern void buildCamTables(void);
 extern void collProbe(void); // camera.asm: reads the collision byte-map
 extern void rowDepth(void);  // camera.asm: screen row for a view depth
@@ -189,6 +190,8 @@ char pwBuf[6]; // power pip string, built on change
 #define LIGHT_SPR (SPRAY_SPR + 2 * SPRAY_ROWS)
 u8 ltState, ltT, ltRed; // 0 showing, 2 rising, 3 done
 s16 ltY;
+// upper halves of the stacked tall racers: player, then the 3 NPCs
+#define TOP_SPR (LIGHT_SPR + 6)
 // set to 1 to restore the dev readouts (position/physics/profiler)
 #define DEBUG_UI 0
 // projectPoint i/o
@@ -373,33 +376,52 @@ static void drawLadder(u16 oid, u8 right)
 // NPC racer at the projected point: rear-view ski, same five distance bands
 // as the buoys, recoloured per racer via OBJ palette (tiles shared). The art
 // is cropped at its waterline, so the bottom-anchored slot sits ON the water.
-static void drawSki(u16 oid, u8 pal)
+// racers live in OBJ name table 2 (VRAM 0x7000): OAM tile bit 8 is byte
+// 3 bit 0 of the entry; oamSet takes the low 8 bits, so the table bit is
+// OR'd in after every tall oamSet (idempotent if the lib ever sets it)
+#define OAM_TALL(oid) (oamMemory[(oid) + 3] |= 1)
+
+static void drawSki(u16 oid, u16 tid, u8 pal)
 {
+    // two stacked sprites per racer (bottom carries the waterline, top
+    // rides above it), one shared projection - names: top n, bottom n+64
+    // in the 32-wide slots, n / n+32 in the 16-wide ones
     if (pjV < SCALE_V1)
     {
-        oamSet(oid, pjCol - 16, rdRow - 31, 3, 0, 0, 128, pal);
+        oamSet(oid, pjCol - 16, rdRow - 31, 3, 0, 0, 72, pal);
+        oamSet(tid, pjCol - 16, rdRow - 63, 3, 0, 0, 8, pal);
         oamSetEx(oid, OBJ_LARGE, OBJ_SHOW);
+        oamSetEx(tid, OBJ_LARGE, OBJ_SHOW);
     }
     else if (pjV < SCALE_V2)
     {
-        oamSet(oid, pjCol - 16, rdRow - 31, 3, 0, 0, 132, pal);
+        oamSet(oid, pjCol - 16, rdRow - 31, 3, 0, 0, 76, pal);
+        oamSet(tid, pjCol - 16, rdRow - 63, 3, 0, 0, 12, pal);
         oamSetEx(oid, OBJ_LARGE, OBJ_SHOW);
+        oamSetEx(tid, OBJ_LARGE, OBJ_SHOW);
     }
     else if (pjV < SCALE_V3)
     {
-        oamSet(oid, pjCol - 8, rdRow - 15, 3, 0, 0, 136, pal);
+        oamSet(oid, pjCol - 8, rdRow - 15, 3, 0, 0, 160, pal);
+        oamSet(tid, pjCol - 8, rdRow - 31, 3, 0, 0, 128, pal);
         oamSetEx(oid, OBJ_SMALL, OBJ_SHOW);
+        oamSetEx(tid, OBJ_SMALL, OBJ_SHOW);
     }
     else if (pjV < SCALE_V4)
     {
-        oamSet(oid, pjCol - 8, rdRow - 15, 3, 0, 0, 138, pal);
+        oamSet(oid, pjCol - 8, rdRow - 15, 3, 0, 0, 162, pal);
+        oamSet(tid, pjCol - 8, rdRow - 31, 3, 0, 0, 130, pal);
         oamSetEx(oid, OBJ_SMALL, OBJ_SHOW);
+        oamSetEx(tid, OBJ_SMALL, OBJ_SHOW);
     }
     else
     {
-        oamSet(oid, pjCol - 8, rdRow - 15, 3, 0, 0, 140, pal);
+        oamSet(oid, pjCol - 8, rdRow - 15, 3, 0, 0, 132, pal);
         oamSetEx(oid, OBJ_SMALL, OBJ_SHOW);
+        oamSetVisible(tid, OBJ_HIDE); // smallest scale is one sprite
     }
+    OAM_TALL(oid);
+    OAM_TALL(tid);
 }
 
 //---------------------------------------------------------------------------------
@@ -482,10 +504,17 @@ int main(void)
                   OBJ_SIZE16_L32);
     // NPC racer recolours: OBJ palettes 1-3 (CGRAM 144-191), shared tiles
     dmaCopyCGram((u8 *)&npc_pals, 144, 96);
-    oamSet(0, SKI_X, 140, 3, 0, 0, 0, 0);
+    // stacked tall racers: name table 2 right after the sheet
+    dmaCopyVram((u8 *)&tall_tiles, 0x7000, WAVE_TALL_SHEET);
+    oamSet(0, SKI_X, 140, 3, 0, 0, 64, 0);
     oamSetEx(0, OBJ_LARGE, OBJ_SHOW);
-    for (bi = 1; bi < LIGHT_SPR + 6; bi++)
-        oamSetVisible(bi << 2, OBJ_HIDE); // NB: OAM ids are byte offsets (x4)
+    OAM_TALL(0);
+    oamSet(TOP_SPR << 2, SKI_X, 108, 3, 0, 0, 0, 0);
+    oamSetEx(TOP_SPR << 2, OBJ_LARGE, OBJ_SHOW);
+    OAM_TALL(TOP_SPR << 2);
+    for (bi = 1; bi < TOP_SPR + 4; bi++)
+        if (bi != TOP_SPR)
+            oamSetVisible(bi << 2, OBJ_HIDE); // NB: ids are byte offsets (x4)
 
     setPaletteColor(0, RGB8(16, 60, 150)); // deep azure zenith
 
@@ -1175,8 +1204,14 @@ int main(void)
         if (sprTop > 190)
             sprTop = 190;
         // sprite updates BEFORE WaitForVBlank: the ISR's OAM DMA (ch7 regs)
-        // fires on that vblank, and waveHdma restores ch7 right after
-        oamSet(0, SKI_X, (u16)sprTop, 3, skiFlip, 0, skiLean ? 4 : 0, 0);
+        // fires on that vblank, and waveHdma restores ch7 right after.
+        // Two stacked sprites: the bottom keeps the old geometry (all the
+        // waterline maths anchor to it), the rider's top half sits above
+        oamSet(0, SKI_X, (u16)sprTop, 3, skiFlip, 0, skiLean ? 68 : 64, 0);
+        OAM_TALL(0);
+        oamSet(TOP_SPR << 2, SKI_X, (u16)(sprTop - 32), 3, skiFlip, 0,
+               skiLean ? 4 : 0, 0);
+        OAM_TALL(TOP_SPR << 2);
 
         // ---- buoys: project into view space, pick scale, ride the water ----
 #if DEBUG_UI
@@ -1248,9 +1283,13 @@ int main(void)
             pjY = npcY[bi];
             projectPoint();
             if (pjOk)
-                drawSki((NPC_SPR + bi) << 2, (u8)(1 + bi));
+                drawSki((NPC_SPR + bi) << 2, (TOP_SPR + 1 + bi) << 2,
+                        (u8)(1 + bi));
             else
+            {
                 oamSetVisible((NPC_SPR + bi) << 2, OBJ_HIDE);
+                oamSetVisible((TOP_SPR + 1 + bi) << 2, OBJ_HIDE);
+            }
         }
 #endif
 #if DEBUG_UI

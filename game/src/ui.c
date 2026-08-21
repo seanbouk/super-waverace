@@ -17,8 +17,9 @@ static const u8 uiModeTable[] = {
     0x00                   // then BG mode 7 for the sea
 };
 
-// map words: font tile = ascii - 32, palette row 1 (bits 10-12)
-#define UI_ATTR 0x0400
+// map words: font tile = 256 + ascii - 32 (the font sits at 0x5000, ids
+// 256+ from the 0x4000 BG1 char base), palette row 1 (bits 10-12)
+#define UI_ATTR 0x0500
 
 static dmaMemory dmaMode;
 u16 uiMap[UI_COLS * UI_ROWS];
@@ -29,19 +30,22 @@ void uiInit(void)
 
     // Font + palette via the library (both respect the address overrides;
     // only the console's own MAP path is $0800-hardcoded, which we bypass).
-    // VRAM kept clear of mode 7's 0x0000-0x3FFF: font 0x5000, map 0x7000
-    // (the OBJ sheet at 0x6000 runs to 0x6BFF since the NPC ski band).
-    bgSetGfxPtr(0, 0x5000);
-    bgSetMapPtr(0, 0x7000, SC_32x32);
+    // BG1/BG3 data lives in the 0x4000 bank (UI map 0x4000, BG3 cloud map
+    // 0x4400, HUD font 0x4800, cloud chars after) so 0x7000-0x7FFF can be
+    // OBJ name table 2 (the tall racers). Font stays at 0x5000 = ids 256+,
+    // sky rows stay at 0x5C00 = ids 448+ (both from the 0x4000 char base).
+    bgSetGfxPtr(0, 0x4000);
+    bgSetMapPtr(0, 0x4000, SC_32x32);
     consoleSetTextGfxPtr(0x5000);
-    consoleSetTextMapPtr(0x7000);
+    consoleSetTextMapPtr(0x4000);
     consoleInitDefaultText(1); // palette row 1 = CGRAM 16-31 (see colour map)
+    bgSetGfxPtr(0, 0x4000);    // re-point: the console init re-set the base
 
     // mode-1 sky band: gradient tiles (chars WAVE_SKY_CHAR0+, VRAM above
     // the font) on palette row 2 (CGRAM 32-47), one char per map row from
     // tile row 3 down to the mode-switch line. Uses uiMap as scratch for
     // the row DMAs, then the text init below repaints it.
-    dmaCopyVram((u8 *)&sky_gfx, 0x5000 + WAVE_SKY_CHAR0 * 16,
+    dmaCopyVram((u8 *)&sky_gfx, 0x4000 + WAVE_SKY_CHAR0 * 16,
                 WAVE_SKY_ROWS * 32);
     dmaCopyCGram((u8 *)&sky_pal2, 32, 32);
     // WAVE_SKY_ROWS includes the extra bottom row for the BG scroll
@@ -52,34 +56,34 @@ void uiInit(void)
         u16 c;
         for (c = 0; c < 32; c++)
             uiMap[c] = 0x0800 | (WAVE_SKY_CHAR0 + i); // palette row 2
-        dmaCopyVram((u8 *)uiMap, 0x7000 + (UI_ROWS + i) * 32, 64);
+        dmaCopyVram((u8 *)uiMap, 0x4000 + (UI_ROWS + i) * 32, 64);
     }
 
     // BG3 cloud overlay (mode-1 sky rows only; the TM table keeps it off
     // the text band). BG3, NOT BG2: EXTBG stays on all frame for the
     // sea's priority layer, and on REAL HARDWARE it mangles BG2's fetches
     // outside mode 7 - emulators only model EXTBG in mode 7, so they
-    // cannot show the jank. 2bpp chars at 0x7E00 (ids 448+ from the
-    // 0x7000 base), map at 0x7400, palette group 7 = CGRAM 28-31 (spare
+    // cannot show the jank. 2bpp chars after the HUD font (ids from the
+    // 0x4000 base), map at 0x4400, palette group 7 = CGRAM 28-31 (spare
     // entries of the UI text row). Map words carry the priority bit: the
     // band's mode byte is 0x09 (BG3 priority), so clouds draw over the
     // BG1 gradient.
-    bgSetGfxPtr(2, 0x7000);
-    bgSetMapPtr(2, 0x7400, SC_32x32);
-    dmaCopyVram((u8 *)&cloud_gfx, 0x7000 + WAVE_CLOUD_CHAR0 * 8,
+    bgSetGfxPtr(2, 0x4000);
+    bgSetMapPtr(2, 0x4400, SC_32x32);
+    dmaCopyVram((u8 *)&cloud_gfx, 0x4000 + WAVE_CLOUD_CHAR0 * 8,
                 WAVE_CLOUD_CHARS * 16);
     for (i = 0; i < UI_COLS * UI_ROWS; i++)
         uiMap[i] = 0x1C00 | WAVE_CLOUD_CHAR0; // the set's char 0 = blank
     for (i = 0; i < 16; i++) // clear the whole 32x32 map...
-        dmaCopyVram((u8 *)uiMap, 0x7400 + i * 64, 128);
-    dmaCopyVram((u8 *)&cloud_map, 0x7400 + WAVE_CLOUD_ROW0 * 32,
+        dmaCopyVram((u8 *)uiMap, 0x4400 + i * 64, 128);
+    dmaCopyVram((u8 *)&cloud_map, 0x4400 + WAVE_CLOUD_ROW0 * 32,
                 WAVE_CLOUD_TROWS * 64); // ...then drop the strip in
     setPaletteColor(29, RGB8(250, 250, 250)); // cloud white
     setPaletteColor(30, WAVE_CLOUD_SHADE);    // cloud underside shade
 
     // HUD gradient font: 3 blocks of glyphs (single height / double-height
     // tops / bottoms) between the UI map and the cloud chars
-    dmaCopyVram((u8 *)&hud_gfx, 0x5000 + WAVE_HUD_CHAR0 * 16,
+    dmaCopyVram((u8 *)&hud_gfx, 0x4000 + WAVE_HUD_CHAR0 * 16,
                 WAVE_HUD_GLYPHS * 3 * 32);
     dmaCopyCGram((u8 *)&hud_pal, 64, 96);
     // BG scroll off-by-one (screen line N samples map line N+1): VOFS -1
@@ -209,5 +213,5 @@ void uiPrintS16(u16 x, u16 y, s16 val, u16 width)
 
 void uiFlush(void)
 {
-    dmaCopyVram((u8 *)uiMap, 0x7000, UI_COLS * UI_ROWS * 2);
+    dmaCopyVram((u8 *)uiMap, 0x4000, UI_COLS * UI_ROWS * 2);
 }

@@ -179,10 +179,18 @@ Mesen.exe --testrunner --timeout=30 <rom> <script.lua>   # arg order-free
 - **Sprite sheet rule**: every art's bottom row IS its slot's bottom row
   (margin 0); screen anchors derive from slot size only (−31 large, −15
   small). Negative blit margins wrap via Python indexing and corrupt other
-  slots silently. The sheet is now ALL 256 OBJ names (0x6000-0x6FFF words,
-  abutting the UI map at 0x7000): rows 14-15 hold the start-tree lamps
-  (names 224 dark / 226 red / 228 green, green = ski palette 12/13); only
-  the right side of those two rows (~20 names) is still free.
+  slots silently. TWO OBJ name tables now: table 1 (0x6000-0x6FFF) holds
+  buoys/spray/lamps (the old racer slots are blank - reusable); table 2
+  (0x7000-0x7FFF) holds the TALL RACERS (32x64 master, all NPC scales),
+  each drawn as two stacked sprites sharing one projection - the BOTTOM
+  sprite keeps the old 32x32 geometry so every waterline/window/spray
+  constant is untouched (master waterline row 58 = bottom-sprite row 26).
+  Table-2 sprites need OAM byte 3 bit 0 set: oamSet only takes the low 8
+  gfx bits, so OAM_TALL(oid) ORs it in after EVERY tall oamSet. The VRAM
+  for table 2 came from relocating UI map (0x4000), BG3 cloud map
+  (0x4400), HUD font (0x4800) and cloud chars into the once-free 0x4000
+  bank; BG1/BG3 char bases are 0x4000 now, so font ids are 256+ (UI_ATTR
+  0x0500) and sky ids 448+ (still physically at 0x5000/0x5C00).
 - **Mesen: `emu.takeScreenshot()` lags `emu.read(snesSpriteRam)` by exactly 3
   frames** (measured by dumping 21 consecutive frames of OAM state against
   pixel counts). Screenshots keyed on "OAM shows X" therefore capture frames
