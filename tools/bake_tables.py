@@ -165,9 +165,12 @@ def repeat_blocks(n, value):
 def sky_add_at(line, sky_ref):
     """The fixed-from-the-top sky light-field: COLDATA add units at an
     absolute scanline, normalised against the deepest horizon of the whole
-    cycle (the moving horizon slices into it, it never breathes)."""
+    cycle (the moving horizon slices into it, it never breathes). Linear,
+    with a small head start (+6): the old pow-1.3 curve rounded the first
+    two anchors both to zero, which drew a flat backdrop-blue band under
+    the HUD instead of a gradient from the very first line."""
     span = max(1, sky_ref - UI_LINES - 1)
-    return SKY_GRAD_MAX * min(1.0, (line - UI_LINES) / span) ** 1.3
+    return SKY_GRAD_MAX * min(1.0, (line - UI_LINES + 6.0) / (span + 6.0))
 
 
 def phase_tables(phi, sky_ref, switch):
@@ -216,8 +219,11 @@ def build_sky_band(switch, sky_ref):
     n_rows = (switch - UI_LINES) // 8 + 1  # +1: the scroll off-by-one row
     base5 = [c >> 3 for c in SKY_RGB]
 
+    # anchors use indices 1..15 ONLY: index 0 is TRANSPARENT in 4bpp, so
+    # any index-0 pixel shows the flat backdrop through the tile - which
+    # is exactly the "dead blue band under the HUD" bug
     def anchor_add(k):
-        line = UI_LINES + (switch - UI_LINES) * k / 15.0
+        line = UI_LINES + (switch - UI_LINES) * (k - 1) / 14.0
         return min(31, round(sky_add_at(line, sky_ref)))
 
     pal = bytearray()
@@ -230,7 +236,7 @@ def build_sky_band(switch, sky_ref):
     for g in range(n_rows * 8):
         # map line UI_LINES+g draws on SCREEN line UI_LINES+g-1
         s = min(switch - 1, max(UI_LINES, UI_LINES + g - 1))
-        p = 15.0 * (s - UI_LINES) / max(1, switch - UI_LINES - 1)
+        p = 1.0 + 14.0 * (s - UI_LINES) / max(1, switch - UI_LINES - 1)
         k = min(15, int(p))
         d = pats[min(3, int((p - k) * 4))]
         for x in range(8):
@@ -329,9 +335,10 @@ HUD_FONT = {  # 5x7, one int per row, bit 4 = leftmost pixel
     'S': (0x0F, 0x10, 0x10, 0x0E, 0x01, 0x01, 0x1E),
     'T': (0x1F, 0x04, 0x04, 0x04, 0x04, 0x04, 0x04),
     'W': (0x11, 0x11, 0x11, 0x15, 0x15, 0x1B, 0x11),
-    # power pips are diamonds - a hollow CIRCLE reads as a zero
-    '*': (0x04, 0x0E, 0x1F, 0x1F, 0x1F, 0x0E, 0x04),  # filled
-    '.': (0x04, 0x0A, 0x11, 0x11, 0x11, 0x0A, 0x04),  # hollow
+    # power pips: 7-bit-wide soft rectangles - circles and diamonds both
+    # read as zeros at this size
+    '*': (0x3E, 0x7F, 0x7F, 0x7F, 0x7F, 0x3E, 0x00),  # filled
+    '.': (0x3E, 0x41, 0x41, 0x41, 0x41, 0x3E, 0x00),  # hollow
 }
 HUD_RAMPS = (((252, 216, 32), (56, 200, 88)),   # row 4 titles: yellow -> green
              ((56, 200, 88), (252, 216, 32)),   # row 5 value top: green -> yel
@@ -349,8 +356,8 @@ def build_hud_font():
     for gi, ch in enumerate(HUD_GLYPHS):
         rows = HUD_FONT[ch]
         for r in range(7):
-            for x in range(5):
-                if not rows[r] & (0x10 >> x):
+            for x in range(7):  # rows are 7-bit (bit 6 leftmost); the 5-bit
+                if not rows[r] & (0x40 >> x):  # letters just sit 1px right
                     continue
                 grid[gi * 8 + r][x + 1] = 1 + r  # single height
                 for s in (2 * r, 2 * r + 1):     # doubled: tops then bottoms
