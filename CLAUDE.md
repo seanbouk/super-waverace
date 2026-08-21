@@ -122,19 +122,37 @@ Mesen.exe --testrunner --timeout=30 <rom> <script.lua>   # arg order-free
   the mode-1 region now extends to WAVE_SKY_SWITCH (the tiled sky band), and
   its tiles render unscrolled BECAUSE of those zeros. Sky tiles live at
   VRAM 0x5C00 (chars 192+, above the font), palette row 2 (CGRAM 32-47).
-- **Clouds are BG2, not BG1**: scrolling BG1 would need per-row HDMA table
-  writes AND would slide the gradient dither. BG2 (mode-1 sky rows only,
-  TM 0x13 there; text band stays 0x11) has its own scroll: BG2HOFS =
-  camTheta16 >> 6 (4px per binary degree, smooth from the 8.8 heading),
-  one write-twice per frame — the 256px map wraps exactly 4x per full
-  turn, still a perfect loop. Write BOTH bytes back-to-back in
-  vblank: all BG scroll regs share the prev-byte latch, and the HDMA's
-  $210D stream poisons it mid-frame. Mode 7 ignores BG2 map/char bases
-  (BG2 = EXTBG there), so they're free to point anywhere: chars 128-191
-  at 0x5800 (64 max, bake-asserted), map 0x7400, palette row 3 (white =
-  CGRAM 49 = the checker white; shade = 50). BG2VOFS is set to -1 once
-  at init (the scroll off-by-one), and blank map entries are 0x0000 =
-  font space = transparent.
+- **EXTBG mangles BG2 outside mode 7 ON REAL HARDWARE ONLY.** SETINI bit
+  6 stays on all frame for the sea's priority layer; the moment BG2 was
+  main-screen-enabled during the mode-1 band (the first cloud attempt),
+  real hardware filled the band with structured black/white jank -
+  degenerate mode-7-style fetches through BG2's pipeline. NO emulator
+  reproduces it (they implement EXTBG only when mode==7), so a clean
+  Mesen run proves nothing here: never enable BG2 in TM during mode-1
+  lines while EXTBG is set.
+- **Clouds are therefore BG3 (2bpp), not BG1 or BG2**: scrolling BG1
+  would need per-row HDMA table writes AND would slide the gradient
+  dither; BG2 is EXTBG's (above). Band TM = 0x15, mode byte 0x09 (BG3
+  priority: cloud cells carry the priority bit and draw over the BG1
+  gradient - and over sprites, which is fine up there). Scroll: BG3HOFS
+  = camTheta16 >> 6 (4px per binary degree; 256px map = exactly 4 wraps
+  per full turn), one write-twice per frame, BOTH bytes back-to-back in
+  vblank - all BG scroll regs share the prev-byte latch and the HDMA's
+  $210D stream poisons it mid-frame. BG3VOFS = -1 once at init (scroll
+  off-by-one). 2bpp chars sit right after the HUD font (CLOUD_CHAR0 is
+  DERIVED from len(HUD_GLYPHS) - a hardcoded base silently overlapped
+  when the font grew; asserted against the 0x8000 VRAM end), map at
+  0x7400, palette group 7 = CGRAM 28-31 (spare UI-text-row entries:
+  29 white, 30 shade). Blank map entries point at the set's char 0,
+  which the bake guarantees blank.
+- **A rebake does NOT recompile .c files** (the Makefile has no header
+  deps): when wavedata.h DEFINES move (char bases, counts), touch the
+  sources or the objects keep the old values - this shipped a build
+  where ui.obj uploaded cloud chars to the old base while the bake
+  mapped them at the new one.
+- **Mesen settings.json now has Snes.RamPowerOnState=Random**
+  (hardware-like power-on garbage instead of zeros) - keep it: zeros
+  hide uninitialised-memory bugs that hardware will show.
 - **BG vertical scroll is off by one**: at VOFS 0, screen line N samples MAP
   line N+1. Any mode-1 tile band must write one extra map row below its
   last visible row or the bottom line shows tile 0 (transparent -> a bare

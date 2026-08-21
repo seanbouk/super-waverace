@@ -2,19 +2,19 @@
 #include "wavedata.h"
 
 extern char sky_gfx, sky_pal2; // baked mode-1 sky band (wavetables.asm)
-extern char cloud_gfx, cloud_map; // BG2 cloud overlay strip
+extern char cloud_gfx, cloud_map; // BG3 cloud overlay strip
 extern char hud_gfx, hud_pal;     // gradient HUD font + its CGRAM ramps
 
-#define REG_BG2VOFS (*(vuint8 *)0x2110)
+#define REG_BG3VOFS (*(vuint8 *)0x2112)
 
 // HDMA table for $2105: mode 1 from the top (text band + tiled sky) down
 // to the baked switch line - just above the wave cycle's highest horizon -
 // then mode 7 for the sea. The strip between the switch and the true
 // horizon stays backdrop + COLDATA gradient (see bake_tables.py).
 static const u8 uiModeTable[] = {
-    WAVE_SKY_SWITCH, 0x01, // BG mode 1: text + sky tiles
-    1, 0x07,               // then BG mode 7 for the sea
-    0x00
+    WAVE_SKY_SWITCH, 0x09, // BG mode 1 + BG3 priority: text + sky, with
+    1, 0x07,               // the BG3 clouds above the BG1 gradient;
+    0x00                   // then BG mode 7 for the sea
 };
 
 // map words: font tile = ascii - 32, palette row 1 (bits 10-12)
@@ -55,33 +55,37 @@ void uiInit(void)
         dmaCopyVram((u8 *)uiMap, 0x7000 + (UI_ROWS + i) * 32, 64);
     }
 
-    // BG2 cloud overlay (mode-1 sky rows only; the TM table keeps it off
-    // the text band, and mode 7 ignores BG2's map/char bases entirely -
-    // there BG2 is the EXTBG layer). Chars share BG1's 0x5000 base
-    // (cloud tiles at WAVE_CLOUD_CHAR0, between the font and the sky
-    // rows); map at 0x7400. Map words carry the priority bit: mode 1
-    // draws BG2-high above BG1-low, so the clouds sit ON the gradient.
-    bgSetGfxPtr(1, 0x5000);
-    bgSetMapPtr(1, 0x7400, SC_32x32);
-    dmaCopyVram((u8 *)&cloud_gfx, 0x5000 + WAVE_CLOUD_CHAR0 * 16,
-                WAVE_CLOUD_CHARS * 32);
+    // BG3 cloud overlay (mode-1 sky rows only; the TM table keeps it off
+    // the text band). BG3, NOT BG2: EXTBG stays on all frame for the
+    // sea's priority layer, and on REAL HARDWARE it mangles BG2's fetches
+    // outside mode 7 - emulators only model EXTBG in mode 7, so they
+    // cannot show the jank. 2bpp chars at 0x7E00 (ids 448+ from the
+    // 0x7000 base), map at 0x7400, palette group 7 = CGRAM 28-31 (spare
+    // entries of the UI text row). Map words carry the priority bit: the
+    // band's mode byte is 0x09 (BG3 priority), so clouds draw over the
+    // BG1 gradient.
+    bgSetGfxPtr(2, 0x7000);
+    bgSetMapPtr(2, 0x7400, SC_32x32);
+    dmaCopyVram((u8 *)&cloud_gfx, 0x7000 + WAVE_CLOUD_CHAR0 * 8,
+                WAVE_CLOUD_CHARS * 16);
     for (i = 0; i < UI_COLS * UI_ROWS; i++)
-        uiMap[i] = 0; // char 0 = font space: transparent
+        uiMap[i] = 0x1C00 | WAVE_CLOUD_CHAR0; // the set's char 0 = blank
     for (i = 0; i < 16; i++) // clear the whole 32x32 map...
         dmaCopyVram((u8 *)uiMap, 0x7400 + i * 64, 128);
     dmaCopyVram((u8 *)&cloud_map, 0x7400 + WAVE_CLOUD_ROW0 * 32,
                 WAVE_CLOUD_TROWS * 64); // ...then drop the strip in
-    setPaletteColor(50, WAVE_CLOUD_SHADE); // row 3: 49 is the checker white
+    setPaletteColor(29, RGB8(250, 250, 250)); // cloud white
+    setPaletteColor(30, WAVE_CLOUD_SHADE);    // cloud underside shade
 
     // HUD gradient font: 3 blocks of glyphs (single height / double-height
-    // tops / bottoms) above the BG2 map, and the three colour ramps
+    // tops / bottoms) between the UI map and the cloud chars
     dmaCopyVram((u8 *)&hud_gfx, 0x5000 + WAVE_HUD_CHAR0 * 16,
                 WAVE_HUD_GLYPHS * 3 * 32);
     dmaCopyCGram((u8 *)&hud_pal, 64, 96);
     // BG scroll off-by-one (screen line N samples map line N+1): VOFS -1
     // makes screen row == map row exactly for the strip
-    REG_BG2VOFS = 0xFF;
-    REG_BG2VOFS = 0x03;
+    REG_BG3VOFS = 0xFF;
+    REG_BG3VOFS = 0x03;
 
     for (i = 0; i < UI_COLS * UI_ROWS; i++)
         uiMap[i] = UI_ATTR; // tile 0 = space

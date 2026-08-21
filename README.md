@@ -151,11 +151,12 @@ the true (moving) horizon stay backdrop-only, shaded by a per-scanline COLDATA
 ramp that continues the same gradient, so the seam is invisible. This works
 because the M7 HOFS/VOFS HDMA rows above the horizon are pre-zeroed — and those
 registers double as BG1's scroll in mode 1, so the sky tiles render unscrolled
-for free. Clouds ride BG2 over the gradient: a strip of dithered cumulus
-(transparent tiles, palette row 3, priority bit set) whose horizontal scroll is
-simply the camera heading ×4 — the 256px map wraps exactly four times per full
-turn, a perfect parallax loop for one register write per frame. BG2's map/char bases are ignored in mode 7 (where
-BG2 is the EXTBG layer), so the overlay costs the sea nothing. The PVSnesLib
+for free. Clouds ride BG3 (2bpp) over the gradient: a strip of dithered
+cumulus whose horizontal scroll is simply the camera heading ×4 — the 256px
+map wraps exactly four times per full turn, a perfect parallax loop for one
+register write per frame. (They were BG2 for a day, which real hardware
+punished: EXTBG — on all frame for the sea's priority layer — mangles BG2's
+fetches outside mode 7, an effect no emulator models.) The PVSnesLib
 console uploads its map to a hardcoded VRAM address inside the Mode 7 region, so
 `game/src/ui.c` owns its own map buffer and DMAs it in vblank; the library is still
 used for its font and palette. Shows position/heading/speed, build profiler,
@@ -180,11 +181,10 @@ The line in the sand — update this table whenever an allocation changes.
 | 0 | Backdrop | Sky safe strip above the horizon (deep azure, set at runtime; shaded by COLDATA) |
 | 1–7 | Water | `1..N` rotating deep stripes (ping-pong colours), `N+1` peaks, `N+2` lattice. N ≤ 5 fits here |
 | 8–15 | Course | 8 sand, 9 sand shade (unused), 10 foam (pale blue), 11 wet sand/rope, 12 float magenta, 13 shallow blue, 14 calm wake, 15 shallow sand (unused) |
-| 16–31 | UI text | Font palette for the mode-1 text band (palette row 1) |
+| 16–31 | UI text | Font palette for the mode-1 text band (palette row 1); 29–30 = BG3 cloud white/shade (2bpp group 7) |
 | 32–47 | Sky band | Palette row 2: the mode-1 sky gradient tiles (loaded over CGRAM at boot — nothing else may live here) |
 | 48–49 | Start line | Checker black / true white (glow-exempt) |
-| 50 | Clouds | BG2 cloud underside shade (cloud white is 49, shared with the start line) |
-| 51–63 | BG reserve | Unallocated |
+| 50–63 | BG reserve | Unallocated |
 | 64–111 | HUD ramps | Palette rows 4–6: the gradient-font colour ramps (titles / value tops / value bottoms) |
 | 112–127 | BG reserve | Unallocated |
 | 128–143 | Ski + buoys | OBJ palette 0 (shared: ski, buoy yellows/reds, letters) |

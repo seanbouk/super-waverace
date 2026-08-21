@@ -91,7 +91,7 @@ u8 skiDist8, thrF8, thrR8;
 #define REG_OPVCT (*(vuint8 *)0x213D)
 #endif
 #define REG_WOBJSEL (*(vuint8 *)0x2125)
-#define REG_BG2HOFS (*(vuint8 *)0x210F)
+#define REG_BG3HOFS (*(vuint8 *)0x2111)
 #define REG_WRDIVL (*(vuint8 *)0x4204)
 #define REG_WRDIVH (*(vuint8 *)0x4205)
 #define REG_WRDIVB (*(vuint8 *)0x4206)
@@ -1494,14 +1494,15 @@ int main(void)
         }
 
         WaitForVBlank();
-        // cloud parallax: BG2 (the mode-1 sky overlay) scrolls with the
-        // heading at 4px per binary degree (from the 8.8 heading, so it
-        // stays smooth mid-turn) - the 256px map wraps exactly 4 times
-        // per full turn, still a perfect loop. Written in vblank, both
-        // bytes back-to-back (the shared BGOFS prev-latch makes a split
-        // pair inherit garbage from the HDMA's $210D stream)
-        REG_BG2HOFS = (u8)(camTheta16 >> 6);
-        REG_BG2HOFS = 0;
+        // cloud parallax: BG3 (the mode-1 sky overlay - BG2 belongs to
+        // EXTBG, see ui.c) scrolls with the heading at 4px per binary
+        // degree (from the 8.8 heading, so it stays smooth mid-turn) -
+        // the 256px map wraps exactly 4 times per full turn, still a
+        // perfect loop. Written in vblank, both bytes back-to-back (the
+        // shared BGOFS prev-latch makes a split pair inherit garbage
+        // from the HDMA's $210D stream)
+        REG_BG3HOFS = (u8)(camTheta16 >> 6);
+        REG_BG3HOFS = 0;
         uiFlush();
         waveHdma(phase, camBufOff);
 

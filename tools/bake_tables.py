@@ -47,7 +47,9 @@ SKY_GRAD_MAX = 17
 # the true (moving) horizon keeps the COLDATA backdrop gradient.
 SKY_SAFE = 6         # scanlines of margin above the highest horizon
 SKY_CHAR0 = 192      # first tile id for sky rows (VRAM 0x5C00, above font)
-CLOUD_CHAR0 = 128    # BG2 cloud chars: VRAM 0x5800, between font and sky
+# CLOUD_CHAR0 (BG3 2bpp cloud char base) is derived below HUD_GLYPHS: the
+# cloud chars sit immediately after the HUD font, which once silently
+# overlapped them when it grew (assert guards both ends now)
 CLOUD_ROW0 = 5       # strip's top map/screen tile row (scanline 40)
 CLOUD_TROWS = 4      # strip height in tile rows
 CLOUD_SHADE = (204, 222, 242)  # CGRAM 50: soft cloud underside
@@ -197,11 +199,12 @@ def phase_tables(phi, sky_ref, switch):
         b = round(P["crestGlow"] * max(0.0, c) ** P["glowGamma"]) if c > 0 else 0
         g_entries.append((0xE0 | min(31, b),))
 
-    # TM: BG1 for the text band (BG2 clouds must never ride under the HUD),
-    # BG1+BG2 through the tiled sky (the scrolling cloud overlay), then
+    # TM: BG1 for the text band, BG1+BG3 through the tiled sky (the
+    # scrolling cloud overlay - BG3, NOT BG2: EXTBG is on all frame for
+    # the sea, and on real hardware it mangles BG2 outside mode 7), then
     # backdrop-only safe strip, then the sea
     tab_tm = bytes(repeat_blocks(UI_LINES, 0x11)
-                   + repeat_blocks(switch - UI_LINES, 0x13)
+                   + repeat_blocks(switch - UI_LINES, 0x15)
                    + repeat_blocks(n_sky - switch, SKY_TM)
                    + bytearray((0x81, SEA_TM, 0x00)))
     tab_g = hdma_table(switch, (0xE0,), g_entries) # mode-1 region: add zero
@@ -249,12 +252,12 @@ def build_sky_band(switch, sky_ref):
 
 
 def build_clouds():
-    """BG2 cloud overlay: a 256x32 strip of dithered cumulus on palette
-    row 3 (0 transparent, 1 = the start line's true white at CGRAM 49,
-    2 = CLOUD_SHADE at CGRAM 50 - both in the 50-127 BG reserve, nothing
-    else lives there). X wraps, so the 256px map loops seamlessly - and
-    256px against 256 binary degrees of heading means one full turn
-    scrolls exactly one map: the loop matches turn for turn.
+    """BG3 cloud overlay: a 256x32 strip of dithered cumulus, 2bpp
+    palette group 7 (0 transparent, 1 = white at CGRAM 29, 2 =
+    CLOUD_SHADE at CGRAM 30 - spare entries of the UI text row). X wraps,
+    so the 256px map loops seamlessly - and 256px against 256 binary
+    degrees of heading means one full turn scrolls exactly one map: the
+    loop matches turn for turn.
     Returns (tiles, map words as LE bytes, char count)."""
     W, H = 256, CLOUD_TROWS * 8
     grid = [[0] * W for _ in range(H)]
@@ -279,22 +282,26 @@ def build_clouds():
                 # solid body, hash-dithered fringe
                 if f > 0.30 or _hash01(bx + dx + 97 * y, y * 31 + dx) < f * 2.4:
                     grid[y][(bx + dx) & 255] = 2 if y >= base - 2 else 1
-    raw = encode_4bpp(grid, 32, CLOUD_TROWS)
-    blank = bytes(32)
-    chars, index, mapw = [], {}, bytearray()
+    # 2bpp for BG3: clouds only need transparent/white/shade. BG2 is OFF
+    # LIMITS in the mode-1 band because EXTBG (always on for the sea)
+    # mangles BG2's fetches outside mode 7 ON REAL HARDWARE - emulators
+    # implement EXTBG only in mode 7, so they can't show it (see the
+    # CRT-jank hardware gotcha in CLAUDE.md).
+    raw = encode_2bpp(grid, 32, CLOUD_TROWS)
+    blank = bytes(16)
+    chars, index, mapw = [blank], {blank: 0}, bytearray()
     for i in range(32 * CLOUD_TROWS):
-        t = raw[i * 32:i * 32 + 32]
-        if t == blank:
-            mapw += struct.pack("<H", 0) # font space char: transparent
-            continue
+        t = raw[i * 16:i * 16 + 16]
         if t not in index:
             index[t] = len(chars)
             chars.append(t)
-        # priority bit set: mode 1 draws BG2-high above BG1-low (the sky)
-        mapw += struct.pack("<H", 0x2000 | 0x0C00
+        # palette group 7 (CGRAM 28-31) + priority: with the band's mode
+        # byte 0x09 (BG3 priority) the clouds draw above the sky gradient
+        mapw += struct.pack("<H", 0x2000 | 0x1C00
                             | (CLOUD_CHAR0 + index[t]))
-    assert len(chars) <= SKY_CHAR0 - CLOUD_CHAR0, \
-        "cloud tiles overflow into the sky chars ({0})".format(len(chars))
+    assert CLOUD_CHAR0 + len(chars) <= 512, \
+        "cloud tiles run past the end of VRAM ({0} chars from id {1})" \
+        .format(len(chars), CLOUD_CHAR0)
     return b"".join(chars), bytes(mapw), len(chars)
 
 
@@ -305,6 +312,9 @@ def build_clouds():
 # 4/5/6, CGRAM 64-111 - the free BG reserve) do the per-scanline colouring.
 # Order must match hudIdx() in game/src/ui.c.
 HUD_GLYPHS = "0123456789'\"/!ADEFGHIKLMNOPRSTW*."  # * / . = power pips
+# BG3 cloud chars start right after the HUD font (0x7800 + glyphs*3 4bpp
+# chars), as 2bpp ids from the 0x7000 BG3 char base; VRAM ends at id 512
+CLOUD_CHAR0 = (0x800 + len(HUD_GLYPHS) * 3 * 16) // 8
 HUD_CHAR0 = 640  # VRAM 0x7800 from the 0x5000 BG1 base (map ids are 10-bit)
 HUD_FONT = {  # 5x7, one int per row, bit 4 = leftmost pixel
     '0': (0x0E, 0x11, 0x13, 0x15, 0x19, 0x11, 0x0E),
@@ -510,6 +520,24 @@ def ski_scaled(size):
                 g[size - h + dy][dx] = max(counts.items(),
                                            key=lambda kv: kv[1])[0]
     return g
+
+
+def encode_2bpp(grid, w_tiles, h_tiles):
+    """SNES 2bpp planar tiles (16 bytes each), row-major over the sheet."""
+    out = bytearray()
+    for ty in range(h_tiles):
+        for tx in range(w_tiles):
+            for py in range(8):
+                b0 = b1 = 0
+                for px in range(8):
+                    c = grid[ty * 8 + py][tx * 8 + px]
+                    bit = 0x80 >> px
+                    if c & 1:
+                        b0 |= bit
+                    if c & 2:
+                        b1 |= bit
+                out += bytes((b0, b1))
+    return bytes(out)
 
 
 def encode_4bpp(grid, w_tiles, h_tiles):
