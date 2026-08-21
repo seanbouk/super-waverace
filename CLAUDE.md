@@ -95,8 +95,11 @@ Mesen.exe --testrunner --timeout=30 <rom> <script.lua>   # arg order-free
   hudIdx() in ui.c. HUD chars live at VRAM 0x7800 = map ids 640+ (tile
   ids are 10-bit; ids past 255 work fine). Band is 4 tile rows (UI_LINES
   32): row 0 and columns 0/31 stay EMPTY - CRT overscan crops them. The
-  race clock's ms digits are frames-in-second * 17 (shift+add, no div for
-  the value). LAST LAP is no longer displayed (still tracked).
+  race clock shows hundredths (frames-in-second * 5 / 3). LAST LAP is no
+  longer displayed (still tracked). The countdown + GO are the sprite
+  start-light tree (LIGHT_SPR, 6 sprites; see the sheet bullet), risen
+  and hidden row-by-row at the HUD's lower edge; only FINISH! remains a
+  text banner (over the rank/lap cells, restored after ~6s).
 - **Mode 7 has NO tile flipping** (bare 8-bit map entries) — hence the bake's
   tile quantiser. Budget: 256 unique tiles, checked every bake.
 - **The Mode 7 view is LEFT-HANDED vs the painter's map** (facing +Y,
@@ -158,8 +161,10 @@ Mesen.exe --testrunner --timeout=30 <rom> <script.lua>   # arg order-free
 - **Sprite sheet rule**: every art's bottom row IS its slot's bottom row
   (margin 0); screen anchors derive from slot size only (−31 large, −15
   small). Negative blit margins wrap via Python indexing and corrupt other
-  slots silently. The sheet is now 224 of the 256 OBJ names (0x6000-0x6DFF
-  words) — only 32 tiles spare before the UI map at 0x7000.
+  slots silently. The sheet is now ALL 256 OBJ names (0x6000-0x6FFF words,
+  abutting the UI map at 0x7000): rows 14-15 hold the start-tree lamps
+  (names 224 dark / 226 red / 228 green, green = ski palette 12/13); only
+  the right side of those two rows (~20 names) is still free.
 - **Mesen: `emu.takeScreenshot()` lags `emu.read(snesSpriteRam)` by exactly 3
   frames** (measured by dumping 21 consecutive frames of OAM state against
   pixel counts). Screenshots keyed on "OAM shows X" therefore capture frames

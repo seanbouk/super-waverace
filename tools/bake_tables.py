@@ -295,7 +295,7 @@ def build_clouds():
 # carries its own palette index (1..8), and three static CGRAM ramps (rows
 # 4/5/6, CGRAM 64-111 - the free BG reserve) do the per-scanline colouring.
 # Order must match hudIdx() in game/src/ui.c.
-HUD_GLYPHS = "0123456789'\"/!ADEFGHIKLMNOPRST"
+HUD_GLYPHS = "0123456789'\"/!ADEFGHIKLMNOPRSTW*."  # * / . = power pips
 HUD_CHAR0 = 640  # VRAM 0x7800 from the 0x5000 BG1 base (map ids are 10-bit)
 HUD_FONT = {  # 5x7, one int per row, bit 4 = leftmost pixel
     '0': (0x0E, 0x11, 0x13, 0x15, 0x19, 0x11, 0x0E),
@@ -328,6 +328,10 @@ HUD_FONT = {  # 5x7, one int per row, bit 4 = leftmost pixel
     'R': (0x1E, 0x11, 0x11, 0x1E, 0x14, 0x12, 0x11),
     'S': (0x0F, 0x10, 0x10, 0x0E, 0x01, 0x01, 0x1E),
     'T': (0x1F, 0x04, 0x04, 0x04, 0x04, 0x04, 0x04),
+    'W': (0x11, 0x11, 0x11, 0x15, 0x15, 0x1B, 0x11),
+    # power pips are diamonds - a hollow CIRCLE reads as a zero
+    '*': (0x04, 0x0E, 0x1F, 0x1F, 0x1F, 0x0E, 0x04),  # filled
+    '.': (0x04, 0x0A, 0x11, 0x11, 0x11, 0x0A, 0x04),  # hollow
 }
 HUD_RAMPS = (((252, 216, 32), (56, 200, 88)),   # row 4 titles: yellow -> green
              ((56, 200, 88), (252, 216, 32)),   # row 5 value top: green -> yel
@@ -433,7 +437,9 @@ SKI_PALETTE = [
     (190, 200, 210),  # 9 hull white shade
     (220, 60, 50),    # 10 hull red
     (160, 40, 36),    # 11 hull red shade
-] + [(0, 0, 0)] * 4
+    (64, 208, 80),    # 12 start-light green
+    (34, 130, 48),    # 13 start-light green shade
+] + [(0, 0, 0)] * 2
 
 SKI_WATERLINE_ROW = 26  # sprite row that sits at the surface when at rest
 
@@ -615,12 +621,28 @@ def spray_cell(level):
     return g
 
 
+def lamp_cell(body, shade):
+    """16x16 start-tree lamp: outlined round light, lit body + diagonal
+    shade + a glass highlight."""
+    g = [[0] * 16 for _ in range(16)]
+    for y in range(16):
+        for x in range(16):
+            dx, dy = x - 7.5, y - 7.5
+            d = math.hypot(dx, dy)
+            if d > 7.5:
+                continue
+            g[y][x] = 1 if d > 6.2 else shade if dx + dy > 3.5 else body
+    for y, x in ((4, 5), (4, 6), (5, 4), (5, 5)):
+        g[y][x] = 8  # hull white doubles as the highlight
+    return g
+
+
 def build_ski_sheet():
-    """128x112 sheet: player ski frames (straight + lean), buoys at 5 sizes,
-    the NPC rear-view ski at 5 sizes (rows 64+, recoloured by palette), and
-    the impact-splash frames (row 96+).
+    """128x128 sheet: player ski frames (straight + lean), buoys at 5 sizes,
+    the NPC rear-view ski at 5 sizes (rows 64+, recoloured by palette), the
+    wake conveyor cells (row 96+) and the start-tree lamps (row 112+).
     128px wide = 16 tiles/row, matching OAM's name-row stride exactly."""
-    sheet = [[0] * 128 for _ in range(112)]
+    sheet = [[0] * 128 for _ in range(128)]
     for f, shear in enumerate((0.0, 0.14)):
         grid = ski_frame(shear)
         for y in range(32):
@@ -657,7 +679,11 @@ def build_ski_sheet():
     # wake conveyor cells, one per intensity: names 192 / 194 / 196 / 198
     for lv in range(SPRAY_LEVELS):
         blitg(spray_cell(lv), lv * 16, 96, 16)
-    tiles = encode_4bpp(sheet, 16, 14)
+    # start-tree lamps: names 224 dark / 226 red / 228 green
+    blitg(lamp_cell(7, 5), 0, 112, 16)
+    blitg(lamp_cell(10, 11), 16, 112, 16)
+    blitg(lamp_cell(12, 13), 32, 112, 16)
+    tiles = encode_4bpp(sheet, 16, 16)
 
     def pal_bytes(cols):
         out = bytearray()
@@ -1342,6 +1368,7 @@ def main():
    one per intensity level) */
 #define WAVE_SKI_SHEET {{SHB}}
 #define WAVE_SPRAY_CELL 192
+#define WAVE_LIGHT_CELL 224 /* start-tree lamps: dark / +2 red / +4 green */
 #define WAVE_SPRAY_LEVELS {{SPLV}}
 /* mode-1 sky band: tile rows under the text, mode 7 resumes at the switch */
 #define WAVE_SKY_SWITCH {{SKSW}}

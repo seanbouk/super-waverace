@@ -101,7 +101,7 @@ void uiHdma(void)
 // glyph order must match the bake's HUD_GLYPHS
 static u16 hudIdx(char c)
 {
-    char *g = "0123456789'\"/!ADEFGHIKLMNOPRST";
+    char *g = "0123456789'\"/!ADEFGHIKLMNOPRSTW*.";
     u16 i = 0;
     while (g[i])
     {

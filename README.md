@@ -6,8 +6,9 @@ fake a sinusoidal ocean on hardware that can only rotate and scale a flat plane.
 ## Status
 
 🌊 Playable: a full 3-lap race against three rubber-banded NPC racers — start
-grid, 3-2-1-GO countdown, live positions, lap times, chequered start line and
-a FINISH banner — on the rolling sea, around an island course with shorelines,
+grid, a sprite start-light tree (three reds stage, greens together at the gun,
+then the tree floats up and away), live positions, lap times, chequered start
+line and a FINISH banner — on the rolling sea, around an island course with shorelines,
 rope float-lines and L/R buoys, collision with slide-along, and speed-driven
 wake spray under the hull. Buoys are judged: passing each one on its correct
 side builds a 0–5 power chain (HUD bar) that scales thrust and top speed from
@@ -139,9 +140,9 @@ so they never read as R buoys.
 baked switch line just above the wave cycle's highest horizon (HDMA on `$2105`
 switches the whole PPU mode mid-frame), giving a 4-row HUD band plus a tiled
 sky: a 16-colour azure gradient with 2D dithering (palette row 2), far smoother
-than per-scanline colour math could manage. The HUD (TIME / RANK / LAP / SPEED
-titles over double-height values, plus the power bar) keeps row 0 and columns
-0/31 empty for CRT overscan, and its text colour sweeps yellow→green through
+than per-scanline colour math could manage. The HUD (TIME / RANK / LAP /
+SPEED / POWER titles over double-height values, the power chain as filled
+diamond pips) keeps row 0 and columns 0/31 empty for CRT overscan, and its text colour sweeps yellow→green through
 the titles, green→yellow through the values' top half and yellow→red through
 their bottom half — per scanline, with no HDMA channel to spare: every glyph
 pixel *row* carries its own palette index, so three static 8-colour CGRAM

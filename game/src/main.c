@@ -180,8 +180,15 @@ u8 rMin, rSecT, rSecU, rTick; // rTick = frame accum (also counts the countdown)
 u16 lapFr;                    // frames this lap
 u8 lastLapSec, lastLapTenth;
 // HUD drawn-state (redraw only on change - uiPrint per tick is real cost):
-// hBan = centre banner (0 none, 1-3 countdown, 4 GO!, 5 FINISH!)
+// hBan = FINISH! banner over the rank/lap cells
 u8 hudInit, hRank, hLapD, hSpd, hBan, finTk, hMinD, hSecU;
+char pwBuf[6]; // power pip string, built on change
+// start-light tree: 6 sprites after the spray block. Reds count the
+// gun down one at a time, greens light together at GO, then the whole
+// tree floats up and hides row by row as it reaches the HUD band.
+#define LIGHT_SPR (SPRAY_SPR + 2 * SPRAY_ROWS)
+u8 ltState, ltT, ltRed; // 0 showing, 2 rising, 3 done
+s16 ltY;
 // set to 1 to restore the dev readouts (position/physics/profiler)
 #define DEBUG_UI 0
 // projectPoint i/o
@@ -477,7 +484,7 @@ int main(void)
     dmaCopyCGram((u8 *)&npc_pals, 144, 96);
     oamSet(0, SKI_X, 140, 3, 0, 0, 0, 0);
     oamSetEx(0, OBJ_LARGE, OBJ_SHOW);
-    for (bi = 1; bi < SPRAY_SPR + 2 * SPRAY_ROWS; bi++)
+    for (bi = 1; bi < LIGHT_SPR + 6; bi++)
         oamSetVisible(bi << 2, OBJ_HIDE); // NB: OAM ids are byte offsets (x4)
 
     setPaletteColor(0, RGB8(16, 60, 150)); // deep azure zenith
@@ -536,6 +543,10 @@ int main(void)
     hSecU = 255;
     hBan = 0;
     finTk = 0;
+    ltState = 0;
+    ltT = 0;
+    ltRed = 0;
+    ltY = 72;
     thrF8 = thrTab[0];
     thrR8 = thrF8 >> 1;
     skiY = -1536; // spawn below any wave: wet from frame one, bobs up
@@ -1185,6 +1196,50 @@ int main(void)
         }
 #endif
 #if WAVE_PATH_COUNT > 0
+        // ---- start-light tree: reds count the gun down one at a time,
+        // greens light together at GO, and a couple of seconds later the
+        // whole tree floats up, each row hiding as it meets the HUD ----
+        if (ltState < 3)
+        {
+            if (raceState == 0)
+                ltRed = rTick >= 180 ? 3 : rTick >= 120 ? 2
+                    : rTick >= 60 ? 1 : 0;
+            else if (ltState == 0)
+            {
+                ltT++;
+                if (ltT > 40) // ~2s of green before lift-off
+                    ltState = 2;
+            }
+            if (ltState == 2)
+                ltY -= 3;
+            for (gj = 0; gj < 3; gj++)
+            {
+                ox = 104 + ((u16)gj << 4);
+                if (ltY < 34) // row reaches the HUD band: gone
+                    oamSetVisible((LIGHT_SPR + gj) << 2, OBJ_HIDE);
+                else
+                {
+                    oy = raceState == 0 && gj < ltRed ? WAVE_LIGHT_CELL + 2
+                                                      : WAVE_LIGHT_CELL;
+                    oamSet((LIGHT_SPR + gj) << 2, ox, (u16)ltY, 3, 0, 0,
+                           oy, 0);
+                    oamSetEx((LIGHT_SPR + gj) << 2, OBJ_SMALL, OBJ_SHOW);
+                }
+                if (ltY + 16 < 34)
+                {
+                    oamSetVisible((LIGHT_SPR + 3 + gj) << 2, OBJ_HIDE);
+                    ltState = 3; // bottom row gone too: tree done
+                }
+                else
+                {
+                    oy = raceState ? WAVE_LIGHT_CELL + 4 : WAVE_LIGHT_CELL;
+                    oamSet((LIGHT_SPR + 3 + gj) << 2, ox, (u16)(ltY + 16),
+                           3, 0, 0, oy, 0);
+                    oamSetEx((LIGHT_SPR + 3 + gj) << 2, OBJ_SMALL, OBJ_SHOW);
+                }
+            }
+        }
+
         // NPC racers ride the exact same pipeline: rear-view ski art,
         // one recolour palette per racer
         for (bi = 0; bi < NPC_COUNT; bi++)
@@ -1345,16 +1400,16 @@ int main(void)
             {
                 hudInit = 1;
                 uiHudSmall(1, 1, HUD_PAL_TITLE, "TIME");
-                uiHudSmall(10, 1, HUD_PAL_TITLE, "RANK");
-                uiHudSmall(15, 1, HUD_PAL_TITLE, "LAP");
-                uiHudSmall(20, 1, HUD_PAL_TITLE, "SPEED");
-                uiHudSmall(23, 3, HUD_PAL_BOT, "KM/H");
-                uiHudBig(1, "0'00\"000");
-                uiHudBig(16, "/3");
+                uiHudSmall(9, 1, HUD_PAL_TITLE, "RANK");
+                uiHudSmall(14, 1, HUD_PAL_TITLE, "LAP");
+                uiHudSmall(18, 1, HUD_PAL_TITLE, "SPEED");
+                uiHudSmall(25, 1, HUD_PAL_TITLE, "POWER");
+                uiHudSmall(20, 3, HUD_PAL_BOT, "KM/H");
+                uiHudBig(1, "0'00\"00");
+                uiHudBig(15, "/3");
             }
-            // race clock M'SS"mmm: minutes/seconds on change, the
-            // milliseconds (frames-in-second * 17: 59f -> 1003, close
-            // enough and division-free) every tick; frozen off-race
+            // race clock M'SS"hh: minutes/seconds on change, hundredths
+            // (frames-in-second * 5 / 3) every tick; frozen off-race
             if (raceState == 1)
             {
                 if (hMinD != rMin)
@@ -1368,24 +1423,15 @@ int main(void)
                     uiHudBigDigit(3, rSecT);
                     uiHudBigDigit(4, rSecU);
                 }
-                bq = ((u16)rTick << 4) + rTick;
-                if (bq > 999)
-                    bq = 999;
-                dly = bq / 100;
-                uiHudBigDigit(6, dly);
-                bq -= dly * 100;
+                bq = (((u16)rTick << 2) + rTick) / 3;
                 dly = bq / 10;
-                uiHudBigDigit(7, dly);
-                uiHudBigDigit(8, bq - dly * 10);
+                uiHudBigDigit(6, dly);
+                uiHudBigDigit(7, bq - dly * 10);
             }
-            // centre banner over the RANK/LAP cells: countdown / GO / FIN
+            // FINISH! banner over the rank/lap cells (the countdown and
+            // GO live on the start-light tree now)
             bq = 0;
-            if (raceState == 0)
-                bq = rTick >= 180 ? 3 : rTick >= 120 ? 2
-                    : rTick >= 60 ? 1 : 0;
-            else if (goTimer)
-                bq = 4;
-            else if (raceState == 2 && finTk < 120)
+            if (raceState == 2 && finTk < 120)
             {
                 bq = 5;
                 finTk++; // ~6s of FINISH!, then the rank comes back
@@ -1393,16 +1439,12 @@ int main(void)
             if (hBan != (u8)bq)
             {
                 hBan = (u8)bq;
-                uiHudBigClear(10, 8);
-                if (hBan && hBan <= 3)
-                    uiHudBigDigit(13, 4 - hBan); // 3.. 2.. 1
-                else if (hBan == 4)
-                    uiHudBig(13, "GO!");
-                else if (hBan == 5)
-                    uiHudBig(10, "FINISH!");
+                uiHudBigClear(9, 8);
+                if (hBan)
+                    uiHudBig(9, "FINISH!");
                 else
                 {
-                    uiHudBig(16, "/3"); // banner gone: restore + force
+                    uiHudBig(15, "/3"); // banner gone: restore + force
                     hRank = 255;
                     hLapD = 255;
                 }
@@ -1413,7 +1455,7 @@ int main(void)
                 if (hRank != (u8)bq)
                 {
                     hRank = (u8)bq;
-                    uiHudBig(10, bq == 1 ? "1ST" : bq == 2 ? "2ND"
+                    uiHudBig(9, bq == 1 ? "1ST" : bq == 2 ? "2ND"
                              : bq == 3 ? "3RD" : "4TH");
                 }
                 // lapCount 255 = just before the rolling start: show lap 1
@@ -1422,7 +1464,7 @@ int main(void)
                 if (hLapD != (u8)dly)
                 {
                     hLapD = (u8)dly;
-                    uiHudBigDigit(15, dly);
+                    uiHudBigDigit(14, dly);
                 }
             }
             // speed: vAlong>>6 reads ~48 km/h at power-0 top, 96 at full
@@ -1432,18 +1474,20 @@ int main(void)
                 hSpd = (u8)bq;
                 dly = bq / 10;
                 if (dly)
-                    uiHudBigDigit(20, dly);
+                    uiHudBigDigit(18, dly);
                 else
-                    uiHudBigClear(20, 1);
-                uiHudBigDigit(21, bq - dly * 10);
+                    uiHudBigClear(18, 1);
+                uiHudBigDigit(19, bq - dly * 10);
             }
 #if WAVE_BUOY_COUNT > 0
-            // power bar: 5 cells on the title row, right side
+            // power pips under the POWER title: filled up to the chain
             if (pwDrawn != power)
             {
                 pwDrawn = power;
                 for (gj = 0; gj < 5; gj++)
-                    uiPrint(26 + gj, 1, gj < power ? "=" : "-");
+                    pwBuf[gj] = gj < power ? '*' : '.';
+                pwBuf[5] = 0;
+                uiHudBig(25, pwBuf);
             }
 #endif
 #endif
