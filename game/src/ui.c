@@ -3,6 +3,7 @@
 
 extern char sky_gfx, sky_pal2; // baked mode-1 sky band (wavetables.asm)
 extern char cloud_gfx, cloud_map; // BG2 cloud overlay strip
+extern char hud_gfx, hud_pal;     // gradient HUD font + its CGRAM ramps
 
 #define REG_BG2VOFS (*(vuint8 *)0x2110)
 
@@ -71,6 +72,12 @@ void uiInit(void)
     dmaCopyVram((u8 *)&cloud_map, 0x7400 + WAVE_CLOUD_ROW0 * 32,
                 WAVE_CLOUD_TROWS * 64); // ...then drop the strip in
     setPaletteColor(50, WAVE_CLOUD_SHADE); // row 3: 49 is the checker white
+
+    // HUD gradient font: 3 blocks of glyphs (single height / double-height
+    // tops / bottoms) above the BG2 map, and the three colour ramps
+    dmaCopyVram((u8 *)&hud_gfx, 0x5000 + WAVE_HUD_CHAR0 * 16,
+                WAVE_HUD_GLYPHS * 3 * 32);
+    dmaCopyCGram((u8 *)&hud_pal, 64, 96);
     // BG scroll off-by-one (screen line N samples map line N+1): VOFS -1
     // makes screen row == map row exactly for the strip
     REG_BG2VOFS = 0xFF;
@@ -89,6 +96,71 @@ void uiHdma(void)
     REG_BBAD0 = 0x05; // $2105 BG mode
     REG_A1T0LH = dmaMode.mem.c.addr;
     REG_A1B0 = dmaMode.mem.c.bank;
+}
+
+// glyph order must match the bake's HUD_GLYPHS
+static u16 hudIdx(char c)
+{
+    char *g = "0123456789'\"/!ADEFGHIKLMNOPRST";
+    u16 i = 0;
+    while (g[i])
+    {
+        if (g[i] == c)
+            return i;
+        i++;
+    }
+    return 0;
+}
+
+void uiHudSmall(u16 x, u16 y, u16 pal, char *s)
+{
+    u16 *p = uiMap + y * UI_COLS + x;
+    while (*s)
+    {
+        *p++ = *s == ' ' ? 0 : pal | (WAVE_HUD_CHAR0 + hudIdx(*s));
+        s++;
+    }
+}
+
+void uiHudBig(u16 x, char *s)
+{
+    u16 *t = uiMap + 2 * UI_COLS + x;
+    u16 *b = uiMap + 3 * UI_COLS + x;
+    u16 i;
+    while (*s)
+    {
+        if (*s == ' ')
+        {
+            *t++ = 0;
+            *b++ = 0;
+        }
+        else
+        {
+            i = hudIdx(*s);
+            *t++ = HUD_PAL_TOP | (WAVE_HUD_CHAR0 + WAVE_HUD_GLYPHS + i);
+            *b++ = HUD_PAL_BOT | (WAVE_HUD_CHAR0 + 2 * WAVE_HUD_GLYPHS + i);
+        }
+        s++;
+    }
+}
+
+void uiHudBigDigit(u16 x, u16 d) // digits are glyphs 0-9: no lookup
+{
+    uiMap[2 * UI_COLS + x] =
+        HUD_PAL_TOP | (WAVE_HUD_CHAR0 + WAVE_HUD_GLYPHS + d);
+    uiMap[3 * UI_COLS + x] =
+        HUD_PAL_BOT | (WAVE_HUD_CHAR0 + 2 * WAVE_HUD_GLYPHS + d);
+}
+
+void uiHudBigClear(u16 x, u16 w)
+{
+    u16 *t = uiMap + 2 * UI_COLS + x;
+    u16 *b = uiMap + 3 * UI_COLS + x;
+    while (w--)
+    {
+        *t++ = 0;
+        *b++ = 0;
+    }
 }
 
 void uiPrint(u16 x, u16 y, char *s)

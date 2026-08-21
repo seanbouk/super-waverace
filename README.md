@@ -137,9 +137,15 @@ so they never read as R buoys.
 
 **The UI band and the sky.** The screen runs in BG mode 1 from the top down to a
 baked switch line just above the wave cycle's highest horizon (HDMA on `$2105`
-switches the whole PPU mode mid-frame), giving 3 rows of tiled text plus a tiled
+switches the whole PPU mode mid-frame), giving a 4-row HUD band plus a tiled
 sky: a 16-colour azure gradient with 2D dithering (palette row 2), far smoother
-than per-scanline colour math could manage. The few lines between the switch and
+than per-scanline colour math could manage. The HUD (TIME / RANK / LAP / SPEED
+titles over double-height values, plus the power bar) keeps row 0 and columns
+0/31 empty for CRT overscan, and its text colour sweeps yellow→green through
+the titles, green→yellow through the values' top half and yellow→red through
+their bottom half — per scanline, with no HDMA channel to spare: every glyph
+pixel *row* carries its own palette index, so three static 8-colour CGRAM
+ramps do the per-line colouring for free. The few lines between the switch and
 the true (moving) horizon stay backdrop-only, shaded by a per-scanline COLDATA
 ramp that continues the same gradient, so the seam is invisible. This works
 because the M7 HOFS/VOFS HDMA rows above the horizon are pre-zeroed — and those
@@ -177,7 +183,9 @@ The line in the sand — update this table whenever an allocation changes.
 | 32–47 | Sky band | Palette row 2: the mode-1 sky gradient tiles (loaded over CGRAM at boot — nothing else may live here) |
 | 48–49 | Start line | Checker black / true white (glow-exempt) |
 | 50 | Clouds | BG2 cloud underside shade (cloud white is 49, shared with the start line) |
-| 51–127 | BG reserve | Unallocated |
+| 51–63 | BG reserve | Unallocated |
+| 64–111 | HUD ramps | Palette rows 4–6: the gradient-font colour ramps (titles / value tops / value bottoms) |
+| 112–127 | BG reserve | Unallocated |
 | 128–143 | Ski + buoys | OBJ palette 0 (shared: ski, buoy yellows/reds, letters) |
 | 144–191 | NPC racers | OBJ palettes 1–3: green/purple/orange recolours of the ski palette (tiles shared) |
 | 192–255 | Sprites reserve | OBJ palettes 4–7 — do not touch from BG code |

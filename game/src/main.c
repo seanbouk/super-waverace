@@ -179,6 +179,9 @@ s16 rubDiff;
 u8 rMin, rSecT, rSecU, rTick; // rTick = frame accum (also counts the countdown)
 u16 lapFr;                    // frames this lap
 u8 lastLapSec, lastLapTenth;
+// HUD drawn-state (redraw only on change - uiPrint per tick is real cost):
+// hBan = centre banner (0 none, 1-3 countdown, 4 GO!, 5 FINISH!)
+u8 hudInit, hRank, hLapD, hSpd, hBan, finTk, hMinD, hSecU;
 // set to 1 to restore the dev readouts (position/physics/profiler)
 #define DEBUG_UI 0
 // projectPoint i/o
@@ -525,6 +528,14 @@ int main(void)
     nextGate = 0;
     gateNeg = 0;
     pwDrawn = 255; // force the bar's first draw
+    hudInit = 0;   // ditto the HUD furniture + every value cell
+    hRank = 255;
+    hLapD = 255;
+    hSpd = 255;
+    hMinD = 255;
+    hSecU = 255;
+    hBan = 0;
+    finTk = 0;
     thrF8 = thrTab[0];
     thrR8 = thrF8 >> 1;
     skiY = -1536; // spawn below any wave: wet from frame one, bobs up
@@ -1327,65 +1338,114 @@ int main(void)
             uiPrintNum(29, 2, pProg, 3);
 #endif
 #else
-            // ---- race HUD ----
-            uiPrint(0, 0, "LAP ");
-            // lapCount 255 = the instant before the rolling start crosses
-            // the line; show lap 1
-            dly = lapCount == 255 ? 1
-                : lapCount < RACE_LAPS ? (u16)lapCount + 1 : RACE_LAPS;
-            uiPrintNum(4, 0, dly, 1);
-            uiPrint(5, 0, "/3");
-            uiPrint(11, 0, "POS ");
-            bq = raceState == 2 ? finPos : racePos;
-            uiPrintNum(15, 0, bq, 1);
-            if (bq == 1)
-                uiPrint(16, 0, "ST");
-            else if (bq == 2)
-                uiPrint(16, 0, "ND");
-            else if (bq == 3)
-                uiPrint(16, 0, "RD");
-            else
-                uiPrint(16, 0, "TH");
-            uiPrint(23, 0, "T");
-            uiPrintNum(24, 0, rMin, 1);
-            uiPrint(25, 0, ":");
-            uiPrintNum(26, 0, rSecT, 1);
-            uiPrintNum(27, 0, rSecU, 1);
+            // ---- race HUD: gradient text (colour ramps live per pixel
+            // row in the baked font), row 0 + columns 0/31 left clear for
+            // CRT overscan, everything redrawn only on change ----
+            if (!hudInit)
+            {
+                hudInit = 1;
+                uiHudSmall(1, 1, HUD_PAL_TITLE, "TIME");
+                uiHudSmall(10, 1, HUD_PAL_TITLE, "RANK");
+                uiHudSmall(15, 1, HUD_PAL_TITLE, "LAP");
+                uiHudSmall(20, 1, HUD_PAL_TITLE, "SPEED");
+                uiHudSmall(23, 3, HUD_PAL_BOT, "KM/H");
+                uiHudBig(1, "0'00\"000");
+                uiHudBig(16, "/3");
+            }
+            // race clock M'SS"mmm: minutes/seconds on change, the
+            // milliseconds (frames-in-second * 17: 59f -> 1003, close
+            // enough and division-free) every tick; frozen off-race
+            if (raceState == 1)
+            {
+                if (hMinD != rMin)
+                {
+                    hMinD = rMin;
+                    uiHudBigDigit(1, rMin);
+                }
+                if (hSecU != rSecU)
+                {
+                    hSecU = rSecU;
+                    uiHudBigDigit(3, rSecT);
+                    uiHudBigDigit(4, rSecU);
+                }
+                bq = ((u16)rTick << 4) + rTick;
+                if (bq > 999)
+                    bq = 999;
+                dly = bq / 100;
+                uiHudBigDigit(6, dly);
+                bq -= dly * 100;
+                dly = bq / 10;
+                uiHudBigDigit(7, dly);
+                uiHudBigDigit(8, bq - dly * 10);
+            }
+            // centre banner over the RANK/LAP cells: countdown / GO / FIN
+            bq = 0;
+            if (raceState == 0)
+                bq = rTick >= 180 ? 3 : rTick >= 120 ? 2
+                    : rTick >= 60 ? 1 : 0;
+            else if (goTimer)
+                bq = 4;
+            else if (raceState == 2 && finTk < 120)
+            {
+                bq = 5;
+                finTk++; // ~6s of FINISH!, then the rank comes back
+            }
+            if (hBan != (u8)bq)
+            {
+                hBan = (u8)bq;
+                uiHudBigClear(10, 8);
+                if (hBan && hBan <= 3)
+                    uiHudBigDigit(13, 4 - hBan); // 3.. 2.. 1
+                else if (hBan == 4)
+                    uiHudBig(13, "GO!");
+                else if (hBan == 5)
+                    uiHudBig(10, "FINISH!");
+                else
+                {
+                    uiHudBig(16, "/3"); // banner gone: restore + force
+                    hRank = 255;
+                    hLapD = 255;
+                }
+            }
+            if (!hBan)
+            {
+                bq = raceState == 2 ? finPos : racePos;
+                if (hRank != (u8)bq)
+                {
+                    hRank = (u8)bq;
+                    uiHudBig(10, bq == 1 ? "1ST" : bq == 2 ? "2ND"
+                             : bq == 3 ? "3RD" : "4TH");
+                }
+                // lapCount 255 = just before the rolling start: show lap 1
+                dly = lapCount == 255 ? 1
+                    : lapCount < RACE_LAPS ? (u16)lapCount + 1 : RACE_LAPS;
+                if (hLapD != (u8)dly)
+                {
+                    hLapD = (u8)dly;
+                    uiHudBigDigit(15, dly);
+                }
+            }
+            // speed: vAlong>>6 reads ~48 km/h at power-0 top, 96 at full
+            bq = vAlong > 0 ? (u16)vAlong >> 6 : 0;
+            if (hSpd != (u8)bq)
+            {
+                hSpd = (u8)bq;
+                dly = bq / 10;
+                if (dly)
+                    uiHudBigDigit(20, dly);
+                else
+                    uiHudBigClear(20, 1);
+                uiHudBigDigit(21, bq - dly * 10);
+            }
 #if WAVE_BUOY_COUNT > 0
-            // power bar: 5 cells fill as the buoy chain grows. Redrawn
-            // only on change: uiPrint per tick is real cost under tcc
+            // power bar: 5 cells on the title row, right side
             if (pwDrawn != power)
             {
                 pwDrawn = power;
-                uiPrint(0, 1, "PW");
                 for (gj = 0; gj < 5; gj++)
-                    uiPrint(3 + gj, 1, gj < power ? "=" : "-");
+                    uiPrint(26 + gj, 1, gj < power ? "=" : "-");
             }
 #endif
-            // centre banner: countdown / GO! / FINISH!
-            if (raceState == 0)
-            {
-                uiPrint(13, 1, "       ");
-                if (rTick >= 180)
-                    uiPrint(15, 1, "1");
-                else if (rTick >= 120)
-                    uiPrint(15, 1, "2");
-                else if (rTick >= 60)
-                    uiPrint(15, 1, "3");
-            }
-            else if (goTimer)
-                uiPrint(14, 1, "GO!");
-            else if (raceState == 2)
-                uiPrint(13, 1, "FINISH!");
-            else
-                uiPrint(13, 1, "       ");
-            if (lapCount)
-            {
-                uiPrint(0, 2, "LAST LAP ");
-                uiPrintNum(9, 2, lastLapSec, 2);
-                uiPrint(11, 2, ".");
-                uiPrintNum(12, 2, lastLapTenth, 1);
-            }
 #endif
         }
 

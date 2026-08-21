@@ -88,6 +88,15 @@ Mesen.exe --testrunner --timeout=30 <rom> <script.lua>   # arg order-free
 - **PVSnesLib console text**: consoleUpdate DMAs its map to hardcoded VRAM
   $0800 — inside Mode 7's region. Never use consoleDrawText/consoleUpdate;
   ui.c owns the text map. The lib is still used for font+palette init only.
+- **HUD gradient text needs NO HDMA channel** (all 8 are taken): the baked
+  font gives every glyph PIXEL ROW its own palette index 1-8, and three
+  static CGRAM ramps (rows 4-6, 64-111) colour the text per scanline for
+  free. The glyph order string in bake_tables.py HUD_GLYPHS must match
+  hudIdx() in ui.c. HUD chars live at VRAM 0x7800 = map ids 640+ (tile
+  ids are 10-bit; ids past 255 work fine). Band is 4 tile rows (UI_LINES
+  32): row 0 and columns 0/31 stay EMPTY - CRT overscan crops them. The
+  race clock's ms digits are frames-in-second * 17 (shift+add, no div for
+  the value). LAST LAP is no longer displayed (still tracked).
 - **Mode 7 has NO tile flipping** (bare 8-bit map entries) — hence the bake's
   tile quantiser. Budget: 256 unique tiles, checked every bake.
 - **The Mode 7 view is LEFT-HANDED vs the painter's map** (facing +Y,

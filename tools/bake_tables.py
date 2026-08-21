@@ -34,7 +34,8 @@ ASSETS = os.path.join(ROOT, "assets")
 SCANLINES = 224
 SKY_TM = 0x10        # sky lines: sprites + backdrop only
 SEA_TM = 0x13        # sea lines: BG1 + BG2 (EXTBG) + sprites
-UI_LINES = 24        # top band: BG mode 1 text UI (3 tile rows)
+UI_LINES = 32        # top band: BG mode 1 HUD (blank row + titles + 2 value
+                     # rows - row 0 stays empty for CRT overscan)
 SKY_RGB = (16, 60, 150)  # backdrop / palette index 0 (deep azure zenith)
 # per-scanline additive sky gradient (COLDATA, riding the crest-glow HDMA
 # channel): 0 at the top of the sky, this much white added at the horizon
@@ -47,7 +48,7 @@ SKY_GRAD_MAX = 17
 SKY_SAFE = 6         # scanlines of margin above the highest horizon
 SKY_CHAR0 = 192      # first tile id for sky rows (VRAM 0x5C00, above font)
 CLOUD_CHAR0 = 128    # BG2 cloud chars: VRAM 0x5800, between font and sky
-CLOUD_ROW0 = 4       # strip's top map/screen tile row (scanline 32)
+CLOUD_ROW0 = 5       # strip's top map/screen tile row (scanline 40)
 CLOUD_TROWS = 4      # strip height in tile rows
 CLOUD_SHADE = (204, 222, 242)  # CGRAM 50: soft cloud underside
 
@@ -286,6 +287,80 @@ def build_clouds():
     assert len(chars) <= SKY_CHAR0 - CLOUD_CHAR0, \
         "cloud tiles overflow into the sky chars ({0})".format(len(chars))
     return b"".join(chars), bytes(mapw), len(chars)
+
+
+# ---- HUD font: gradient text without an HDMA channel -------------------------
+# All 8 HDMA channels are spoken for, so the "text colour changes every
+# scanline" effect is baked into the art instead: every glyph pixel ROW
+# carries its own palette index (1..8), and three static CGRAM ramps (rows
+# 4/5/6, CGRAM 64-111 - the free BG reserve) do the per-scanline colouring.
+# Order must match hudIdx() in game/src/ui.c.
+HUD_GLYPHS = "0123456789'\"/!ADEFGHIKLMNOPRST"
+HUD_CHAR0 = 640  # VRAM 0x7800 from the 0x5000 BG1 base (map ids are 10-bit)
+HUD_FONT = {  # 5x7, one int per row, bit 4 = leftmost pixel
+    '0': (0x0E, 0x11, 0x13, 0x15, 0x19, 0x11, 0x0E),
+    '1': (0x04, 0x0C, 0x04, 0x04, 0x04, 0x04, 0x0E),
+    '2': (0x0E, 0x11, 0x01, 0x06, 0x08, 0x10, 0x1F),
+    '3': (0x1F, 0x02, 0x04, 0x02, 0x01, 0x11, 0x0E),
+    '4': (0x02, 0x06, 0x0A, 0x12, 0x1F, 0x02, 0x02),
+    '5': (0x1F, 0x10, 0x1E, 0x01, 0x01, 0x11, 0x0E),
+    '6': (0x06, 0x08, 0x10, 0x1E, 0x11, 0x11, 0x0E),
+    '7': (0x1F, 0x01, 0x02, 0x04, 0x08, 0x08, 0x08),
+    '8': (0x0E, 0x11, 0x11, 0x0E, 0x11, 0x11, 0x0E),
+    '9': (0x0E, 0x11, 0x11, 0x0F, 0x01, 0x02, 0x0C),
+    "'": (0x04, 0x04, 0x08, 0x00, 0x00, 0x00, 0x00),
+    '"': (0x0A, 0x0A, 0x14, 0x00, 0x00, 0x00, 0x00),
+    '/': (0x01, 0x02, 0x04, 0x08, 0x10, 0x00, 0x00),
+    '!': (0x04, 0x04, 0x04, 0x04, 0x04, 0x00, 0x04),
+    'A': (0x0E, 0x11, 0x11, 0x1F, 0x11, 0x11, 0x11),
+    'D': (0x1E, 0x11, 0x11, 0x11, 0x11, 0x11, 0x1E),
+    'E': (0x1F, 0x10, 0x1E, 0x10, 0x10, 0x10, 0x1F),
+    'F': (0x1F, 0x10, 0x1E, 0x10, 0x10, 0x10, 0x10),
+    'G': (0x0E, 0x11, 0x10, 0x17, 0x11, 0x11, 0x0F),
+    'H': (0x11, 0x11, 0x1F, 0x11, 0x11, 0x11, 0x11),
+    'I': (0x0E, 0x04, 0x04, 0x04, 0x04, 0x04, 0x0E),
+    'K': (0x11, 0x12, 0x14, 0x18, 0x14, 0x12, 0x11),
+    'L': (0x10, 0x10, 0x10, 0x10, 0x10, 0x10, 0x1F),
+    'M': (0x11, 0x1B, 0x15, 0x15, 0x11, 0x11, 0x11),
+    'N': (0x11, 0x19, 0x15, 0x13, 0x11, 0x11, 0x11),
+    'O': (0x0E, 0x11, 0x11, 0x11, 0x11, 0x11, 0x0E),
+    'P': (0x1E, 0x11, 0x11, 0x1E, 0x10, 0x10, 0x10),
+    'R': (0x1E, 0x11, 0x11, 0x1E, 0x14, 0x12, 0x11),
+    'S': (0x0F, 0x10, 0x10, 0x0E, 0x01, 0x01, 0x1E),
+    'T': (0x1F, 0x04, 0x04, 0x04, 0x04, 0x04, 0x04),
+}
+HUD_RAMPS = (((252, 216, 32), (56, 200, 88)),   # row 4 titles: yellow -> green
+             ((56, 200, 88), (252, 216, 32)),   # row 5 value top: green -> yel
+             ((252, 216, 32), (228, 40, 32)))   # row 6 value bottom: yel -> red
+
+
+def build_hud_font():
+    """Three blocks of len(HUD_GLYPHS) chars each: single-height glyphs,
+    then double-height TOPS, then double-height BOTTOMS (so bottom char =
+    top char + count). Double height = each source row twice; the colour
+    index still advances every SCANLINE, so the ramps keep per-line
+    resolution through the doubled art. Returns (tiles, CGRAM 64-111)."""
+    n = len(HUD_GLYPHS)
+    grid = [[0] * 8 for _ in range(n * 8 * 3)]
+    for gi, ch in enumerate(HUD_GLYPHS):
+        rows = HUD_FONT[ch]
+        for r in range(7):
+            for x in range(5):
+                if not rows[r] & (0x10 >> x):
+                    continue
+                grid[gi * 8 + r][x + 1] = 1 + r  # single height
+                for s in (2 * r, 2 * r + 1):     # doubled: tops then bottoms
+                    blk = (1 + s // 8) * n * 8
+                    grid[blk + gi * 8 + (s & 7)][x + 1] = 1 + (s & 7)
+    pal = bytearray()
+    for ra, rb in HUD_RAMPS:
+        row = [(0, 0, 0)] + [tuple(ra[i] + (rb[i] - ra[i]) * t // 7
+                                   for i in range(3)) for t in range(8)]
+        row += [(0, 0, 0)] * 7
+        for r, g, b in row:
+            pal += struct.pack("<H", ((b >> 3) << 10) | ((g >> 3) << 5)
+                               | (r >> 3))
+    return encode_4bpp(grid, 1, n * 3), bytes(pal)
 
 
 def phase_raw(phi):
@@ -1229,6 +1304,11 @@ def main():
     asm.append(db_lines(cloud_gfx))
     asm.append("cloud_map:")
     asm.append(db_lines(cloud_map))
+    hud_gfx, hud_pal = build_hud_font()
+    asm.append("hud_gfx:")
+    asm.append(db_lines(hud_gfx))
+    asm.append("hud_pal:")
+    asm.append(db_lines(hud_pal))
     asm.append(".ends")
     asm.append("")
 
@@ -1267,6 +1347,9 @@ def main():
 #define WAVE_SKY_SWITCH {{SKSW}}
 #define WAVE_SKY_ROWS {{SKRW}}
 #define WAVE_SKY_CHAR0 {{SKC0}}
+/* HUD gradient font: SH glyphs, then DH tops, then DH bottoms */
+#define WAVE_HUD_CHAR0 {{HDC0}}
+#define WAVE_HUD_GLYPHS {{HDGL}}
 /* BG2 cloud overlay: char/map strip geometry + the CGRAM 50 shade */
 #define WAVE_CLOUD_CHAR0 {{CLC0}}
 #define WAVE_CLOUD_ROW0 {{CLR0}}
@@ -1322,6 +1405,8 @@ void waveRotateStep(u8 offset);
            .replace("{{SKSW}}", str(sky_switch))
            .replace("{{SKRW}}", str(sky_rows))
            .replace("{{SKC0}}", str(SKY_CHAR0))
+           .replace("{{HDC0}}", str(HUD_CHAR0))
+           .replace("{{HDGL}}", str(len(HUD_GLYPHS)))
            .replace("{{CLC0}}", str(CLOUD_CHAR0))
            .replace("{{CLR0}}", str(CLOUD_ROW0))
            .replace("{{CLTR}}", str(CLOUD_TROWS))
