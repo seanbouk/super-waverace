@@ -13,8 +13,10 @@ rope float-lines and L/R buoys, collision with slide-along, and speed-driven
 wake spray under the hull. Buoys are judged: passing each one on its correct
 side builds a 0–5 power chain (HUD bar) that scales thrust and top speed from
 67% to 133%; a wrong-side pass resets it to 0 — you earn your speed. Dithered
-clouds drift through the sky with a heading-linked parallax. Verified
-on real hardware (pre-race build). See `docs/PLAN.md` "Race mode" for what's
+clouds drift through the sky with a heading-linked parallax. Verified on real
+hardware (full current build: race, power, gradient HUD, start tree, clouds —
+the spawn drop passes behind the clouds, which is a feature).
+See `docs/PLAN.md` "Race mode" for what's
 left (multi-course) and for important performance findings. Target:
 [SNES DEV Game Jam 2026](https://itch.io/jam/snes-dev-game-jam-2026) — LoROM,
 ≤512KB, no enhancement chips, no SRAM, NTSC+PAL. See `docs/PLAN.md` for history.
