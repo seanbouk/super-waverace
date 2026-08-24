@@ -899,6 +899,8 @@ def load_pattern():
 # ---- course: sand islands, shorelines, rope float-lines ----------------------
 # palette indices 8-13 (the course block in the colour map)
 SAND, SAND_SH, FOAM, WET_SAND, FLOAT_A, SHAL_BLUE, CALM, TEAL =     8, 9, 10, 11, 12, 13, 14, 15
+TEAL_SAND = 50    # band-1 teal, over the wet sand (CGRAM 50: free since
+                  # the cloud shade moved to the BG3 palette group)
 CHECK_DARK = 48   # start/finish checker black - NOT 32-47, which is the
 CHECK_WHITE = 49  # mode-1 sky palette row loaded over CGRAM at boot
 COURSE_COLORS = {
@@ -906,7 +908,8 @@ COURSE_COLORS = {
     FOAM: (172, 214, 246), WET_SAND: (186, 164, 118),  # foam = lattice blue
     FLOAT_A: (216, 44, 214),  # magenta: not confusable with R buoys
     CALM: (22, 62, 122),   # flat wake band under ropes (non-rotating)
-    TEAL: (72, 202, 198),  # clear warm-water shallows along the shore
+    TEAL: (60, 182, 214),       # clear shallows, water side: toward blue
+    TEAL_SAND: (128, 196, 168), # clear shallows over sand: toward wet sand
     # SHAL_BLUE is set at bake time to the lightest deep-water rotation
     # colour (fixed copy, so the shallows don't flow)
 }
@@ -1040,7 +1043,7 @@ def compose_canvas(pat, course):
                         if n < 12:
                             c = FOAM
                         else:
-                            c = TEAL if h < 0.4 else WET_SAND
+                            c = TEAL_SAND if h < 0.4 else WET_SAND
                     else:
                         # s: pixel rows from the shore side (0) to sea (7)
                         if dn:
@@ -1356,7 +1359,7 @@ def main():
     # per-PIXEL exemption: anything sand-coloured (beach, wet-sand line,
     # sandy shallows) plus the rope cord and floats escape the glow; foam,
     # pale shallows, calm wake and open water keep the crest highlights
-    exempt = (SAND, SAND_SH, WET_SAND, FLOAT_A, TEAL,
+    exempt = (SAND, SAND_SH, WET_SAND, FLOAT_A, TEAL, TEAL_SAND,
               CHECK_DARK, CHECK_WHITE)
     for row in canvas:
         for x in range(1024):
