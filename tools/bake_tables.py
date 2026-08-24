@@ -1493,8 +1493,12 @@ def main():
     # frame. The mode switch that used to own ch0 rides a scanline IRQ now.
     sand_far = (248, 244, 228)  # ~double the fade range, still warm-tinted
     fade = []
+    # full sand colour is reached HALFWAY down the sea region: the fade
+    # lives in the far half only, so the world near the ski stays rich
+    sand_mid = (sky_switch + 224) // 2
     for y in range(224):
-        t = 0.0 if y <= sky_switch else (y - sky_switch) / (223.0 - sky_switch)
+        t = 0.0 if y <= sky_switch else min(
+            1.0, (y - sky_switch) / float(sand_mid - sky_switch))
         c5 = [round(f + (n - f) * t) >> 3
               for n, f in zip(COURSE_COLORS[SAND], sand_far)]
         fade.append((c5[2] << 10) | (c5[1] << 5) | c5[0])
