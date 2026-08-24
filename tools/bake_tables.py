@@ -1491,16 +1491,21 @@ def main():
     # stays fixed while the water breathes, which divorces land from sea.
     # Entries are hold-runs (write once, wait N lines): ~a dozen cover the
     # frame. The mode switch that used to own ch0 rides a scanline IRQ now.
-    sand_far = (248, 244, 228)  # ~double the fade range, still warm-tinted
+    sand_far = (248, 244, 228)   # pale horizon, still warm-tinted
+    sand_deep = (212, 184, 120)  # darker + more saturated at the ski
     fade = []
-    # full sand colour is reached HALFWAY down the sea region: the fade
-    # lives in the far half only, so the world near the ski stays rich
+    # the BASE sand colour sits at the region's midpoint: far half fades
+    # up to pale, near half keeps deepening past base toward sand_deep
     sand_mid = (sky_switch + 224) // 2
     for y in range(224):
-        t = 0.0 if y <= sky_switch else min(
-            1.0, (y - sky_switch) / float(sand_mid - sky_switch))
-        c5 = [round(f + (n - f) * t) >> 3
-              for n, f in zip(COURSE_COLORS[SAND], sand_far)]
+        if y <= sand_mid:
+            t = 0.0 if y <= sky_switch else \
+                (y - sky_switch) / float(sand_mid - sky_switch)
+            a, b = sand_far, COURSE_COLORS[SAND]
+        else:
+            t = (y - sand_mid) / float(223 - sand_mid)
+            a, b = COURSE_COLORS[SAND], sand_deep
+        c5 = [round(f + (n - f) * t) >> 3 for f, n in zip(a, b)]
         fade.append((c5[2] << 10) | (c5[1] << 5) | c5[0])
     sand_tab = bytearray()
     y = 0
