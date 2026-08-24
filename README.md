@@ -197,7 +197,8 @@ The line in the sand — update this table whenever an allocation changes.
 | 16–31 | UI text | Font palette for the mode-1 text band (palette row 1); 29–30 = BG3 cloud white/shade (2bpp group 7) |
 | 32–47 | Sky band | Palette row 2: the mode-1 sky gradient tiles (loaded over CGRAM at boot — nothing else may live here) |
 | 48–49 | Start line | Checker black / true white (glow-exempt) |
-| 50–63 | BG reserve | Unallocated |
+| 50 | Shore teal | Sandy seafoam teal for the surf band over wet sand (glow-exempt) |
+| 51–63 | BG reserve | Unallocated |
 | 64–111 | HUD ramps | Palette rows 4–6: the gradient-font colour ramps (titles / value tops / value bottoms) |
 | 112–127 | BG reserve | Unallocated |
 | 128–143 | Ski + buoys | OBJ palette 0 (shared: ski, buoy yellows/reds, letters) |
