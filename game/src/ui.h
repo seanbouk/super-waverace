@@ -32,8 +32,8 @@ void uiHudBig(u16 x, char *s);
 void uiHudBigDigit(u16 x, u16 d);
 void uiHudBigClear(u16 x, u16 w);
 
-// program HDMA channel 0 (the per-scanline BG mode switch); call every frame
-// alongside the other channel setup
+// program HDMA channel 0 (the sand distance-fade CGRAM stream; the BG
+// mode switch rides a scanline IRQ); call every frame with the others
 void uiHdma(void);
 
 // write text / a right-aligned decimal into the band (rows 0..UI_ROWS-1)

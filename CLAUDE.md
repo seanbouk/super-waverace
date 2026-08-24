@@ -88,6 +88,19 @@ Mesen.exe --testrunner --timeout=30 <rom> <script.lua>   # arg order-free
 - **PVSnesLib console text**: consoleUpdate DMAs its map to hardcoded VRAM
   $0800 — inside Mode 7's region. Never use consoleDrawText/consoleUpdate;
   ui.c owns the text map. The lib is still used for font+palette init only.
+- **The mode-1/mode-7 switch is a SCANLINE IRQ, not HDMA** (since the sand
+  fade): hdr.asm is HAND-MAINTAINED (AUTOHDR := 0, un-gitignored) with the
+  native IRQ vector -> irqStub, a 4-byte jml in BANK 0 (bank 0 had 11
+  bytes free - the stub is the only thing that fits there) -> irqSwitch
+  (camera.asm): ack $4211 (mandatory or it refires), spin on the $4212
+  hblank flag, write $2105=7. V+H timer set to (WAVE_SKY_SWITCH-1, dot
+  260); the NMI callback (nmiSet -> vblTop) restores mode 0x09 at frame
+  top EVERY frame (the main loop is slower than the frame rate). irqOn
+  (camera.asm) does the cli. Freed HDMA ch0 = CGRAM stream ($2121 mode 3:
+  CGADD,CGADD,CGDATA,CGDATA = one palette entry per table entry): the
+  baked sand_fade table repaints CGRAM 8 down the frame in hold-runs -
+  the wave-phase-independent sand distance fade. Measured cost: zero
+  (648 vs 649 ticks/2000f). NOT yet hardware-verified.
 - **HUD gradient text needs NO HDMA channel** (all 8 are taken): the baked
   font gives every glyph PIXEL ROW its own palette index 1-8, and three
   static CGRAM ramps (rows 4-6, 64-111) colour the text per scanline for

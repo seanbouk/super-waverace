@@ -2,7 +2,8 @@
     Super Waverace — jet ski on the rolling sea
 
     HDMA channels per frame:
-      ch0 BG mode ($2105)  : mode 1 UI band on top, mode 7 below   (static ROM)
+      ch0 CGRAM   ($2121)  : sand distance-fade (entry 8 per band, baked
+          ROM; the mode 1/7 switch rides a scanline IRQ - see camera.asm)
       ch1 TM      ($212C)  : UI band / sky / sea split             (baked ROM)
       ch2 COLDATA ($2132)  : crest glow                            (baked ROM)
       ch3 M7A+B, ch4 M7C+D, ch5 M7X+Y, ch6 HOFS+VOFS : paired-register
@@ -48,6 +49,7 @@ extern void camPivot(void);   // camP += (skiDist8 * (prev - cur trig)) >> 7
 extern void npcAim(void); // aimT/aimP/aimBias + npcTrig -> wpdx/wpdy (bias-
                           // aimed), apc = cross, apd = dot
 extern void npcVel(void); // apc/apd = ((bq >> 5) * npcSin/Cos) >> 2
+extern void irqOn(void);  // camera.asm: cli, once the timer regs are set
 
 // ---- camera state shared with camera.asm (accessed via long addressing) ----
 u8 camTheta;
@@ -93,6 +95,11 @@ u8 skiDist8, thrF8, thrR8;
 #endif
 #define REG_WOBJSEL (*(vuint8 *)0x2125)
 #define REG_BG3HOFS (*(vuint8 *)0x2111)
+#define REG_BGMODE (*(vuint8 *)0x2105)
+#define REG_HTIMEL (*(vuint8 *)0x4207)
+#define REG_HTIMEH (*(vuint8 *)0x4208)
+#define REG_VTIMEL (*(vuint8 *)0x4209)
+#define REG_VTIMEH (*(vuint8 *)0x420A)
 #define REG_WRDIVL (*(vuint8 *)0x4204)
 #define REG_WRDIVH (*(vuint8 *)0x4205)
 #define REG_WRDIVB (*(vuint8 *)0x4206)
@@ -490,6 +497,14 @@ static void waveHdma(u16 ph, u16 bufOff)
 }
 
 //---------------------------------------------------------------------------------
+// every vblank (lib NMI callback): frame top is mode 1 + BG3 priority;
+// the scanline IRQ flips to mode 7 at the sky switch line
+static void vblTop(void)
+{
+    REG_BGMODE = 0x09;
+}
+
+//---------------------------------------------------------------------------------
 int main(void)
 {
     waveTablesInit();
@@ -536,6 +551,19 @@ int main(void)
     REG_TMW = 0x10;
 
     setScreenOn();
+
+    // The mode-1 -> mode-7 switch rides a scanline IRQ (camera.asm
+    // irqSwitch), freeing HDMA ch0 for the sand fade. The V+H timer
+    // fires just before hblank on the line ABOVE the switch; the NMI
+    // callback below restores mode 1 (+BG3 priority) at frame top.
+    nmiSet(vblTop);
+    REG_BGMODE = 0x09; // valid until the first IRQ fires
+    REG_HTIMEL = 260 & 0xFF; // just before hblank; the handler spins
+    REG_HTIMEH = 260 >> 8;   // on the hblank flag for the last few dots
+    REG_VTIMEL = WAVE_SKY_SWITCH - 1;
+    REG_VTIMEH = 0;
+    REG_NMITIMEN = 0xB1; // NMI + V=V,H=H timer IRQ + auto-joypad
+    irqOn();             // camera.asm: cli
 
     tick = 0;
     phaseAcc = 0;

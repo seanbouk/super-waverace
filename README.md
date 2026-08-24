@@ -146,8 +146,12 @@ sprite pairs are dealt out nearest-first every frame so passing racers stack
 correctly.
 
 **The UI band and the sky.** The screen runs in BG mode 1 from the top down to a
-baked switch line just above the wave cycle's highest horizon (HDMA on `$2105`
-switches the whole PPU mode mid-frame), giving a 4-row HUD band plus a tiled
+baked switch line just above the wave cycle's highest horizon (a scanline timer
+IRQ, fired into hblank, switches the whole PPU mode mid-frame — this freed an
+HDMA channel to repaint the dry sand's palette entry per scanline, so the beach
+grows paler and less saturated with distance while ignoring the swell entirely:
+the sand's fixed light divorces land from the breathing water), giving a 4-row
+HUD band plus a tiled
 sky: a 16-colour azure gradient with 2D dithering (palette row 2), far smoother
 than per-scanline colour math could manage. The HUD (TIME / RANK / LAP /
 SPEED / POWER titles over double-height values, the power chain as filled

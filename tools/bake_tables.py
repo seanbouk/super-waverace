@@ -1127,7 +1127,13 @@ def compose_canvas(pat, course):
             ox, oy = octants[oct_i]
             for py in range(8):
                 for px in range(8):
-                    canvas[cy * 8 + py][cx * 8 + px] = CALM
+                    # calm wake with a breath of open-sea noise (the same
+                    # pool as the shallows' sea side, rotating stripes
+                    # included) so the band isn't a dead flat ribbon.
+                    # Cell-local coords keep the tiles canonical.
+                    canvas[cy * 8 + py][cx * 8 + px] = \
+                        pool[int(_hash01(px + 13, py + 44) * len(pool))] \
+                        if _hash01(px * 5 + 21, py * 3 + 66) < 0.30 else CALM
             # canonical rope line through the cell centre
             for s in range(-4, 5):
                 x = (cx * 8 + 3 + ox * s) & 1023
@@ -1476,6 +1482,34 @@ def main():
     asm.append(db_lines(hud_gfx))
     asm.append("hud_pal:")
     asm.append(db_lines(hud_pal))
+    asm.append(".ends")
+    asm.append("")
+
+    # sand distance-fade: HDMA channel 0 (mode 3 -> $2121) rewrites CGRAM
+    # entry 8 (dry sand) down the frame - paler and less saturated in the
+    # distance. The table ignores wave phase BY DESIGN: the sand's light
+    # stays fixed while the water breathes, which divorces land from sea.
+    # Entries are hold-runs (write once, wait N lines): ~a dozen cover the
+    # frame. The mode switch that used to own ch0 rides a scanline IRQ now.
+    sand_far = (242, 233, 208)
+    fade = []
+    for y in range(224):
+        t = 0.0 if y <= sky_switch else (y - sky_switch) / (223.0 - sky_switch)
+        c5 = [round(f + (n - f) * t) >> 3
+              for n, f in zip(COURSE_COLORS[SAND], sand_far)]
+        fade.append((c5[2] << 10) | (c5[1] << 5) | c5[0])
+    sand_tab = bytearray()
+    y = 0
+    while y < 224:
+        run = 1
+        while y + run < 224 and fade[y + run] == fade[y] and run < 127:
+            run += 1
+        sand_tab += bytes((run, SAND, SAND, fade[y] & 0xFF, fade[y] >> 8))
+        y += run
+    sand_tab.append(0)
+    asm.append('.section ".sandfade" superfree')
+    asm.append("sand_fade:")
+    asm.append(db_lines(sand_tab))
     asm.append(".ends")
     asm.append("")
 

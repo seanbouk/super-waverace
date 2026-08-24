@@ -6,6 +6,9 @@ endif
 export ROMNAME := superwaverace
 export ROMTITLE := SUPER WAVERACE
 
+# hand-maintained hdr.asm: the IRQ vector points at irqStub (camera.asm)
+AUTOHDR := 0
+
 include ${PVSNESLIB_HOME}/devkitsnes/snes_rules
 
 PYTHON := $(shell command -v python3 2>/dev/null || command -v python 2>/dev/null)

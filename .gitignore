@@ -4,7 +4,8 @@ game/*.log
 game/*.sym
 game/*.symfull
 game/linkfile
-game/hdr.asm
+# game/hdr.asm is hand-maintained now (AUTOHDR=0): the IRQ vector points
+# at the scanline mode-switch handler
 game/*.obj
 game/src/*.obj
 game/src/*.ps

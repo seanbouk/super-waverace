@@ -7,15 +7,11 @@ extern char hud_gfx, hud_pal;     // gradient HUD font + its CGRAM ramps
 
 #define REG_BG3VOFS (*(vuint8 *)0x2112)
 
-// HDMA table for $2105: mode 1 from the top (text band + tiled sky) down
-// to the baked switch line - just above the wave cycle's highest horizon -
-// then mode 7 for the sea. The strip between the switch and the true
-// horizon stays backdrop + COLDATA gradient (see bake_tables.py).
-static const u8 uiModeTable[] = {
-    WAVE_SKY_SWITCH, 0x09, // BG mode 1 + BG3 priority: text + sky, with
-    1, 0x07,               // the BG3 clouds above the BG1 gradient;
-    0x00                   // then BG mode 7 for the sea
-};
+// The mode-1 -> mode-7 switch rides a scanline IRQ now (camera.asm
+// irqSwitch, vector in hdr.asm), which freed HDMA channel 0 for the sand
+// distance-fade: a baked table of hold-run entries (mode 3 -> $2121)
+// that rewrites CGRAM entry 8 per scanline band, ignoring wave phase.
+extern char sand_fade;
 
 // map words: font tile = 256 + ascii - 32 (the font sits at 0x5000, ids
 // 256+ from the 0x4000 BG1 char base), palette row 1 (bits 10-12)
@@ -99,9 +95,9 @@ void uiInit(void)
 
 void uiHdma(void)
 {
-    dmaMode.mem.p = (u8 *)uiModeTable;
-    REG_DMAP0 = 0x00;
-    REG_BBAD0 = 0x05; // $2105 BG mode
+    dmaMode.mem.p = (u8 *)&sand_fade;
+    REG_DMAP0 = 0x03; // mode 3: p,p,p+1,p+1 = CGADD x2 then CGDATA lo/hi
+    REG_BBAD0 = 0x21; // $2121 CGADD: one palette entry per table entry
     REG_A1T0LH = dmaMode.mem.c.addr;
     REG_A1B0 = dmaMode.mem.c.bank;
 }

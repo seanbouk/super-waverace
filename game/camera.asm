@@ -1154,3 +1154,39 @@ collProbe:
     rtl
 
 .ENDS
+
+;----------------------------------------------------------------------------
+; Scanline IRQ: the mode-1 -> mode-7 switch, moved off HDMA channel 0 so
+; ch0 can stream the sand distance-fade CGRAM writes instead. The V+H
+; timer fires just before hblank on the line ABOVE the switch; we ack
+; ($4211 read is mandatory or the IRQ refires), wait for the hblank flag
+; so the mode never flips mid-line, and write $2105. The NMI callback in
+; main.c restores mode 1 (0x09) at the top of every frame.
+; The vector stub must live in BANK 0 (the native IRQ vector is a 16-bit
+; bank-0 address); the handler body is SUPERFREE and reached by jml.
+; Straight-line single-mode sections (see the WLA immediate-sizing gotcha).
+.SECTION ".irqstub" BANK 0 SLOT 0 FREE
+irqStub:
+    jml irqSwitch
+.ENDS
+
+.SECTION ".irqsw" SUPERFREE
+irqSwitch:
+    rep #$20
+    pha                  ; 16-bit push: covers A whatever mode we landed in
+    sep #$20
+    lda.l $004211        ; TIMEUP: acknowledge the timer IRQ
+_irq_wait:
+    lda.l $004212        ; HVBJOY
+    and #$40             ; hblank flag
+    beq _irq_wait
+    lda #$07
+    sta.l $002105        ; sea rows: mode 7
+    rep #$20
+    pla
+    rti
+
+irqOn:                   ; called once from C after the timer regs are set
+    cli
+    rtl
+.ENDS
