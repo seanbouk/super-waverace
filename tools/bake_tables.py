@@ -1491,7 +1491,7 @@ def main():
     # stays fixed while the water breathes, which divorces land from sea.
     # Entries are hold-runs (write once, wait N lines): ~a dozen cover the
     # frame. The mode switch that used to own ch0 rides a scanline IRQ now.
-    sand_far = (242, 233, 208)
+    sand_far = (248, 244, 228)  # ~double the fade range, still warm-tinted
     fade = []
     for y in range(224):
         t = 0.0 if y <= sky_switch else (y - sky_switch) / (223.0 - sky_switch)
