@@ -96,9 +96,10 @@ it bobs, and nearer water swallows it.
 **Glow-free land (EXTBG).** Crest glow is colour math on BG1, and land is BG1 — so
 Mode 7's hidden second layer exempts it: with EXTBG enabled, BG2 duplicates the
 image treating **pixel bit 7** as a per-pixel priority flag (colour = low 7 bits).
-Sand-coloured pixels, the rope cord, floats and sandy shallows are baked with bit 7
-set, so they win via BG2-high (mode 7 priority: S3 S2 2H S1 BG1 S0 2L) and escape
-the glow; foam, pale shallows and open water keep it. Verified on real hardware.
+Sand-coloured pixels, the rope cord, floats and the teal clear-water shallows are
+baked with bit 7 set, so they win via BG2-high (mode 7 priority: S3 S2 2H S1 BG1
+S0 2L) and escape the glow; foam, pale shallows and open water keep it. Verified
+on real hardware.
 
 **Collision.** The course zones double as physics: the bake exports a 128×128
 collision byte-map (water / sand / rope / buoy; one cell = 32 world units), a tiny

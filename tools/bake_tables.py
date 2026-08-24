@@ -898,7 +898,7 @@ def load_pattern():
 
 # ---- course: sand islands, shorelines, rope float-lines ----------------------
 # palette indices 8-13 (the course block in the colour map)
-SAND, SAND_SH, FOAM, WET_SAND, FLOAT_A, SHAL_BLUE, CALM, SHAL_SAND =     8, 9, 10, 11, 12, 13, 14, 15
+SAND, SAND_SH, FOAM, WET_SAND, FLOAT_A, SHAL_BLUE, CALM, TEAL =     8, 9, 10, 11, 12, 13, 14, 15
 CHECK_DARK = 48   # start/finish checker black - NOT 32-47, which is the
 CHECK_WHITE = 49  # mode-1 sky palette row loaded over CGRAM at boot
 COURSE_COLORS = {
@@ -906,8 +906,9 @@ COURSE_COLORS = {
     FOAM: (172, 214, 246), WET_SAND: (186, 164, 118),  # foam = lattice blue
     FLOAT_A: (216, 44, 214),  # magenta: not confusable with R buoys
     CALM: (22, 62, 122),   # flat wake band under ropes (non-rotating)
+    TEAL: (72, 202, 198),  # clear warm-water shallows along the shore
     # SHAL_BLUE is set at bake time to the lightest deep-water rotation
-    # colour (fixed copy, so the shallows don't flow); SHAL_SAND to sand
+    # colour (fixed copy, so the shallows don't flow)
 }
 
 
@@ -990,9 +991,9 @@ def compose_canvas(pat, course):
     def water(cy, cx):
         return zones[cy % 128][cx % 128] == "w"
 
-    # surf wings: white water up to 3 cells out from every shore, painted
-    # with strictly 8-periodic patterns over flat calm blue so each band
-    # costs ~one unique tile
+    # surf wings: two water-cell bands out from every shore, painted with
+    # strictly 8-periodic patterns so each band costs ~one unique tile
+    # (band 2 has one variant per shore direction)
     dist = [[9] * 128 for _ in range(128)]
     frontier = []
     for cy in range(128):
@@ -1010,22 +1011,58 @@ def compose_canvas(pat, course):
                         dist[ny][nx] = step
                         nxt.append((ny, nx))
         frontier = nxt
-    SURF_CUT = {1: 12, 2: 6}  # foam density per band
+    # band 1: dense foam over wet sand, with a little TEAL dithered into
+    # the gaps - the clear-shallows colour bleeding in under the surf.
+    # band 2: a shore-to-sea gradient PER CELL, oriented by where the
+    # shore is: smooth teal on the land side, dithering out through
+    # SHAL_BLUE into noise drawn from the open sea's own colour balance
+    # (pattern indices 1-5 - the rotating stripes carry a little of the
+    # sea's motion right up to the shallows). It can't tile perfectly
+    # with the open sea, but it shares its palette and texture. All
+    # patterns stay 8-periodic per direction variant: ~5 unique tiles.
+    pool = [c for prow in pat for c in prow if 1 <= c <= 5]
     for cy in range(128):
         for cx in range(128):
             d = dist[cy][cx]
             if d < 1 or d > 2:
                 continue
-            cut = SURF_CUT[d]
-            # super-shallow water: foam over WET sand (the dry-sand-coloured
-            # SHAL_SAND read as a light beach strip inside the foam line)
-            gap = WET_SAND if d == 1 else SHAL_BLUE
+            dn = dist[(cy - 1) & 127][cx] <= 1
+            ds = dist[(cy + 1) & 127][cx] <= 1
+            dw = dist[cy][(cx - 1) & 127] <= 1
+            de = dist[cy][(cx + 1) & 127] <= 1
             for py in range(8):
                 y = cy * 8 + py
                 for px in range(8):
                     x = cx * 8 + px
                     n = ((x & 7) * 13 + (y & 7) * 29 + ((x & 7) * (y & 7))) % 17
-                    canvas[y][x] = FOAM if n < cut else gap
+                    h = _hash01((x & 7) * 7 + 3, (y & 7) * 11 + 5)
+                    if d == 1:
+                        if n < 12:
+                            c = FOAM
+                        else:
+                            c = TEAL if h < 0.4 else WET_SAND
+                    else:
+                        # s: pixel rows from the shore side (0) to sea (7)
+                        if dn:
+                            s = py
+                        elif ds:
+                            s = 7 - py
+                        elif dw:
+                            s = px
+                        elif de:
+                            s = 7 - px
+                        else:
+                            s = 4  # diagonal-only corner: mid-blend
+                        if s <= 2:
+                            c = FOAM if s <= 1 and h < 0.25 else TEAL
+                        elif s <= 4:
+                            c = TEAL if h < (5 - s) * 0.35 else SHAL_BLUE
+                        elif h < (7 - s) * 0.1:
+                            c = TEAL
+                        else:
+                            c = pool[int(_hash01((x & 7) + 51,
+                                                 (y & 7) + 77) * len(pool))]
+                    canvas[y][x] = c
 
     # sand: flat plain dry sand everywhere; coastline cells (4-adjacent to
     # water) add the foam fringe on their water edges. Wet sand appears
@@ -1273,7 +1310,6 @@ def main():
     pat, palette = load_pattern()
     for idx, rgb in COURSE_COLORS.items():
         palette[idx] = rgb
-    palette[SHAL_SAND] = palette[SAND]
     palette[CHECK_DARK] = (16, 16, 20)    # start-line checker black
     palette[CHECK_WHITE] = (250, 250, 250) # start-line checker white
     rs, rc = int(P["rotStart"]), int(P["rotCount"])
@@ -1314,7 +1350,7 @@ def main():
     # per-PIXEL exemption: anything sand-coloured (beach, wet-sand line,
     # sandy shallows) plus the rope cord and floats escape the glow; foam,
     # pale shallows, calm wake and open water keep the crest highlights
-    exempt = (SAND, SAND_SH, WET_SAND, FLOAT_A, SHAL_SAND,
+    exempt = (SAND, SAND_SH, WET_SAND, FLOAT_A, TEAL,
               CHECK_DARK, CHECK_WHITE)
     for row in canvas:
         for x in range(1024):
