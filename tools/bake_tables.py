@@ -1014,11 +1014,11 @@ def compose_canvas(pat, course):
                         dist[ny][nx] = step
                         nxt.append((ny, nx))
         frontier = nxt
-    # band 1: dense foam over wet sand, with a little TEAL dithered into
-    # the gaps - the clear-shallows colour bleeding in under the surf.
+    # band 1: dense foam over plain wet sand.
     # band 2: a shore-to-sea gradient PER CELL, oriented by where the
-    # shore is: smooth teal on the land side, dithering out through
-    # SHAL_BLUE into noise drawn from the open sea's own colour balance
+    # shore is: sandy seafoam teal on the land edge dithering into the
+    # bluer water teal, then out through SHAL_BLUE into noise drawn from
+    # the open sea's own colour balance
     # (pattern indices 1-5 - the rotating stripes carry a little of the
     # sea's motion right up to the shallows). It can't tile perfectly
     # with the open sea, but it shares its palette and texture. All
@@ -1043,7 +1043,7 @@ def compose_canvas(pat, course):
                         if n < 12:
                             c = FOAM
                         else:
-                            c = TEAL_SAND if h < 0.4 else WET_SAND
+                            c = WET_SAND
                     else:
                         # s: pixel rows from the shore side (0) to sea (7)
                         if dn:
@@ -1057,7 +1057,14 @@ def compose_canvas(pat, course):
                         else:
                             s = 4  # diagonal-only corner: mid-blend
                         if s <= 2:
-                            c = FOAM if s <= 1 and h < 0.25 else TEAL
+                            # land edge: the sandy seafoam teal, dithering
+                            # into the bluer water teal across three rows
+                            if s <= 1 and h < 0.25:
+                                c = FOAM
+                            elif h < (5 - 2 * s) * 0.33:  # 1.0 / .99 / .33
+                                c = TEAL_SAND
+                            else:
+                                c = TEAL
                         elif s <= 4:
                             c = TEAL if h < (5 - s) * 0.35 else SHAL_BLUE
                         elif h < (7 - s) * 0.1:
