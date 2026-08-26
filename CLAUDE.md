@@ -245,9 +245,11 @@ colours, SKI_PALETTE/NPC_PALETTES are what shows). Bake maps pixels by
 exact RGB match and fails listing unknown colours. Waterline = row 58.
 The turn frame is authored leaning LEFT and mirrored at bake (runtime:
 KEY_LEFT sets hflip). Buoys borrow player slots 9/10 (red) and 11/12
-(yellow); spray uses 2/3 (white/lt grey); the start lamps have their
-OWN palette (OBJ 4, CGRAM 192, LAMP_PALETTE in the bake). NPC recolours
-override slots 5-12 (skin included - riders differ in complexion).
+(yellow); spray uses 2 (white) + 13 (a FIXED grey - the greys at 3/4
+are the per-rider HULL pair now, and spray must not tint with it); the
+start lamps have their OWN palette (OBJ 4, CGRAM 192, LAMP_PALETTE in
+the bake). NPC recolours override slots 3-12 (hull + skin + kit - five
+adjustable pairs per rider).
 
 ## Tuning knobs (game feel — user-driven, ask before big changes)
 
