@@ -234,6 +234,21 @@ Mesen.exe --testrunner --timeout=30 <rom> <script.lua>   # arg order-free
   profFrames*262, a constant). Reads that matter must be assigned to a
   variable, even a throwaway one.
 
+## Rider art pipeline (user-authored, Photoshop)
+
+assets/rider_stand.png + rider_turn.png (32x64 indexed PNGs, true-alpha
+background, hard pixels) + assets/rider.act, whose entry ORDER is the
+role contract: 0 black, 1 white, 2 lt grey, 3 dk grey, 4/5 skin pair,
+6/7 clothing A (blues), 8/9 clothing B (reds), 10/11 jetski accent
+(authored green; DISPLAYED warm yellow - ACT colours are authoring
+colours, SKI_PALETTE/NPC_PALETTES are what shows). Bake maps pixels by
+exact RGB match and fails listing unknown colours. Waterline = row 58.
+The turn frame is authored leaning LEFT and mirrored at bake (runtime:
+KEY_LEFT sets hflip). Buoys borrow player slots 9/10 (red) and 11/12
+(yellow); spray uses 2/3 (white/lt grey); the start lamps have their
+OWN palette (OBJ 4, CGRAM 192, LAMP_PALETTE in the bake). NPC recolours
+override slots 5-12 (skin included - riders differ in complexion).
+
 ## Tuning knobs (game feel — user-driven, ask before big changes)
 
 `game/src/main.c` top: TURN_SPEED, THRUST (drag >>4 sets top speed =

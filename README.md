@@ -201,9 +201,10 @@ The line in the sand — update this table whenever an allocation changes.
 | 51–63 | BG reserve | Unallocated |
 | 64–111 | HUD ramps | Palette rows 4–6: the gradient-font colour ramps (titles / value tops / value bottoms) |
 | 112–127 | BG reserve | Unallocated |
-| 128–143 | Ski + buoys | OBJ palette 0 (shared: ski, buoy yellows/reds, letters) |
-| 144–191 | NPC racers | OBJ palettes 1–3: green/purple/orange recolours of the ski palette (tiles shared) |
-| 192–255 | Sprites reserve | OBJ palettes 4–7 — do not touch from BG code |
+| 128–143 | Rider + buoys | OBJ palette 0: the player's role slots (neutrals, skin/clothing/jetski pairs); buoys borrow the red and warm-yellow pairs |
+| 144–191 | NPC racers | OBJ palettes 1–3: full rider recolours (skin + two clothing pairs + jetski pair; tiles shared) |
+| 192–207 | Start lamps | OBJ palette 4: the start-tree lamps (moved out of the rider palette) |
+| 208–255 | Sprites reserve | OBJ palettes 5–7 — do not touch from BG code |
 
 ## Building the ROM
 

@@ -27,6 +27,8 @@
 extern char sea_patterns, sea_map, sea_palette;
 extern char ski_tiles, ski_pal, npc_pals;
 extern char tall_tiles; // OBJ name table 2: the stacked tall racers
+extern char lamp_pal;   // start-tree lamps: own OBJ palette (4) - the ski
+                        // palette's slots are all rider roles now
 extern void buildCamTables(void);
 extern void collProbe(void); // camera.asm: reads the collision byte-map
 extern void rowDepth(void);  // camera.asm: screen row for a view depth
@@ -526,6 +528,7 @@ int main(void)
                   OBJ_SIZE16_L32);
     // NPC racer recolours: OBJ palettes 1-3 (CGRAM 144-191), shared tiles
     dmaCopyCGram((u8 *)&npc_pals, 144, 96);
+    dmaCopyCGram((u8 *)&lamp_pal, 192, 32); // start-tree lamps: palette 4
     // stacked tall racers: name table 2 right after the sheet
     dmaCopyVram((u8 *)&tall_tiles, 0x7000, WAVE_TALL_SHEET);
     oamSet(0, SKI_X, 140, 3, 0, 0, 64, 0);
@@ -1291,7 +1294,7 @@ int main(void)
                     oy = raceState == 0 && gj < ltRed ? WAVE_LIGHT_CELL + 2
                                                       : WAVE_LIGHT_CELL;
                     oamSet((LIGHT_SPR + gj) << 2, ox, (u16)ltY, 3, 0, 0,
-                           oy, 0);
+                           oy, 4);
                     oamSetEx((LIGHT_SPR + gj) << 2, OBJ_SMALL, OBJ_SHOW);
                 }
                 if (ltY + 16 < 34)
@@ -1303,7 +1306,7 @@ int main(void)
                 {
                     oy = raceState ? WAVE_LIGHT_CELL + 4 : WAVE_LIGHT_CELL;
                     oamSet((LIGHT_SPR + 3 + gj) << 2, ox, (u16)(ltY + 16),
-                           3, 0, 0, oy, 0);
+                           3, 0, 0, oy, 4);
                     oamSetEx((LIGHT_SPR + 3 + gj) << 2, OBJ_SMALL, OBJ_SHOW);
                 }
             }
