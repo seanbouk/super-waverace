@@ -169,6 +169,63 @@ Phases (each headless-verifiable in Mesen; ✅ = done):
 
 ---
 
+## Multi-course (Aug 2026) — agreed design
+
+Targets: **3 courses minimum, 5 better, 8 is the wish**; **wave params
+per course is a hard requirement** (each course names a wave profile;
+identical profiles dedupe in ROM, so 8 unique swells is an authoring/bytes
+choice, not an architecture one). Course select opens the game as a plain
+text list for now (mini-map maybe later; attract mode exists as a separate
+future idea — no mode-7 flyover at track select).
+
+Locked-in design decisions:
+- **The camera is global** (camH/pitch/fovV/fovH, skiDist) — never
+  per-course. The a-from-d synthesis, sprite scale bands, ski row and
+  projection constants all assume it; the bake asserts it.
+- **Wave profiles pool**: per-course amp/wavelength/phases/framesPerPhase/
+  crestGlow/glowGamma + water texture/rotation. The mode-switch line
+  (WAVE_SKY_SWITCH) is the min across all courses' horizons — the roughest
+  course (probably the current one) sets the sky band for everyone.
+- **Palette roles are fixed, RGB varies**: courses recolour by CGRAM index
+  (8 = sand, 15 = teal, ...), never by re-arting tiles. The sand-fade
+  table, glow exemption and EXTBG bits survive untouched.
+- **Per-course ambient light**: an RGB multiplier in course.json applied
+  AT BAKE to every in-world palette — course colours, sand fade, all four
+  rider OBJ palettes, buoys, spray — so sunset/overcast maps dim the world
+  with zero runtime cost. Exempt: HUD text (readability) and the start
+  lamps (self-lit). The bake lints 5-bit shade-pair collapse under dark
+  ambients. Buoys move to their own OBJ palette (row 5) first — today they
+  alias the player's clothing-B/accent slots.
+- **On-disk structure**: assets/courses/<nn>_<name>/course.json (palette +
+  ambient + wave-profile name embedded; optional per-course
+  sea_pattern.png), wave profiles as wave-lab exports. Current
+  assets/course.json becomes course 01.
+
+ROM maths (512K jam cap): fixed content ~175K; per course ~37K raw
+(16K tiles + 16K map + 4K packed collision + pal/fade) minus map RLE
+(open water crushes); per unique wave profile ~12K (delta-d ~7K + phase
+HDMA tables ~5K; a is synthesised). 8 courses + 8 profiles ≈ ~465K.
+The bake grows a byte-budget report; calm 16-phase profiles cost half.
+
+Phases (1 done):
+1. **Decouple** ✓ — wave d/a to WRAM $7F (waveRawLoad expands: delta-d +
+   PPU-multiplier a synthesis), collision packed 2bpc, course geometry
+   (counts/start/grid/gates) runtime. Each step verified bit-exact
+   (tickshot/tabdump harnesses; exhaustive collision checksum).
+2. **State machine** — SELECT (full-screen mode 1, gradient font, IRQ
+   parked) -> RACE -> RESULTS -> SELECT; resetRace() owning ALL race BSS
+   (fixes the latent read-before-write list in CLAUDE.md); dual-race
+   harness proving replay == first run.
+3. **Multi-bake** — course folders, map RLE + decoder, wave-profile pool
+   with dedupe, ROM descriptor table + courseLoad(), byte-budget report.
+4. **Palette + ambient per course** — painter palette editor + ambient
+   swatch, bake tint pass + per-course OBJ palettes + collapse lint,
+   buoys to OBJ palette 5, courseLoad CGRAM upload.
+5. **Content** — author courses 2..N; per-course gate lint + NPC pace
+   check ride along.
+
+---
+
 ## Performance pass (Aug 2026) + post-jam options
 
 The three planned C->asm ports plus a rowDepth binary search, each verified
