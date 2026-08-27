@@ -82,6 +82,10 @@ u8 skiFlip;       // lean direction (hflip)
 // three fit today - see the init asserts-by-comment)
 u8 skiDist8, thrF8, thrR8;
 
+// build-time debug: drive itself (the emulator test runner has no input);
+// also auto-confirms the course-select menu and the results screen
+#define AUTOPILOT 0
+
 #define TURN_SPEED 2
 #define THRUST 144 // applied at >>6: top speed = THRUST*32 (8.8 world/loop)
 #define GRAV 36       // 8.8 texels/loop^2 — floaty hangtime at race pace
@@ -99,6 +103,14 @@ u8 skiDist8, thrF8, thrR8;
 #endif
 #define REG_WOBJSEL (*(vuint8 *)0x2125)
 #define REG_BG3HOFS (*(vuint8 *)0x2111)
+#define REG_BG1HOFS (*(vuint8 *)0x210D)
+#define REG_BG1VOFS (*(vuint8 *)0x210E)
+#ifndef REG_COLDATA
+#define REG_COLDATA (*(vuint8 *)0x2132)
+#endif
+#ifndef REG_TM
+#define REG_TM (*(vuint8 *)0x212C)
+#endif
 #define REG_BGMODE (*(vuint8 *)0x2105)
 #define REG_HTIMEL (*(vuint8 *)0x4207)
 #define REG_HTIMEH (*(vuint8 *)0x4208)
@@ -204,6 +216,8 @@ char pwBuf[6]; // power pip string, built on change
 // gun down one at a time, greens light together at GO, then the whole
 // tree floats up and hides row by row as it reaches the HUD band.
 #define LIGHT_SPR (SPRAY_SPR + 2 * SPRAY_ROWS)
+u8 raceDone, startHeld; // exit-to-menu flow (START on the results)
+u8 menuT;               // menu/results timers (autopilot auto-advance)
 u8 ltState, ltT, ltRed; // 0 showing, 2 rising, 3 done
 s16 ltY;
 // per-NPC projection results, buffered so the OAM pairs can be assigned
@@ -509,31 +523,13 @@ static void vblTop(void)
 }
 
 //---------------------------------------------------------------------------------
-int main(void)
+// raceInit - EVERY race-scoped variable is set here, deliberately: BSS is
+// not zero-initialised and the race runs more than once per boot now, so
+// anything missed inherits the previous race's tail (or power-on garbage).
+static void raceInit(void)
 {
-    waveTablesInit();
-    camTabsInitHeaders();
-    waveRawLoad(); // d/a arrays -> WRAM $7F before anything projects
-
-    bgInitMapTileSet7(&sea_patterns, &sea_map, &sea_palette,
-                      WAVE_PC7_SIZE, 0x0000);
-
-    setMode7(0);
-    // EXTBG spike: BG2 duplicates the mode 7 image with pixel bit 7 as a
-    // priority flag; course pixels (bit 7 set) render via BG2-high, above
-    // BG1 and OUTSIDE its colour math - crest glow no longer touches sand
-    REG_SETINI = 0x40;
-    uiInit();
-
-    // ski + buoy + NPC sheet: 192 tiles at VRAM 0x6000 (through 0x6BFF -
-    // the UI map moved to 0x7000 to make room), OBJ palette 0 (CGRAM 128+)
-    oamInitGfxSet(&ski_tiles, WAVE_SKI_SHEET, &ski_pal, 32, 0, 0x6000,
-                  OBJ_SIZE16_L32);
-    // NPC racer recolours: OBJ palettes 1-3 (CGRAM 144-191), shared tiles
-    dmaCopyCGram((u8 *)&npc_pals, 144, 96);
-    dmaCopyCGram((u8 *)&lamp_pal, 192, 32); // start-tree lamps: palette 4
-    // stacked tall racers: name table 2 right after the sheet
-    dmaCopyVram((u8 *)&tall_tiles, 0x7000, WAVE_TALL_SHEET);
+    REG_NMITIMEN = 0xB1; // NMI + V=V,H=H timer IRQ + auto-joypad (the
+                         // course select parks the timer IRQ)
     oamSet(0, SKI_X, 140, 3, 0, 0, 64, 0);
     oamSetEx(0, OBJ_LARGE, OBJ_SHOW);
     OAM_TALL(0);
@@ -543,34 +539,6 @@ int main(void)
     for (bi = 2; bi < LIGHT_SPR + 6; bi++)
         oamSetVisible(bi << 2, OBJ_HIDE); // NB: ids are byte offsets (x4)
 
-    setPaletteColor(0, RGB8(16, 60, 150)); // deep azure zenith
-
-    // Additive colour math with the fixed colour: BG1 = crest glow, and
-    // the backdrop too (bit 5) - the baked COLDATA table ramps white into
-    // the sky lines, so the azure pales toward the horizon for free
-    REG_CGWSEL = 0x00;
-    REG_CGADSUB = 0x21;
-
-    // Window 1 masks OBJ on the main screen; HDMA moves the window edges so
-    // the region below the waterline swallows the sprite
-    REG_WOBJSEL = 0x02;
-    REG_TMW = 0x10;
-
-    setScreenOn();
-
-    // The mode-1 -> mode-7 switch rides a scanline IRQ (camera.asm
-    // irqSwitch), freeing HDMA ch0 for the sand fade. The V+H timer
-    // fires just before hblank on the line ABOVE the switch; the NMI
-    // callback below restores mode 1 (+BG3 priority) at frame top.
-    nmiSet(vblTop);
-    REG_BGMODE = 0x09; // valid until the first IRQ fires
-    REG_HTIMEL = 260 & 0xFF; // just before hblank; the handler spins
-    REG_HTIMEH = 260 >> 8;   // on the hblank flag for the last few dots
-    REG_VTIMEL = WAVE_SKY_SWITCH - 1;
-    REG_VTIMEH = 0;
-    REG_NMITIMEN = 0xB1; // NMI + V=V,H=H timer IRQ + auto-joypad
-    irqOn();             // camera.asm: cli
-
     tick = 0;
     phaseAcc = 0;
     // start pose comes from the bake (behind the racing line's waypoint 0,
@@ -578,6 +546,18 @@ int main(void)
     // sits on the exported grid slot
     camTheta = startTheta;
     camTheta16 = (u16)startTheta << 8;
+    // pre-zero the bytes camera.asm's 16-bit u8 reads overrun (lda.l +
+    // and #$00FF grabs the NEIGHBOUR byte too): masked, so harmless - but
+    // seeding them keeps Mesen's uninitialised-read log clean, so a REAL
+    // read-before-write stands out
+    npcSinMag = 0;
+    npcSinNeg = 0;
+    npcCosMag = 0;
+    npcCosNeg = 0;
+    aimTX = 0;
+    aimTY = 0;
+    aimPX = 0;
+    aimPY = 0;
     npcA = startTheta;
     npcTrig();
     camSinVal = npcSin;
@@ -686,12 +666,125 @@ int main(void)
     lastLapTenth = 0;
     loopVbl = snes_vblank_count; // BSS garbage would poison the first
     loopFrames = 0;              // countdown accumulation
+    phase = 0;     // the physics reads waveSurfH/waveSkiRow[phase] and
+    camBufOff = 0; // waveHdma follows waveTM[phase] BEFORE the camera block
+                   // derives them on the first tick: garbage here reaches a
+                   // garbage pointer (hardware WILL deliver garbage - zeroed
+                   // emulator RAM hides it)
+    vAlong = 0; // steering reads these before the first skiSplit
+    vSide = 0;
+    raceDone = 0;
+    startHeld = 1; // the confirm press that started the race must not
+    menuT = 0;     // instantly exit the results
     buildWinTab(200, 210);
+}
 
-    // build-time debug: drive itself (the emulator test runner has no input)
-#define AUTOPILOT 0
-
+//---------------------------------------------------------------------------------
+// course select: full-screen mode 1 - the scanline IRQ is parked and the
+// wave HDMA is off, so every scanline renders the text band's BG1 + the
+// sky + the BG3 clouds. The race HDMA leaves $210D holding some sea
+// line's scroll and COLDATA holding some glow level: reset both or the
+// menu shears/tints. Menu text lives in map rows the race never shows.
+static void courseSelect(void)
+{
+    REG_NMITIMEN = 0x81; // NMI + auto-joypad; no timer IRQ during the menu
+    REG_HDMAEN = 0;      // all eight streams off: TM/scroll/COLDATA are ours
+    setScreenOff();
+    for (bi = 0; bi < LIGHT_SPR + 6; bi++)
+        oamSetVisible(bi << 2, OBJ_HIDE); // everything, player included
+    REG_BG1HOFS = 0; // write-twice pairs, back-to-back (shared prev-latch)
+    REG_BG1HOFS = 0;
+    REG_BG1VOFS = 0;
+    REG_BG1VOFS = 0;
+    REG_COLDATA = 0xE0; // fixed-colour add: all channels to zero
+    REG_TM = 0x15;      // BG1 + BG3 + OBJ (NEVER BG2 in mode 1: EXTBG jank)
+    uiClear();
+    uiFlush();
+    uiMenuClearRows();
+    uiMenuRow(14, 9, "SUPER WAVERACE");
+    uiMenuRow(18, 8, "> COURSE 1");
+    uiMenuRow(22, 10, "PRESS START");
+    setScreenOn();
+    startHeld = 1; // a confirm held over from the results must not re-fire
+    menuT = 0;
     while (1)
+    {
+        WaitForVBlank();
+        REG_BG3HOFS = (u8)(menuT >> 2); // idle cloud drift
+        REG_BG3HOFS = 0;
+        menuT++;
+        pad0 = padsCurrent(0);
+        if (!(pad0 & KEY_START))
+            startHeld = 0;
+        else if (!startHeld)
+            break;
+#if AUTOPILOT
+        if (menuT > 90)
+            break;
+#endif
+    }
+}
+
+//---------------------------------------------------------------------------------
+int main(void)
+{
+    waveTablesInit();
+    camTabsInitHeaders();
+    waveRawLoad(); // d/a arrays -> WRAM $7F before anything projects
+
+    bgInitMapTileSet7(&sea_patterns, &sea_map, &sea_palette,
+                      WAVE_PC7_SIZE, 0x0000);
+
+    setMode7(0);
+    // EXTBG spike: BG2 duplicates the mode 7 image with pixel bit 7 as a
+    // priority flag; course pixels (bit 7 set) render via BG2-high, above
+    // BG1 and OUTSIDE its colour math - crest glow no longer touches sand
+    REG_SETINI = 0x40;
+    uiInit();
+
+    // ski + buoy + NPC sheet: 192 tiles at VRAM 0x6000 (through 0x6BFF -
+    // the UI map moved to 0x7000 to make room), OBJ palette 0 (CGRAM 128+)
+    oamInitGfxSet(&ski_tiles, WAVE_SKI_SHEET, &ski_pal, 32, 0, 0x6000,
+                  OBJ_SIZE16_L32);
+    // NPC racer recolours: OBJ palettes 1-3 (CGRAM 144-191), shared tiles
+    dmaCopyCGram((u8 *)&npc_pals, 144, 96);
+    dmaCopyCGram((u8 *)&lamp_pal, 192, 32); // start-tree lamps: palette 4
+    // stacked tall racers: name table 2 right after the sheet
+    dmaCopyVram((u8 *)&tall_tiles, 0x7000, WAVE_TALL_SHEET);
+    setPaletteColor(0, RGB8(16, 60, 150)); // deep azure zenith
+
+    // Additive colour math with the fixed colour: BG1 = crest glow, and
+    // the backdrop too (bit 5) - the baked COLDATA table ramps white into
+    // the sky lines, so the azure pales toward the horizon for free
+    REG_CGWSEL = 0x00;
+    REG_CGADSUB = 0x21;
+
+    // Window 1 masks OBJ on the main screen; HDMA moves the window edges so
+    // the region below the waterline swallows the sprite
+    REG_WOBJSEL = 0x02;
+    REG_TMW = 0x10;
+
+    setScreenOn();
+
+    // The mode-1 -> mode-7 switch rides a scanline IRQ (camera.asm
+    // irqSwitch), freeing HDMA ch0 for the sand fade. The V+H timer
+    // fires just before hblank on the line ABOVE the switch; the NMI
+    // callback below restores mode 1 (+BG3 priority) at frame top.
+    nmiSet(vblTop);
+    REG_BGMODE = 0x09; // valid until the first IRQ fires
+    REG_HTIMEL = 260 & 0xFF; // just before hblank; the handler spins
+    REG_HTIMEH = 260 >> 8;   // on the hblank flag for the last few dots
+    REG_VTIMEL = WAVE_SKY_SWITCH - 1;
+    REG_VTIMEH = 0;
+    REG_NMITIMEN = 0xB1; // NMI + V=V,H=H timer IRQ + auto-joypad
+    irqOn();             // camera.asm: cli
+
+    while (1) // game states: SELECT -> (raceInit) -> RACE/RESULTS -> repeat
+    {
+    courseSelect();
+    raceInit();
+
+    while (!raceDone)
     {
         // the loop takes a variable 3-4 vblanks (see CLAUDE.md), so ALL
         // race timing accumulates real frames, never loop ticks
@@ -756,7 +849,23 @@ int main(void)
             if (goTimer)
                 goTimer--;
             if (raceState == 2)
+            {
                 pad0 &= ~(KEY_B | KEY_Y);
+                // results: once the FINISH banner has run its ~6s, a
+                // fresh START press hands back to the course select
+                if (!(pad0 & KEY_START))
+                    startHeld = 0;
+                if (finTk >= 120)
+                {
+                    if ((pad0 & KEY_START) && !startHeld)
+                        raceDone = 1;
+#if AUTOPILOT
+                    menuT++;
+                    if (menuT > 90)
+                        raceDone = 1;
+#endif
+                }
+            }
             else
             {
                 rTick += (u8)loopFrames;
@@ -1630,6 +1739,7 @@ int main(void)
             waveRotateStep(rotOfs);
         }
 #endif
+    }
     }
     return 0;
 }

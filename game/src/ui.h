@@ -36,6 +36,15 @@ void uiHudBigClear(u16 x, u16 w);
 // mode switch rides a scanline IRQ); call every frame with the others
 void uiHdma(void);
 
+// course-select helpers: uiClear blanks the band buffer (uiFlush pushes
+// it); uiMenuRow writes a console-font line into a map row BELOW the band
+// (rows >= UI_ROWS + WAVE_SKY_ROWS only - the race's mode switch hides
+// them); uiMenuClearRows blanks all of those rows. VRAM writers: call
+// under force blank or in vblank.
+void uiClear(void);
+void uiMenuRow(u16 row, u16 x, char *s);
+void uiMenuClearRows(void);
+
 // write text / a right-aligned decimal into the band (rows 0..UI_ROWS-1)
 void uiPrint(u16 x, u16 y, char *s);
 void uiPrintNum(u16 x, u16 y, u16 val, u16 width);

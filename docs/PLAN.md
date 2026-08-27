@@ -212,10 +212,11 @@ Phases (1 done):
    PPU-multiplier a synthesis), collision packed 2bpc, course geometry
    (counts/start/grid/gates) runtime. Each step verified bit-exact
    (tickshot/tabdump harnesses; exhaustive collision checksum).
-2. **State machine** — SELECT (full-screen mode 1, gradient font, IRQ
-   parked) -> RACE -> RESULTS -> SELECT; resetRace() owning ALL race BSS
-   (fixes the latent read-before-write list in CLAUDE.md); dual-race
-   harness proving replay == first run.
+2. **State machine** ✓ — SELECT (full-screen mode 1, console font, IRQ
+   parked, HDMA off, $210D/COLDATA reset) -> RACE -> RESULTS (START
+   returns) -> SELECT; raceInit() owns ALL race BSS (the latent
+   read-before-write list is fixed - only tcc's $16/17 scratch flags
+   remain, benign); two-race harness proves race 2 == race 1 bit-exact.
 3. **Multi-bake** — course folders, map RLE + decoder, wave-profile pool
    with dedupe, ROM descriptor table + courseLoad(), byte-budget report.
 4. **Palette + ambient per course** — painter palette editor + ambient

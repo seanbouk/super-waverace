@@ -15,7 +15,9 @@ side builds a 0–5 power chain (HUD bar) that scales thrust and top speed from
 67% to 133%; a wrong-side pass resets it to 0 — you earn your speed. Dithered
 clouds drift through the sky with a heading-linked parallax; the racers are
 double-height arcade sprites authored in Photoshop, with four full rider
-palettes. Verified on real hardware up to the Aug-21 build (race, power,
+palettes. The game boots to a course-select screen (START to race, START on
+the results to return) — the front door for the multi-course work in
+progress. Verified on real hardware up to the Aug-21 build (race, power,
 gradient HUD, start tree, clouds — the spawn drop passes behind the clouds,
 which is a feature); pending a CRT pass: the tall racers / second OBJ table,
 the scanline-IRQ mode switch + sand distance fade, and the new rider art.

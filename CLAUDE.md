@@ -42,7 +42,9 @@ Mesen.exe --testrunner --timeout=30 <rom> <script.lua>   # arg order-free
   superwaverace.sym and MOVE between builds - always re-grep.
 - **Scripted controller input does NOT work in testrunner mode.** To test
   driving, flip `#define AUTOPILOT 1` in `game/src/main.c` (steers around
-  the racing-line waypoints at full throttle — laps in ~750-900 ticks) and
+  the racing-line waypoints at full throttle — laps in ~750-900 ticks;
+  also auto-confirms the course select after ~90 frames and the results
+  after the FINISH banner, so the whole state loop cycles hands-free) and
   rebuild; ALWAYS set back to 0 for release builds.
 - The on-screen debug UI is the other half of verification (flip DEBUG_UI
   to 1 in main.c; 0 shows the race HUD): X/Y/H/V, BUILD profiler (~326
@@ -59,9 +61,11 @@ Mesen.exe --testrunner --timeout=30 <rom> <script.lua>   # arg order-free
   read-before-write BSS makes same-ROM runs diverge under Random!) -
   restore Random after. Tick-keyed screenshots still jitter +/-1 frame
   (HUD clock digits differ); compare data, not pixels.
-- BSS reads Mesen flags before first write (the nondeterminism source,
-  pre-existing, to fix with the race-replay reset work): $7E3CE5/3CE9,
-  $7E3C6A/6B/6E/6F, camDP $16/17, plus one garbage-derived address.
+- The read-before-write BSS list is FIXED (raceInit seeds phase/camBufOff/
+  vAlong/vSide, plus the trig quads and aim pipes camera.asm's 16-bit u8
+  reads overrun - masked, seeded anyway so the Mesen log stays clean).
+  The ONLY expected uninit flags now are $000016/17: tcc's own DP scratch,
+  a codegen artifact, benign. Anything else in the log is a NEW bug.
 
 ## Hardware/toolchain gotchas (each cost real debugging time)
 
@@ -299,6 +303,14 @@ move waypoint 0/1 in the painter to move the grid.
 
 ## State / not yet done
 
+- Game flow: boot -> course select (full-screen mode 1, console font, timer
+  IRQ parked + HDMA off + $210D/COLDATA reset - see courseSelect) -> race ->
+  results (START returns to select). raceInit owns EVERY race variable;
+  replay verified bit-identical (race 2 trace == race 1, flowshot pattern in
+  git history). Menu text lives in BG1 map rows below the sky band - rows
+  the race's mode switch never shows, so menu and race share the map with
+  zero cleanup. Multi-course is the active project: docs/PLAN.md
+  "Multi-course" has the agreed design; phases 1-2 done.
 - Race mode in progress — see docs/PLAN.md "Race mode" for the agreed design
   and phase list. Done: phases 1-4 — racing line + laps + waypoint autopilot;
   3 kinematic NPCs (sprites 5-7); rear-view NPC ski art at the 5 buoy scales

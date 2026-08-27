@@ -169,6 +169,39 @@ void uiHudBigClear(u16 x, u16 w)
     }
 }
 
+void uiClear(void) // every band cell -> the font space
+{
+    u16 i;
+    for (i = 0; i < UI_COLS * UI_ROWS; i++)
+        uiMap[i] = UI_ATTR;
+}
+
+// Menu text: console-font words straight into BG1 map rows BELOW the band
+// and the sky tiles (rows UI_ROWS+WAVE_SKY_ROWS..31). The race never shows
+// these rows - the scanline IRQ has switched to mode 7 by then - so the
+// menu and the race share the map with zero cleanup. VRAM writes: call
+// under force blank or in vblank.
+static u16 menuRow[UI_COLS];
+
+void uiMenuRow(u16 row, u16 x, char *s)
+{
+    u16 i;
+    for (i = 0; i < UI_COLS; i++)
+        menuRow[i] = UI_ATTR;
+    while (*s)
+        menuRow[x++] = UI_ATTR | (u16)(*s++ - 32);
+    dmaCopyVram((u8 *)menuRow, 0x4000 + row * 32, 64);
+}
+
+void uiMenuClearRows(void)
+{
+    u16 r;
+    for (r = 0; r < UI_COLS; r++)
+        menuRow[r] = UI_ATTR;
+    for (r = UI_ROWS + WAVE_SKY_ROWS; r < 32; r++)
+        dmaCopyVram((u8 *)menuRow, 0x4000 + r * 32, 64);
+}
+
 void uiPrint(u16 x, u16 y, char *s)
 {
     u16 *p = uiMap + y * UI_COLS + x;
