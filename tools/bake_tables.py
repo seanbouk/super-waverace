@@ -450,8 +450,8 @@ SKI_PALETTE = [
     (0, 0, 0),        # 0 transparent
     (0, 0, 0),        # 1 black / outline
     (255, 255, 255),  # 2 white
-    (56, 202, 220),   # 3 hull light: saturated cyan, against the warm-
-    (20, 118, 134),   # 4 hull dark      yellow accent (authored as grey)
+    (112, 58, 188),   # 3 hull light: red-leaning indigo, darker than
+    (60, 28, 110),    # 4 hull dark      rider 4's (authored as grey)
     (241, 175, 105),  # 5 skin
     (174, 107, 35),   # 6 skin shadow
     (42, 110, 212),   # 7 clothing A (blue)
