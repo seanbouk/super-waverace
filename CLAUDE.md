@@ -321,5 +321,9 @@ painter to move the grid.
   No sound (jam judges music — PVSnesLib has an .it tracker driver, unused);
   sand is collidable but there's no "run aground" state; no title screen.
 - PAL: accepted trade = runs slower (30Hz loop becomes 25Hz); must still boot.
-- Real-hardware verified: EXTBG rendering, full HDMA stack, general play.
+- Real-hardware verified: EXTBG rendering, full HDMA stack, general play,
+  BG3 clouds, power/HUD/start-tree (Aug-21 build). PENDING a CRT pass:
+  the tall racers / OBJ name table 2, the scanline-IRQ mode switch + sand
+  distance-fade CGRAM HDMA, the Photoshop rider art + 5-pair palettes,
+  and the teal shore rework.
 - CPU: ~45% of the 2-frame loop free; ROM ~58% free; CGRAM map in README.

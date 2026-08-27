@@ -13,9 +13,12 @@ rope float-lines and L/R buoys, collision with slide-along, and speed-driven
 wake spray under the hull. Buoys are judged: passing each one on its correct
 side builds a 0–5 power chain (HUD bar) that scales thrust and top speed from
 67% to 133%; a wrong-side pass resets it to 0 — you earn your speed. Dithered
-clouds drift through the sky with a heading-linked parallax. Verified on real
-hardware (full current build: race, power, gradient HUD, start tree, clouds —
-the spawn drop passes behind the clouds, which is a feature).
+clouds drift through the sky with a heading-linked parallax; the racers are
+double-height arcade sprites authored in Photoshop, with four full rider
+palettes. Verified on real hardware up to the Aug-21 build (race, power,
+gradient HUD, start tree, clouds — the spawn drop passes behind the clouds,
+which is a feature); pending a CRT pass: the tall racers / second OBJ table,
+the scanline-IRQ mode switch + sand distance fade, and the new rider art.
 See `docs/PLAN.md` "Race mode" for what's
 left (multi-course) and for important performance findings. Target:
 [SNES DEV Game Jam 2026](https://itch.io/jam/snes-dev-game-jam-2026) — LoROM,
@@ -149,7 +152,8 @@ correctly.
 baked switch line just above the wave cycle's highest horizon (a scanline timer
 IRQ, fired into hblank, switches the whole PPU mode mid-frame — this freed an
 HDMA channel to repaint the dry sand's palette entry per scanline, so the beach
-grows paler and less saturated with distance while ignoring the swell entirely:
+runs a full lit range — richer and darker up close, paler and washed toward
+the horizon — while ignoring the swell entirely:
 the sand's fixed light divorces land from the breathing water), giving a 4-row
 HUD band plus a tiled
 sky: a 16-colour azure gradient with 2D dithering (palette row 2), far smoother
@@ -197,7 +201,7 @@ The line in the sand — update this table whenever an allocation changes.
 | 16–31 | UI text | Font palette for the mode-1 text band (palette row 1); 29–30 = BG3 cloud white/shade (2bpp group 7) |
 | 32–47 | Sky band | Palette row 2: the mode-1 sky gradient tiles (loaded over CGRAM at boot — nothing else may live here) |
 | 48–49 | Start line | Checker black / true white (glow-exempt) |
-| 50 | Shore teal | Sandy seafoam teal for the surf band over wet sand (glow-exempt) |
+| 50 | Shore teal | Sandy seafoam teal: the shallows tile's land edge, dithering into the bluer teal (glow-exempt) |
 | 51–63 | BG reserve | Unallocated |
 | 64–111 | HUD ramps | Palette rows 4–6: the gradient-font colour ramps (titles / value tops / value bottoms) |
 | 112–127 | BG reserve | Unallocated |
