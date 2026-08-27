@@ -892,15 +892,21 @@ def decode_png(path):
     return [list(r) for r in rows], pal, trns
 
 
-def load_pattern():
-    src = os.path.join(ASSETS, "sea_pattern.png")
-    if os.path.exists(src):
+def load_pattern(cdir=None):
+    # per-course texture wins; then the shared assets/sea_pattern.png,
+    # then the procedural fallback
+    src = None
+    if cdir and os.path.exists(os.path.join(cdir, "sea_pattern.png")):
+        src = os.path.join(cdir, "sea_pattern.png")
+    elif os.path.exists(os.path.join(ASSETS, "sea_pattern.png")):
+        src = os.path.join(ASSETS, "sea_pattern.png")
+    if src:
         pat, palette, _ = decode_png(src)
         size = len(pat)
         assert size == len(pat[0]), "pattern must be square"
         assert 1024 % size == 0 and size % 8 == 0, \
             "pattern size must divide 1024 and be a multiple of 8"
-        print("using designed pattern: assets/sea_pattern.png ({0}x{0})".format(size))
+        print("pattern {0} ({1}x{1})".format(src, size))
         return pat, palette
     return procedural_pattern()
 
@@ -924,8 +930,7 @@ COURSE_COLORS = {
 }
 
 
-def load_course():
-    path = os.path.join(ASSETS, "course.json")
+def load_course(path):
     if not os.path.exists(path):
         return None
     with open(path) as f:
@@ -1327,54 +1332,190 @@ def dw_lines(words):
     return "\n".join(lines)
 
 
-def main():
-    os.makedirs(OUT_DIR, exist_ok=True)
-    phases = P["phases"]
+# ---- multi-course machinery ------------------------------------------------
+# Courses live in assets/courses/<nn>_<name>/course.json (sorted by folder
+# name; the menu name is the folder name past the underscore, uppercased).
+# A course may carry its own sea_pattern.png / water_params.json, and names
+# a wave profile ("wave_profile": "calm" -> assets/waves/calm.json, a wave
+# lab export). Identical profiles dedupe: courses share the baked tables.
+# The CAMERA keys are global by design (the a-from-d synthesis, sprite
+# scale bands and ski row all assume it): a profile that disagrees with
+# the default profile's camera fails the bake.
 
-    # -- texture + course --
-    pat, palette = load_pattern()
+CAMERA_KEYS = ("camH", "pitch", "fovV", "fovH", "skiDist")
+WAVE_KEYS = ("amp", "wavelength", "maxX", "phases", "framesPerPhase",
+             "crestGlow", "glowGamma")
+MAX_PHASES = 32
+MAX_COURSES = 8
+
+
+def find_courses():
+    legacy = os.path.join(ASSETS, "course.json")
+    assert not os.path.exists(legacy), \
+        "assets/course.json has moved: put it at assets/courses/<nn>_<name>/course.json"
+    root = os.path.join(ASSETS, "courses")
+    out = []
+    if os.path.isdir(root):
+        for d in sorted(os.listdir(root)):
+            cj = os.path.join(root, d, "course.json")
+            if os.path.isfile(cj):
+                out.append((d, os.path.join(root, d)))
+    return out
+
+
+def course_menu_name(folder):
+    name = folder.split("_", 1)[1] if "_" in folder else folder
+    name = name.replace("_", " ").upper()[:12]
+    for ch in name:  # the menu uses the console font: printable ASCII
+        assert 32 <= ord(ch) < 127, "course name has non-ASCII: " + name
+    return name
+
+
+def set_profile(pp):
+    """Point the module-level raycast at this profile's params."""
+    global K_WAVE
+    for k in CAMERA_KEYS:
+        assert k not in pp or pp[k] == P[k], \
+            "profile changes CAMERA key {0} - the camera is global".format(k)
+    for k in WAVE_KEYS:
+        P[k] = pp[k]
+    n = max(1, round(1024.0 / float(P["wavelength"])))
+    P["wavelength"] = 1024.0 / n
+    assert P["phases"] & (P["phases"] - 1) == 0, "phases must be a power of two"
+    assert P["phases"] <= MAX_PHASES, "profile exceeds WAVE_MAX_PHASES"
+    assert P["framesPerPhase"] in (1, 2, 4, 8), "framesPerPhase must be 1/2/4/8"
+    K_WAVE = 2 * math.pi / P["wavelength"]
+
+
+def load_wave_profile(name):
+    path = os.path.join(ASSETS, "waves", name + ".json")
+    assert os.path.exists(path), "wave profile missing: " + path
+    with open(path) as f:
+        d = json.load(f)
+    return d
+
+
+def encode_delta(words):
+    """First word raw, then one signed byte per word ($80 = escape + raw
+    word). The decoder is waveRawLoad pass 1 in camera.asm."""
+    enc = bytearray()
+    prev = None
+    for w in words:
+        if prev is None:
+            enc += struct.pack("<H", w)
+        else:
+            dlt = w - prev
+            if -127 <= dlt <= 127:
+                enc.append(dlt & 0xFF)
+            else:
+                enc.append(0x80)
+                enc += struct.pack("<H", w)
+        prev = w
+    return bytes(enc)
+
+
+def encode_map(m):
+    """Mode-7 map codec: the water texture tiles the map with a 16-entry
+    period, so plain RLE FAILS (adjacent entries differ) but copy-from-16-
+    back crushes it. Token: bit7 set = copy (n & $7F) entries from dst-16;
+    else n literal bytes follow. Counts 1-127; decoder (mapTo7F,
+    camera.asm) stops at the known 16384. Entries 0-15 are always
+    literals (nothing to copy from)."""
+    out = bytearray()
+    i, n = 0, len(m)
+    while i < n:
+        if i >= 16 and m[i] == m[i - 16]:
+            run = 0
+            while i + run < n and run < 127 and m[i + run] == m[i + run - 16]:
+                run += 1
+            out.append(0x80 | run)
+            i += run
+        else:
+            lit = 0
+            while (i + lit < n and lit < 127
+                   and (i + lit < 16 or m[i + lit] != m[i + lit - 16])):
+                lit += 1
+            out.append(lit)
+            out += m[i:i + lit]
+            i += lit
+    return bytes(out)
+
+
+def bake_profile(pp, sky_switch, sky_ref):
+    """All per-profile tables (raycasts under set_profile)."""
+    set_profile(pp)
+    phases = P["phases"]
+    out = {"phases": phases,
+           "steps": round(256.0 * phases / P["wavelength"]),
+           "mask": phases * 256 - 1,
+           "tm": [], "g": [], "sky": [], "ski_row": [], "surf_h": []}
+    raw_d = []
+    for p in range(phases):
+        phi = 2 * math.pi * p / phases
+        tm_tab, g_tab, n_sky = phase_tables(phi, sky_ref, sky_switch)
+        out["tm"].append(tm_tab)
+        out["g"].append(g_tab)
+        out["sky"].append(n_sky)
+        d_words, _ = phase_raw(phi)
+        raw_d += d_words
+        row = SCANLINES - 1
+        while row > 0 and d_words[row] < P["skiDist"]:
+            row -= 1
+        out["ski_row"].append(row)
+        out["surf_h"].append(round(P["amp"] * math.sin(K_WAVE * P["skiDist"] + phi)))
+    out["rawd"] = encode_delta(raw_d)
+    out["raw_words"] = len(raw_d)
+    return out
+
+
+def bake_course(cdir, cjson_extra):
+    """Everything derived from one course folder: canvas -> tiles/map/pal,
+    packed collision, gates, start grid, rotation colours, sand fade
+    (needs the GLOBAL sky_switch - filled in by the caller)."""
+    c = {}
+    pat, palette = load_pattern(cdir)
     for idx, rgb in COURSE_COLORS.items():
         palette[idx] = rgb
-    palette[CHECK_DARK] = (16, 16, 20)    # start-line checker black
-    palette[CHECK_WHITE] = (250, 250, 250) # start-line checker white
-    rs, rc = int(P["rotStart"]), int(P["rotCount"])
+    palette[CHECK_DARK] = (16, 16, 20)     # start-line checker black
+    palette[CHECK_WHITE] = (250, 250, 250)  # start-line checker white
+    wp = dict(rotStart=P["rotStart"], rotCount=P["rotCount"],
+              rotFrames=P["rotFrames"])
+    wpath = os.path.join(cdir, "water_params.json")
+    if not os.path.exists(wpath):
+        wpath = os.path.join(ASSETS, "water_params.json")
+    if os.path.exists(wpath):
+        with open(wpath) as f:
+            wj = json.load(f)
+        for k in ("rotStart", "rotCount", "rotFrames"):
+            if k in wj:
+                wp[k] = int(wj[k])
+    rs, rc = wp["rotStart"], wp["rotCount"]
     palette[SHAL_BLUE] = max((palette[rs + i] for i in range(rc)), key=sum)
-    course = load_course()
-    if course:
-        print("course: assets/course.json ({0} ropes, {1} buoys, {2} waypoints)"
-              .format(len(course[1]), len(course[2]), len(course[3])))
+    course = load_course(os.path.join(cdir, "course.json"))
+    assert course, "unreadable course.json in " + cdir
 
-    # Start grid derived from the racing line: the four skis line up just
-    # behind waypoint 0 facing along the opening segment, player at the
-    # back. Exported in world units (the C side derives the camera from the
-    # ski slot). Falls back to the historical spawn when there is no path.
-    if course and len(course[3]) >= 2:
-        p = course[3]
-        gx, gy = p[0]
-        gdx = (p[1][0] - gx + 512) % 1024 - 512
-        gdy = (p[1][1] - gy + 512) % 1024 - 512
-        gl = math.hypot(gdx, gdy) or 1.0
-        gux, guy = gdx / gl, gdy / gl
-        gqx, gqy = -guy, gux  # lateral, to the line's left
+    # start grid from the racing line (player at the back, facing along
+    # the opening segment; world units - the C side derives the camera)
+    assert len(course[3]) >= 2, cdir + ": course needs a racing line"
+    p = course[3]
+    gx, gy = p[0]
+    gdx = (p[1][0] - gx + 512) % 1024 - 512
+    gdy = (p[1][1] - gy + 512) % 1024 - 512
+    gl = math.hypot(gdx, gdy) or 1.0
+    gux, guy = gdx / gl, gdy / gl
+    gqx, gqy = -guy, gux  # lateral, to the line's left
 
-        def grid_slot(back, lat):
-            return (round((gx - gux * back + gqx * lat) * 4) & 4095,
-                    round((gy - guy * back + gqy * lat) * 4) & 4095)
+    def grid_slot(back, lat):
+        return (round((gx - gux * back + gqx * lat) * 4) & 4095,
+                round((gy - guy * back + gqy * lat) * 4) & 4095)
 
-        start_slot = grid_slot(44, 0)
-        npc_slots = [grid_slot(8, -28), grid_slot(18, 28), grid_slot(30, -8)]
-        start_theta = round(math.atan2(gdx, gdy) * 128 / math.pi) & 255
-    else:
-        start_slot = (2048, 968)
-        npc_slots = [(1950, 1020), (2148, 1084), (2050, 1148)]
-        start_theta = 0
+    c["start_slot"] = grid_slot(44, 0)
+    c["npc_slots"] = [grid_slot(8, -28), grid_slot(18, 28), grid_slot(30, -8)]
+    c["start_theta"] = round(math.atan2(gdx, gdy) * 128 / math.pi) & 255
+
     canvas, coll = compose_canvas(pat, course)
-    # EXTBG: set bit 7 on course pixels -> they render via BG2-high (above
-    # BG1, colour-math-free); colour comes from the low 7 bits so the
-    # palette layout is untouched
-    # per-PIXEL exemption: anything sand-coloured (beach, wet-sand line,
-    # sandy shallows) plus the rope cord and floats escape the glow; foam,
-    # pale shallows, calm wake and open water keep the crest highlights
+    # EXTBG: bit 7 on course pixels -> BG2-high, above BG1 and outside its
+    # colour math (crest glow never touches sand); colour = low 7 bits
     exempt = (SAND, SAND_SH, WET_SAND, FLOAT_A, TEAL, TEAL_SAND,
               CHECK_DARK, CHECK_WHITE)
     for row in canvas:
@@ -1390,85 +1531,162 @@ def main():
                 row = canvas[ty * 8 + py]
                 for px in range(8):
                     row[tx * 8 + px] = pc7[base + py * 8 + px]
-    with open(os.path.join(OUT_DIR, "sea.pc7"), "wb") as f:
-        f.write(pc7)
-    with open(os.path.join(OUT_DIR, "sea.mp7"), "wb") as f:
-        f.write(mp7)
-    with open(os.path.join(OUT_DIR, "sea.pal"), "wb") as f:
-        f.write(pal)
-    write_png(os.path.join(OUT_DIR, "sea.png"),
-              [bytes(px & 0x7F for px in row) for row in canvas],
-              palette)  # preview only (priority bit masked)
+    c["preview"] = ([bytes(px & 0x7F for px in row) for row in canvas], palette)
+    c["pc7"] = pc7
+    c["mp7_rle"] = encode_map(mp7)
+    c["pal"] = pal
+    packed = bytearray(len(coll) // 4)
+    for ci, cv in enumerate(coll):
+        assert cv < 4, "collision cell value overflows 2 bits"
+        packed[ci >> 2] |= cv << ((ci & 3) * 2)
+    c["coll"] = bytes(packed)
+    c["coll_sum"] = sum(coll) & 0xFFFF
+    c["course"] = course
+    c["gates"] = order_gates(course)
+    c["rot"] = wp
+    rot_colors = []
+    for i in range(wp["rotCount"]):
+        r, g, b = palette[wp["rotStart"] + i]
+        rot_colors.append(((b >> 3) << 10) | ((g >> 3) << 5) | (r >> 3))
+    c["rot_colors"] = rot_colors
+    return c
 
-    # -- HDMA tables (camera-independent) + raw arrays for the runtime builder --
-    asm = ['.include "hdr.asm"', ""]
-    externs, inits = [], {"tm": [], "g": []}
-    arr_name = {"tm": "waveTM", "g": "waveG"}
-    total = 0
-    raw_d, raw_a, sky_counts, ski_rows, surf_hs = [], [], [], [], []
-    # horizon extremes across the cycle: deepest normalises the gradient,
-    # highest (minus a margin, floored to a tile row) sets the mode switch
-    horizons = [raycast_phase(2 * math.pi * p / phases)[0]
-                for p in range(phases)]
-    sky_ref = max(horizons)
-    sky_switch = ((min(horizons) - SKY_SAFE) // 8) * 8
+
+def sand_fade_table(sky_switch):
+    """HDMA ch0 hold-run table: CGRAM entry 8 (dry sand) repainted down the
+    frame - paler/washed far, richer/darker near; wave-phase independent BY
+    DESIGN (divorces the land's light from the breathing sea)."""
+    sand_far = (248, 244, 228)   # pale horizon, still warm-tinted
+    sand_deep = (212, 184, 120)  # darker + more saturated at the ski
+    fade = []
+    sand_mid = (sky_switch + 224) // 2
+    for y in range(224):
+        if y <= sand_mid:
+            t = 0.0 if y <= sky_switch else \
+                (y - sky_switch) / float(sand_mid - sky_switch)
+            a, b = sand_far, COURSE_COLORS[SAND]
+        else:
+            t = (y - sand_mid) / float(223 - sand_mid)
+            a, b = COURSE_COLORS[SAND], sand_deep
+        c5 = [round(f + (n - f) * t) >> 3 for f, n in zip(a, b)]
+        fade.append((c5[2] << 10) | (c5[1] << 5) | c5[0])
+    tab = bytearray()
+    y = 0
+    while y < 224:
+        run = 1
+        while y + run < 224 and fade[y + run] == fade[y] and run < 127:
+            run += 1
+        tab += bytes((run, SAND, SAND, fade[y] & 0xFF, fade[y] >> 8))
+        y += run
+    tab.append(0)
+    return bytes(tab)
+
+
+def main():
+    os.makedirs(OUT_DIR, exist_ok=True)
+
+    # ---- discover courses + resolve wave profiles (deduped) ----
+    found = find_courses()
+    assert found, "no courses under assets/courses/<nn>_<name>/course.json"
+    assert len(found) <= MAX_COURSES, "too many courses"
+    default_prof = {k: P[k] for k in WAVE_KEYS}
+    profiles, prof_names, prof_keys = [], [], []
+    course_meta = []  # (folder, dir, menu name, profile index)
+    for folder, cdir in found:
+        with open(os.path.join(cdir, "course.json")) as f:
+            cj = json.load(f)
+        pname = cj.get("wave_profile")
+        pp = dict(default_prof)
+        if pname:
+            pj = load_wave_profile(pname)
+            for k in WAVE_KEYS:
+                if k in pj:
+                    pp[k] = pj[k]
+            for k in CAMERA_KEYS:
+                assert k not in pj or pj[k] == P[k], \
+                    "{0}: profile {1} changes camera key {2}".format(
+                        folder, pname, k)
+        key = tuple(pp[k] for k in WAVE_KEYS)
+        if key in prof_keys:
+            pi = prof_keys.index(key)
+        else:
+            pi = len(profiles)
+            prof_keys.append(key)
+            profiles.append(pp)
+            prof_names.append(pname or "default")
+        course_meta.append((folder, cdir, course_menu_name(folder), pi))
+
+    # ---- global sky: the switch is the min across ALL profiles' horizons
+    # (the roughest course sets the band), the gradient ref the max ----
+    all_h = []
+    for pp in profiles:
+        set_profile(pp)
+        all_h += [raycast_phase(2 * math.pi * p / P["phases"])[0]
+                  for p in range(P["phases"])]
+    sky_ref = max(all_h)
+    sky_switch = ((min(all_h) - SKY_SAFE) // 8) * 8
     assert UI_LINES + 8 <= sky_switch <= 127, \
         "mode-1 sky band needs UI_LINES+8 <= switch <= 127 (HDMA count)"
     sky_gfx, sky_pal2, sky_rows = build_sky_band(sky_switch, sky_ref)
-    # sky rows live at 0x5C00 and must not reach the OBJ sheet at 0x6000
     assert SKY_CHAR0 + sky_rows <= 512, "sky tiles overflow into the OBJ sheet"
-    for p in range(phases):
-        phi = 2 * math.pi * p / phases
-        tm_tab, g_tab, n_sky = phase_tables(phi, sky_ref, sky_switch)
-        tabs = {"tm": tm_tab, "g": g_tab}
-        sky_counts.append(n_sky)
-        d_words, a_words = phase_raw(phi)
-        raw_d += d_words
-        raw_a += a_words
-        # jet ski: screen row of the rendered surface at skiDist (scan from
-        # the bottom; occlusion means the first row at/beyond the distance
-        # is the crest the ski visually rides), and the wave height there
-        row = SCANLINES - 1
-        while row > 0 and d_words[row] < P["skiDist"]:
-            row -= 1
-        ski_rows.append(row)
-        surf_hs.append(round(P["amp"] * math.sin(K_WAVE * P["skiDist"] + phi)))
-        asm.append('.section ".wave{0}" superfree'.format(p))
-        for name in ("tm", "g"):
-            label = "wave_{0}_p{1}".format(name, p)
-            total += len(tabs[name])
-            asm.append(label + ":")
-            asm.append(db_lines(tabs[name]))
-            externs.append("extern char {0};".format(label))
-            inits[name].append("    {0}[{1}] = (u8 *)&{2};".format(arr_name[name], p, label))
+
+    # ---- bake every profile and course ----
+    baked_profs = [bake_profile(pp, sky_switch, sky_ref) for pp in profiles]
+    baked_courses = [bake_course(cdir, None) for _, cdir, _, _ in course_meta]
+    sand_tab = sand_fade_table(sky_switch)  # shared until per-course palettes
+    for i, ((folder, cdir, mname, pi), bc) in enumerate(
+            zip(course_meta, baked_courses)):
+        rows, pal = bc["preview"]
+        write_png(os.path.join(OUT_DIR, "sea{0}.png".format(i)), rows, pal)
+        if i == 0:  # compat name for README/web tooling
+            write_png(os.path.join(OUT_DIR, "sea.png"), rows, pal)
+        print("course {0} '{1}': {2} buoys, {3} waypoints, profile {4}, "
+              "map {5}B rle, coll sum {6}".format(
+                  i, mname, len(bc["course"][2]), len(bc["course"][3]),
+                  prof_names[pi], len(bc["mp7_rle"]), bc["coll_sum"]))
+
+    # ---- wavetables.asm ----
+    asm = ['.include "hdr.asm"', ""]
+    externs = []
+    for pf, bp in enumerate(baked_profs):
+        for p in range(bp["phases"]):
+            asm.append('.section ".wavf{0}p{1}" superfree'.format(pf, p))
+            for name in ("tm", "g"):
+                label = "wave_{0}_f{1}p{2}".format(name, pf, p)
+                asm.append(label + ":")
+                asm.append(db_lines(bp[name][p]))
+                externs.append("extern char {0};".format(label))
+            asm.append(".ends")
+            asm.append("")
+        asm.append('.section ".wraw{0}" superfree'.format(pf))
+        asm.append("wave_rawd_f{0}:".format(pf))
+        asm.append(db_lines(bp["rawd"]))
         asm.append(".ends")
         asm.append("")
+        externs.append("extern char wave_rawd_f{0};".format(pf))
 
-    # raw distance array, delta-encoded (waveRawLoad expands it into WRAM
-    # $7F and synthesises the a array from it - see a_from_d): first word
-    # raw, then one signed byte per word ($80 = escape + raw word; d is
-    # non-increasing within a phase so deltas are small, and the phase
-    # seams ride the escape). The a words are not stored at all.
-    enc = bytearray()
-    prev = None
-    for w in raw_d:
-        if prev is None:
-            enc += struct.pack("<H", w)
-        else:
-            dlt = w - prev
-            if -127 <= dlt <= 127:
-                enc.append(dlt & 0xFF)
-            else:
-                enc.append(0x80)
-                enc += struct.pack("<H", w)
-        prev = w
-    print("wave raw: {0} d-words -> {1} bytes encoded (a computed at load; "
-          "was {2} bytes raw)".format(len(raw_d), len(enc), 4 * len(raw_d)))
-    asm.append('.section ".wave_raw" superfree')
-    asm.append("wave_rawd:")
-    asm.append(db_lines(bytes(enc)))
-    asm.append(".ends")
-    asm.append("")
+    for ci, bc in enumerate(baked_courses):
+        asm.append('.section ".crs{0}t" superfree'.format(ci))
+        asm.append("crs{0}_tiles:".format(ci))
+        asm.append(db_lines(bc["pc7"]))
+        asm.append(".ends")
+        asm.append('.section ".crs{0}d" superfree'.format(ci))
+        asm.append("crs{0}_map:".format(ci))
+        asm.append(db_lines(bc["mp7_rle"]))
+        # palette: ONLY the entries the course owns - 1-15 (water pattern +
+        # course block; 0 is the backdrop, owned by the sky) and 48-51
+        # (checker + shallows teal). A full 512-byte load would wipe the
+        # UI/sky/HUD/OBJ palettes, which load once at boot.
+        asm.append("crs{0}_pal1:".format(ci))
+        asm.append(db_lines(bc["pal"][2:32]))
+        asm.append("crs{0}_pal48:".format(ci))
+        asm.append(db_lines(bc["pal"][96:104]))
+        asm.append("crs{0}_coll:".format(ci))
+        asm.append(db_lines(bc["coll"]))
+        asm.append(".ends")
+        asm.append("")
+        for lbl in ("tiles", "map", "pal1", "pal48", "coll"):
+            externs.append("extern char crs{0}_{1};".format(ci, lbl))
 
     # s0.7 sine table for the camera heading (256 binary degrees)
     sin_bytes = [(round(127 * math.sin(2 * math.pi * i / 256))) & 0xFF
@@ -1476,22 +1694,6 @@ def main():
     asm.append('.section ".camsin" superfree')
     asm.append("camSinTab:")
     asm.append(db_lines(sin_bytes))
-    asm.append(".ends")
-    asm.append("")
-
-    # collision map (128x128 cells, 0 water / 1 sand / 2 rope), packed 2
-    # bits per cell - cell i lives in byte i>>2 at bit (i&3)*2 (collProbe
-    # unpacks). The sum line is the exhaustive-unpack check's expected
-    # value (sum of all 16384 cells, mod 65536).
-    packed_coll = bytearray(len(coll) // 4)
-    for ci, cv in enumerate(coll):
-        assert cv < 4, "collision cell value overflows 2 bits"
-        packed_coll[ci >> 2] |= cv << ((ci & 3) * 2)
-    print("collision: {0} bytes packed (sum {1})".format(
-        len(packed_coll), sum(coll) & 0xFFFF))
-    asm.append('.section ".wave_coll" superfree')
-    asm.append("wave_coll:")
-    asm.append(db_lines(bytes(packed_coll)))
     asm.append(".ends")
     asm.append("")
 
@@ -1535,70 +1737,31 @@ def main():
     asm.append(".ends")
     asm.append("")
 
-    # sand distance-fade: HDMA channel 0 (mode 3 -> $2121) rewrites CGRAM
-    # entry 8 (dry sand) down the frame - paler and less saturated in the
-    # distance. The table ignores wave phase BY DESIGN: the sand's light
-    # stays fixed while the water breathes, which divorces land from sea.
-    # Entries are hold-runs (write once, wait N lines): ~a dozen cover the
-    # frame. The mode switch that used to own ch0 rides a scanline IRQ now.
-    sand_far = (248, 244, 228)   # pale horizon, still warm-tinted
-    sand_deep = (212, 184, 120)  # darker + more saturated at the ski
-    fade = []
-    # the BASE sand colour sits at the region's midpoint: far half fades
-    # up to pale, near half keeps deepening past base toward sand_deep
-    sand_mid = (sky_switch + 224) // 2
-    for y in range(224):
-        if y <= sand_mid:
-            t = 0.0 if y <= sky_switch else \
-                (y - sky_switch) / float(sand_mid - sky_switch)
-            a, b = sand_far, COURSE_COLORS[SAND]
-        else:
-            t = (y - sand_mid) / float(223 - sand_mid)
-            a, b = COURSE_COLORS[SAND], sand_deep
-        c5 = [round(f + (n - f) * t) >> 3 for f, n in zip(a, b)]
-        fade.append((c5[2] << 10) | (c5[1] << 5) | c5[0])
-    sand_tab = bytearray()
-    y = 0
-    while y < 224:
-        run = 1
-        while y + run < 224 and fade[y + run] == fade[y] and run < 127:
-            run += 1
-        sand_tab += bytes((run, SAND, SAND, fade[y] & 0xFF, fade[y] >> 8))
-        y += run
-    sand_tab.append(0)
+    # sand distance-fade table (shared while palettes are; per-course when
+    # the ambient-light pass lands)
     asm.append('.section ".sandfade" superfree')
     asm.append("sand_fade:")
     asm.append(db_lines(sand_tab))
     asm.append(".ends")
     asm.append("")
+    externs.append("extern char sand_fade;")
 
     with open(os.path.join(OUT_DIR, "wavetables.asm"), "w", newline="\n") as f:
         f.write("\n".join(asm))
 
-    # -- rotation: unrolled palette writes with literal colours (no far reads) --
-    rot_start, rot_count, rot_frames = P["rotStart"], P["rotCount"], P["rotFrames"]
-    rot_colors = []
-    for i in range(rot_count):
-        r, g, b = palette[rot_start + i]
-        rot_colors.append(((b >> 3) << 10) | ((g >> 3) << 5) | (r >> 3))
-
-    tick_shift = {1: 0, 2: 1, 4: 2, 8: 3}[P["framesPerPhase"]]
-
+    # ---- wavedata.h ----
     with open(os.path.join(OUT_DIR, "wavedata.h"), "w", newline="\n") as f:
         f.write("""#ifndef WAVEDATA_H
 #define WAVEDATA_H
 
 #include <snes.h>
 
-#define WAVE_PHASES {0}
-#define WAVE_TICK_SHIFT {1}
-#define WAVE_ROT_COUNT {2}
-#define WAVE_ROT_FRAMES {3}
+#define WAVE_MAX_PHASES {0}
+#define WAVE_COURSES {1}
 #define WAVE_RAW_STRIDE 448
-#define WAVE_PC7_SIZE {{PC7SIZE}}
 /* fixed maxima: array sizes and the OAM layout (NPC_SPR) hang off these,
    so they stay constant across courses; the ACTUAL counts are runtime
-   (buoyCount/pathCount, set by waveTablesInit - per-course later) */
+   (buoyCount/pathCount, set by courseGeom) */
 #define WAVE_MAX_BUOYS {{MXB}}
 #define WAVE_MAX_PATH {{MXP}}
 /* OBJ sheet: byte size, and the wake conveyor cells (16x16, names +2 each,
@@ -1621,22 +1784,26 @@ def main():
 #define WAVE_CLOUD_TROWS {{CLTR}}
 #define WAVE_CLOUD_CHARS {{CLCH}}
 #define WAVE_CLOUD_SHADE 0x{{CLSH}}
-#define WAVE_UI_LINES {4}
+#define WAVE_UI_LINES {2}
 #define WAVE_BASE_ROLL 64
-#define WAVE_STEPS_PER_TEXEL {5}
-#define WAVE_PHASE_MASK {6}
-#define WAVE_SKI_PPT_Q4 {7}
-#define WAVE_SKI_REST_ROW {8}
-#define WAVE_SKI_DIST {9}
+#define WAVE_SKI_PPT_Q4 {3}
+#define WAVE_SKI_REST_ROW {4}
+#define WAVE_SKI_DIST {5}
 
-extern u8 *waveTM[WAVE_PHASES];
-extern u8 *waveG[WAVE_PHASES];
-extern u8 waveSky[WAVE_PHASES];
-extern u8 waveSkiRow[WAVE_PHASES];
-extern s8 waveSurfH[WAVE_PHASES];
+/* per-profile tables + phase-advance params, filled by waveProfLoad */
+extern u8 *waveTM[WAVE_MAX_PHASES];
+extern u8 *waveG[WAVE_MAX_PHASES];
+extern u8 waveSky[WAVE_MAX_PHASES];
+extern u8 waveSkiRow[WAVE_MAX_PHASES];
+extern s8 waveSurfH[WAVE_MAX_PHASES];
+extern u16 wvSteps; /* phase steps per (vAlong>>4) texel, from wavelength */
+extern u16 wvMask;  /* phases*256 - 1 */
+extern dmaMemory wrSrc; /* delta-d stream for waveRawLoad (camera.asm) */
+extern u16 wrWords;     /* decoded d words (= phases * 224) */
+
 /* per-course geometry: counts, start grid (world units, ski positions;
-   heading in binary degrees), buoys, racing line - all runtime, filled by
-   waveTablesInit */
+   heading in binary degrees), buoys, racing line - filled by courseGeom */
+extern u8 courseProf; /* the course's wave profile: pass to waveProfLoad */
 extern u8 buoyCount, pathCount;
 extern u16 startX, startY;
 extern u8 startTheta;
@@ -1654,14 +1821,20 @@ extern u8 gateLeft[WAVE_MAX_BUOYS + 1];
 extern s8 gateNx[WAVE_MAX_BUOYS + 1];
 extern s8 gateNy[WAVE_MAX_BUOYS + 1];
 extern u8 gateWp[WAVE_MAX_BUOYS + 1];
+/* per-course blobs (ROM addresses for the loaders) + texture rotation */
+extern dmaMemory csTiles, csMap, csPal1, csPal48, csColl, csFade;
+extern u16 csTilLen;
+extern u8 wvRotStart, wvRotCount, wvRotFrames;
+extern u16 rotCols[8];
 
-void waveTablesInit(void);
-void waveRotateStep(u8 offset);
+void waveProfLoad(u8 pf); /* tables/pointers; then call waveRawLoad */
+void courseGeom(u8 c);    /* geometry + blob pointers + courseProf */
+/* menu label (console-font ASCII) copied into out, NUL included - a
+   returned char* loses its bank byte to the tcc 16-bit pointer-copy bug */
+void courseNameTo(u8 c, char *out);
 
 #endif
-""".replace("{{PC7SIZE}}", str(len(pc7))).replace("{{MXB}}",
-             str(MAX_BUOYS if course else 0)).replace("{{MXP}}",
-             str(MAX_PATH if course else 0))
+""".replace("{{MXB}}", str(MAX_BUOYS)).replace("{{MXP}}", str(MAX_PATH))
            .replace("{{SHB}}", str(len(ski_tiles)))
            .replace("{{TLB}}", str(len(tall_tiles)))
            .replace("{{SPLV}}", str(SPRAY_LEVELS))
@@ -1677,24 +1850,21 @@ void waveRotateStep(u8 offset);
            .replace("{{CLSH}}", "{0:04X}".format(
                ((CLOUD_SHADE[2] >> 3) << 10) | ((CLOUD_SHADE[1] >> 3) << 5)
                | (CLOUD_SHADE[0] >> 3)))
-           .format(phases, tick_shift, rot_count, rot_frames, UI_LINES,
-           round(256.0 * phases / P["wavelength"]), phases * 256 - 1,
-           # screen px per world texel at the ski's distance, x2 for drama,
-           # in 4.4 fixed point
-           round((P["camH"] / (P["skiDist"] ** 2 + P["camH"] ** 2))
-                 * ((SCANLINES - 1) / math.radians(P["fovV"])) * 2 * 16),
-           # REST_ROW is BOTTOM-SPRITE-relative (sprTop anchors the lower
-           # of the stacked pair): master row 58 = bottom-sprite row 26
-           SKI_WATERLINE_ROW - 32, round(P["skiDist"])))
+           .format(MAX_PHASES, len(baked_courses), UI_LINES,
+                   round((P["camH"] / (P["skiDist"] ** 2 + P["camH"] ** 2))
+                         * ((SCANLINES - 1) / math.radians(P["fovV"])) * 2 * 16),
+                   SKI_WATERLINE_ROW - 32, round(P["skiDist"])))
 
+    # ---- wavedata.c ----
     with open(os.path.join(OUT_DIR, "wavedata.c"), "w", newline="\n") as f:
         f.write("/* generated by tools/bake_tables.py - do not edit */\n")
         f.write('#include "wavedata.h"\n\n')
         f.write("\n".join(externs) + "\n\n")
-        f.write("u8 *waveTM[WAVE_PHASES];\nu8 *waveG[WAVE_PHASES];\n")
-        f.write("u8 waveSky[WAVE_PHASES];\n")
-        f.write("u8 waveSkiRow[WAVE_PHASES];\ns8 waveSurfH[WAVE_PHASES];\n\n")
-        f.write("u8 buoyCount, pathCount;\n")
+        f.write("u8 *waveTM[WAVE_MAX_PHASES];\nu8 *waveG[WAVE_MAX_PHASES];\n")
+        f.write("u8 waveSky[WAVE_MAX_PHASES];\n")
+        f.write("u8 waveSkiRow[WAVE_MAX_PHASES];\ns8 waveSurfH[WAVE_MAX_PHASES];\n")
+        f.write("u16 wvSteps;\nu16 wvMask;\ndmaMemory wrSrc;\nu16 wrWords;\n\n")
+        f.write("u8 courseProf;\nu8 buoyCount, pathCount;\n")
         f.write("u16 startX, startY;\nu8 startTheta;\n")
         f.write("u16 npcGridX[3], npcGridY[3];\n")
         f.write("u16 buoyX[WAVE_MAX_BUOYS + 1];\nu16 buoyY[WAVE_MAX_BUOYS + 1];\n")
@@ -1703,58 +1873,108 @@ void waveRotateStep(u8 offset);
         f.write("u16 gateX[WAVE_MAX_BUOYS + 1];\nu16 gateY[WAVE_MAX_BUOYS + 1];\n")
         f.write("u8 gateLeft[WAVE_MAX_BUOYS + 1];\n")
         f.write("s8 gateNx[WAVE_MAX_BUOYS + 1];\ns8 gateNy[WAVE_MAX_BUOYS + 1];\n")
-        f.write("u8 gateWp[WAVE_MAX_BUOYS + 1];\n\n")
-        f.write("void waveTablesInit(void)\n{\n")
-        if course:
-            assert len(course[2]) <= MAX_BUOYS, "too many buoys for WAVE_MAX_BUOYS"
-            assert len(course[3]) <= MAX_PATH, "too many waypoints for WAVE_MAX_PATH"
-            f.write("    buoyCount = {0};\n    pathCount = {1};\n".format(
-                len(course[2]), len(course[3])))
-            f.write("    startX = {0};\n    startY = {1};\n"
-                    "    startTheta = {2};\n".format(
-                        start_slot[0], start_slot[1], start_theta))
-            for i, (nx, ny) in enumerate(npc_slots):
-                f.write("    npcGridX[{0}] = {1};\n    npcGridY[{0}] = {2};\n"
-                        .format(i, nx, ny))
-        for name in ("tm", "g"):
-            f.write("\n".join(inits[name]) + "\n")
-        for p, n in enumerate(sky_counts):
-            f.write("    waveSky[{0}] = {1};\n".format(p, n))
-        for p, r in enumerate(ski_rows):
-            f.write("    waveSkiRow[{0}] = {1};\n".format(p, r))
-        for p, h in enumerate(surf_hs):
-            f.write("    waveSurfH[{0}] = {1};\n".format(p, h))
-        if course:
-            for i, (bx, by, side) in enumerate(course[2]):
-                f.write("    buoyX[{0}] = {1};\n".format(i, (bx * 4) & 4095))
-                f.write("    buoyY[{0}] = {1};\n".format(i, (by * 4) & 4095))
-                f.write("    buoyType[{0}] = {1};\n".format(i, 1 if side == "R" else 0))
-            for i, (px, py) in enumerate(course[3]):
-                f.write("    pathX[{0}] = {1};\n".format(i, (px * 4) & 4095))
-                f.write("    pathY[{0}] = {1};\n".format(i, (py * 4) & 4095))
-            for i, (gx, gy, left, nx, ny, wp) in enumerate(order_gates(course)):
-                f.write("    gateX[{0}] = {1};\n".format(i, (gx * 4) & 4095))
-                f.write("    gateY[{0}] = {1};\n".format(i, (gy * 4) & 4095))
-                f.write("    gateLeft[{0}] = {1};\n".format(i, left))
-                f.write("    gateNx[{0}] = {1};\n".format(i, nx))
-                f.write("    gateNy[{0}] = {1};\n".format(i, ny))
-                f.write("    gateWp[{0}] = {1};\n".format(i, wp))
-        f.write("}\n\n")
-        f.write("void waveRotateStep(u8 offset)\n{\n    switch (offset)\n    {\n")
-        for o in range(rot_count):
-            f.write("    case {0}:\n".format(o))
-            for i in range(rot_count):
-                col = rot_colors[(i + o) % rot_count]
-                f.write("        setPaletteColor({0}, 0x{1:04X});\n"
-                        .format(rot_start + i, col))
-            f.write("        break;\n")
-        f.write("    }\n}\n")
+        f.write("u8 gateWp[WAVE_MAX_BUOYS + 1];\n")
+        f.write("dmaMemory csTiles, csMap, csPal1, csPal48, csColl, csFade;\n")
+        f.write("u16 csTilLen;\n")
+        f.write("u8 wvRotStart, wvRotCount, wvRotFrames;\nu16 rotCols[8];\n\n")
 
-    n_sky0 = raycast_phase(0.0)[0]
-    cycle = phases * P["framesPerPhase"] / 60.0
-    print("baked {0} phases ({1} bytes), wavelength {2:.1f}, cycle {3:.2f}s, "
-          "sky lines at phase 0: {4}".format(phases, total, P["wavelength"],
-                                             cycle, n_sky0))
+        f.write("void waveProfLoad(u8 pf)\n{\n    switch (pf)\n    {\n")
+        for pf, bp in enumerate(baked_profs):
+            f.write("    case {0}:\n".format(pf))
+            for p in range(bp["phases"]):
+                f.write("        waveTM[{0}] = (u8 *)&wave_tm_f{1}p{0};\n"
+                        .format(p, pf))
+            for p in range(bp["phases"]):
+                f.write("        waveG[{0}] = (u8 *)&wave_g_f{1}p{0};\n"
+                        .format(p, pf))
+            for p, v in enumerate(bp["sky"]):
+                f.write("        waveSky[{0}] = {1};\n".format(p, v))
+            for p, v in enumerate(bp["ski_row"]):
+                f.write("        waveSkiRow[{0}] = {1};\n".format(p, v))
+            for p, v in enumerate(bp["surf_h"]):
+                f.write("        waveSurfH[{0}] = {1};\n".format(p, v))
+            f.write("        wvSteps = {0};\n".format(bp["steps"]))
+            f.write("        wvMask = {0};\n".format(bp["mask"]))
+            f.write("        wrSrc.mem.p = (u8 *)&wave_rawd_f{0};\n".format(pf))
+            f.write("        wrWords = {0};\n".format(bp["raw_words"]))
+            f.write("        break;\n")
+        f.write("    }\n}\n\n")
+
+        f.write("void courseGeom(u8 c)\n{\n    switch (c)\n    {\n")
+        for ci, ((folder, cdir, mname, pi), bc) in enumerate(
+                zip(course_meta, baked_courses)):
+            course = bc["course"]
+            f.write("    case {0}:\n".format(ci))
+            f.write("        courseProf = {0};\n".format(pi))
+            f.write("        buoyCount = {0};\n        pathCount = {1};\n"
+                    .format(len(course[2]), len(course[3])))
+            assert len(course[2]) <= MAX_BUOYS, folder + ": too many buoys"
+            assert len(course[3]) <= MAX_PATH, folder + ": too many waypoints"
+            f.write("        startX = {0};\n        startY = {1};\n"
+                    "        startTheta = {2};\n".format(
+                        bc["start_slot"][0], bc["start_slot"][1],
+                        bc["start_theta"]))
+            for i, (nx, ny) in enumerate(bc["npc_slots"]):
+                f.write("        npcGridX[{0}] = {1};\n"
+                        "        npcGridY[{0}] = {2};\n".format(i, nx, ny))
+            for i, (bx, by, side) in enumerate(course[2]):
+                f.write("        buoyX[{0}] = {1};\n".format(i, (bx * 4) & 4095))
+                f.write("        buoyY[{0}] = {1};\n".format(i, (by * 4) & 4095))
+                f.write("        buoyType[{0}] = {1};\n"
+                        .format(i, 1 if side == "R" else 0))
+            for i, (px, py) in enumerate(course[3]):
+                f.write("        pathX[{0}] = {1};\n".format(i, (px * 4) & 4095))
+                f.write("        pathY[{0}] = {1};\n".format(i, (py * 4) & 4095))
+            for i, (gx2, gy2, left, nx, ny, wp2) in enumerate(bc["gates"]):
+                f.write("        gateX[{0}] = {1};\n".format(i, (gx2 * 4) & 4095))
+                f.write("        gateY[{0}] = {1};\n".format(i, (gy2 * 4) & 4095))
+                f.write("        gateLeft[{0}] = {1};\n".format(i, left))
+                f.write("        gateNx[{0}] = {1};\n".format(i, nx))
+                f.write("        gateNy[{0}] = {1};\n".format(i, ny))
+                f.write("        gateWp[{0}] = {1};\n".format(i, wp2))
+            f.write("        csTiles.mem.p = (u8 *)&crs{0}_tiles;\n".format(ci))
+            f.write("        csTilLen = {0};\n".format(len(bc["pc7"])))
+            f.write("        csMap.mem.p = (u8 *)&crs{0}_map;\n".format(ci))
+            f.write("        csPal1.mem.p = (u8 *)&crs{0}_pal1;\n".format(ci))
+            f.write("        csPal48.mem.p = (u8 *)&crs{0}_pal48;\n".format(ci))
+            f.write("        csColl.mem.p = (u8 *)&crs{0}_coll;\n".format(ci))
+            f.write("        csFade.mem.p = (u8 *)&sand_fade;\n")
+            f.write("        wvRotStart = {0};\n".format(bc["rot"]["rotStart"]))
+            f.write("        wvRotCount = {0};\n".format(bc["rot"]["rotCount"]))
+            f.write("        wvRotFrames = {0};\n".format(bc["rot"]["rotFrames"]))
+            for i, col in enumerate(bc["rot_colors"]):
+                f.write("        rotCols[{0}] = 0x{1:04X};\n".format(i, col))
+            f.write("        break;\n")
+        f.write("    }\n}\n\n")
+
+        f.write("void courseNameTo(u8 c, char *out)\n{\n")
+        f.write("    char *nm = \"\";\n    switch (c)\n    {\n")
+        for ci, (folder, cdir, mname, pi) in enumerate(course_meta):
+            f.write("    case {0}:\n        nm = \"{1}\";\n"
+                    "        break;\n".format(ci, mname))
+        f.write("    }\n    while (*nm)\n        *out++ = *nm++;\n"
+                "    *out = 0;\n}\n")
+
+    # ---- byte-budget report ----
+    fixed = len(ski_tiles) + len(tall_tiles) + len(sky_gfx) + len(cloud_gfx) \
+        + len(cloud_map) + len(hud_gfx) + len(hud_pal) + 256 + len(sand_tab)
+    total_prof = 0
+    for pf, (bp, nm) in enumerate(zip(baked_profs, prof_names)):
+        sz = len(bp["rawd"]) + sum(len(t) for t in bp["tm"]) \
+            + sum(len(g) for g in bp["g"])
+        total_prof += sz
+        print("profile {0} '{1}': {2} phases, {3} bytes".format(
+            pf, nm, bp["phases"], sz))
+    total_crs = 0
+    for ci, bc in enumerate(baked_courses):
+        sz = len(bc["pc7"]) + len(bc["mp7_rle"]) + 38 + len(bc["coll"])
+        total_crs += sz
+        print("course {0}: {1} bytes ({2} tiles raw, {3} map rle, {4} coll)"
+              .format(ci, sz, len(bc["pc7"]), len(bc["mp7_rle"]),
+                      len(bc["coll"])))
+    print("BUDGET: baked shared gfx ~{0}K, profiles {1}K, courses {2}K "
+          "(+ code/sfx; 512K cap)".format(
+              fixed // 1024, total_prof // 1024, total_crs // 1024))
 
 
 if __name__ == "__main__":

@@ -73,13 +73,18 @@ camDP dsb 64 ; 0-15 build, 16-31 projectPoint, 32-39 ski, 40-51 npc
 .DEFINE RD_HI  $36
 .DEFINE RD_MID $38
 
-; the expanded wave d/a arrays, WRAM bank $7F (filled by waveRawLoad)
-.DEFINE WRD  $0000        ; d: 32 phases x 224 x u16 = 14336 bytes
-.DEFINE WRA  $3800        ; a: ditto (synthesised from d at load)
+; the per-course WRAM bank $7F layout (all filled at course load):
+;   $0000 d words (up to 32 phases x 224 x u16 = 14336 bytes)
+;   $3800 a words (synthesised from d; FIXED base even when fewer phases)
+;   $7000 packed collision (4KB, collProbe's home)
+;   $8000 map decode buffer (16KB; DMA'd on to VRAM)
+.DEFINE WRD  $0000
+.DEFINE WRA  $3800
 .DEFINE WRD_L $7F0000     ; long-address forms (rowDepth runs with DBR=$00)
 .DEFINE WRA_L $7F3800
+.DEFINE COLL_L $7F7000
 
-; waveRawLoad's direct-page frame (shares camDP; nothing else runs at load)
+; the loaders' direct-page frame (shares camDP; nothing else runs at load)
 .DEFINE WL_P2L $00
 .DEFINE WL_P2H $02
 .DEFINE WL_P1L $04
@@ -87,6 +92,7 @@ camDP dsb 64 ; 0-15 build, 16-31 projectPoint, 32-39 ski, 40-51 npc
 .DEFINE WL_RLO $08
 .DEFINE WL_RHI $0A
 .DEFINE WL_PRV $0C
+.DEFINE WL_END $0E
 
 ;----------------------------------------------------------------------------
 ; one product: (16-bit word at wave_raw?,y) * (s0.8 mag at dp) >> 8
@@ -1154,7 +1160,113 @@ _nv_c:
     rtl
 
 ;----------------------------------------------------------------------------
-; collProbe - read the course collision map (C cannot do far ROM reads).
+; copyTo7F - straight copy into WRAM bank $7F. in: cpSrc (dmaMemory: the
+; ROM address), cpDst ($7F offset), cpLen (bytes, EVEN). Load-time only.
+copyTo7F:
+    php
+    phb
+    phd
+    rep #$30
+    phx
+    phy
+    pea camDP
+    pld
+    lda.l cpDst
+    clc
+    adc.l cpLen
+    sta.b WL_END
+    sep #$20
+    lda.l cpSrc + 2
+    pha
+    plb
+    rep #$20
+    lda.l cpSrc
+    tay
+    lda.l cpDst
+    tax
+_c7_loop:
+    lda.w $0000,y
+    sta.l $7F0000,x
+    iny
+    iny
+    inx
+    inx
+    cpx.b WL_END
+    bne _c7_loop
+    ply
+    plx
+    pld
+    plb
+    plp
+    rtl
+
+;----------------------------------------------------------------------------
+; mapTo7F - decode the mode-7 map codec into WRAM bank $7F: token bit7 set
+; = copy (n & $7F) bytes from dst-16 (the water texture's tile period -
+; plain RLE loses here, copy-16 wins), else n literal bytes follow.
+; Decoded size fixed at 16384. in: cpSrc (ROM address), cpDst ($7F offset,
+; >= $10 so dst-16 stays in bank). Load-time only. The branchy body stays
+; 8-bit A throughout (the WLA immediate-sizing gotcha); X/Y stay 16-bit.
+mapTo7F:
+    php
+    phb
+    phd
+    rep #$30
+    phx
+    phy
+    pea camDP
+    pld
+    lda.l cpDst
+    clc
+    adc #16384
+    sta.b WL_END
+    lda.l cpSrc
+    tay
+    lda.l cpDst
+    tax
+    sep #$20
+    lda.l cpSrc + 2
+    pha
+    plb
+_mt_tok:
+    lda.w $0000,y        ; token - branch BEFORE iny (iny sets N from Y,
+    bmi _mt_copy         ; which is always negative up here: source >= $8000)
+    iny
+    sta.b WL_PRV         ; literal count (1-127)
+_mt_lit:
+    lda.w $0000,y
+    iny
+    sta.l $7F0000,x
+    inx
+    dec.b WL_PRV
+    bne _mt_lit
+    bra _mt_next
+_mt_copy:
+    iny
+    and #$7F
+    sta.b WL_PRV
+_mt_cp:
+    lda.l $7F0000 - 16,x ; dst-16 (X >= cpDst+16 whenever copies happen)
+    sta.l $7F0000,x
+    inx
+    dec.b WL_PRV
+    bne _mt_cp
+_mt_next:
+    rep #$20
+    cpx.b WL_END
+    sep #$20
+    bne _mt_tok
+    rep #$30
+    ply
+    plx
+    pld
+    plb
+    plp
+    rtl
+
+;----------------------------------------------------------------------------
+; collProbe - read the course collision map (copied to $7F7000 at course
+; load; C cannot do far reads and the source moves per course).
 ; Packed 2 bits per cell: byte collOfs>>2, bit (collOfs&3)*2.
 ; in: collOfs = cellY*128 + cellX; out: collVal = 0 water / 1 sand / 2 rope
 collProbe:
@@ -1171,7 +1283,7 @@ collProbe:
     lsr a
     tax
     sep #$20
-    lda.l wave_coll,x    ; packed byte
+    lda.l COLL_L,x       ; packed byte
     cpy #0
     beq _cp_mask
 _cp_sh:
@@ -1209,19 +1321,26 @@ waveRawLoad:
     phy
     pea camDP
     pld
+    lda.l wrWords        ; per-profile: end offset = words * 2
+    asl a
+    sta.b WL_END
     sep #$20
-    lda #:wave_rawd
+    lda.l wrSrc + 2      ; dmaMemory: addr at +0, bank at +2
     pha
     plb
     rep #$20
 
-    ; ---- pass 1: delta-decode d into $7F0000 ----
-    ldy #2               ; ROM index: past the first raw word
+    ; ---- pass 1: delta-decode d into $7F0000 (Y carries the full
+    ; source offset: superfree sections never straddle a bank) ----
     ldx #0               ; dest byte offset
-    lda.w wave_rawd      ; first word raw
+    lda.l wrSrc
+    tay
+    lda.w $0000,y        ; first word raw
+    iny
+    iny
     bra _wr_store
 _wr_next:
-    lda.w wave_rawd,y    ; control byte (word read, low byte matters)
+    lda.w $0000,y        ; control byte (word read, low byte matters)
     iny
     and #$00FF
     cmp #$0080
@@ -1234,7 +1353,7 @@ _wr_pos:
     adc.b WL_PRV
     bra _wr_store
 _wr_esc:
-    lda.w wave_rawd,y    ; raw word follows the escape
+    lda.w $0000,y        ; raw word follows the escape
     iny
     iny
 _wr_store:
@@ -1242,7 +1361,7 @@ _wr_store:
     sta.l WRD_L,x
     inx
     inx
-    cpx #WRA
+    cpx.b WL_END
     bne _wr_next
 
     ; ---- pass 2: a[i] from d[i] via the PPU multiplier ----
@@ -1299,7 +1418,7 @@ _wr_anz:
     sta.l WRA_L,x
     inx
     inx
-    cpx #WRA
+    cpx.b WL_END
     bne _wr_a
 
     ply

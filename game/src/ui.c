@@ -11,13 +11,12 @@ extern char hud_gfx, hud_pal;     // gradient HUD font + its CGRAM ramps
 // irqSwitch, vector in hdr.asm), which freed HDMA channel 0 for the sand
 // distance-fade: a baked table of hold-run entries (mode 3 -> $2121)
 // that rewrites CGRAM entry 8 per scanline band, ignoring wave phase.
-extern char sand_fade;
+// The table pointer (csFade) is per-course, set by courseGeom.
 
 // map words: font tile = 256 + ascii - 32 (the font sits at 0x5000, ids
 // 256+ from the 0x4000 BG1 char base), palette row 1 (bits 10-12)
 #define UI_ATTR 0x0500
 
-static dmaMemory dmaMode;
 u16 uiMap[UI_COLS * UI_ROWS];
 
 void uiInit(void)
@@ -95,11 +94,10 @@ void uiInit(void)
 
 void uiHdma(void)
 {
-    dmaMode.mem.p = (u8 *)&sand_fade;
     REG_DMAP0 = 0x03; // mode 3: p,p,p+1,p+1 = CGADD x2 then CGDATA lo/hi
     REG_BBAD0 = 0x21; // $2121 CGADD: one palette entry per table entry
-    REG_A1T0LH = dmaMode.mem.c.addr;
-    REG_A1B0 = dmaMode.mem.c.bank;
+    REG_A1T0LH = csFade.mem.c.addr; // per-course table (courseGeom sets it)
+    REG_A1B0 = csFade.mem.c.bank;
 }
 
 // glyph order must match the bake's HUD_GLYPHS

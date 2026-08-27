@@ -21,14 +21,14 @@ all: gen buildWithSummary
 
 gen: bake.stamp
 
-bake.stamp: ../tools/bake_tables.py ../tools/wave_params.json $(wildcard ../assets/*)
+# nested wildcards: courses live in assets/courses/<nn>_<name>/ and wave
+# profiles in assets/waves/ - edits there must retrigger the bake
+bake.stamp: ../tools/bake_tables.py ../tools/wave_params.json $(wildcard ../assets/*) $(wildcard ../assets/*/*) $(wildcard ../assets/*/*/*)
 	@echo baking wave tables + sea texture ...
 	$(PYTHON) ../tools/bake_tables.py
 	@touch bake.stamp
 
-data.obj: bake.stamp
-
 buildActual: $(OFILES) $(ROMNAME).sfc
 
 clean: cleanBuildRes cleanRom cleanGfx cleanLogs
-	@rm -f bake.stamp sea.png sea.pc7 sea.mp7 sea.pal wavetables.asm wavedata.c wavedata.h
+	@rm -f bake.stamp sea.png sea*.png ski.png wavetables.asm wavedata.c wavedata.h
