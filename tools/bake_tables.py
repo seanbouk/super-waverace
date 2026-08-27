@@ -450,8 +450,8 @@ SKI_PALETTE = [
     (0, 0, 0),        # 0 transparent
     (0, 0, 0),        # 1 black / outline
     (255, 255, 255),  # 2 white
-    (150, 186, 190),  # 3 hull light: low-sat cyan (authored as grey)
-    (66, 100, 104),   # 4 hull dark
+    (56, 202, 220),   # 3 hull light: saturated cyan, against the warm-
+    (20, 118, 134),   # 4 hull dark      yellow accent (authored as grey)
     (241, 175, 105),  # 5 skin
     (174, 107, 35),   # 6 skin shadow
     (42, 110, 212),   # 7 clothing A (blue)
@@ -472,22 +472,22 @@ SKI_WATERLINE_ROW = 58  # master-art row at the surface when at rest (the
 # Overrides: 3/4 hull, 5/6 skin, 7/8 A, 9/10 B, 11/12 jetski accent.
 NPC_PALETTES = [
     # rider 2: pale skin, cool white A, pink B, cool lemon-yellow ski,
-    # low-sat pink hull
-    {3: (198, 168, 178), 4: (110, 78, 90),
+    # saturated pink hull (deeper than the clothing pink)
+    {3: (232, 96, 176), 4: (150, 44, 110),
      5: (244, 205, 170), 6: (192, 146, 112),
      7: (235, 240, 248), 8: (156, 172, 196),
      9: (240, 138, 178), 10: (176, 80, 122),
      11: (230, 228, 92), 12: (162, 158, 42)},
     # rider 3: indigo skin (SF2 Dhalsim-alt), VIBRANT indigo A,
-    # desaturated magenta B, teal ski, low-sat blue hull
-    {3: (146, 162, 196), 4: (64, 78, 110),
+    # desaturated magenta B, teal ski, saturated blue hull
+    {3: (56, 110, 232), 4: (26, 56, 148),
      5: (122, 106, 170), 6: (78, 64, 116),
      7: (92, 70, 235), 8: (52, 36, 160),
      9: (198, 128, 182), 10: (134, 76, 122),
      11: (56, 192, 186), 12: (26, 126, 122)},
     # rider 4: dark brown skin, chartreuse A, pine B, purple ski,
-    # low-sat indigo hull
-    {3: (158, 150, 190), 4: (76, 68, 108),
+    # saturated indigo hull
+    {3: (104, 76, 220), 4: (54, 36, 134),
      5: (126, 78, 44), 6: (82, 46, 22),
      7: (170, 220, 44), 8: (108, 148, 18),
      9: (36, 112, 74), 10: (18, 68, 44),
