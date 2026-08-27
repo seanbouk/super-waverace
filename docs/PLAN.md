@@ -217,8 +217,13 @@ Phases (1 done):
    returns) -> SELECT; raceInit() owns ALL race BSS (the latent
    read-before-write list is fixed - only tcc's $16/17 scratch flags
    remain, benign); two-race harness proves race 2 == race 1 bit-exact.
-3. **Multi-bake** — course folders, map RLE + decoder, wave-profile pool
-   with dedupe, ROM descriptor table + courseLoad(), byte-budget report.
+3. **Multi-bake** ✓ — course folders, map codec (copy-from-16-back; RLE
+   loses to the water texture's tile period) + asm decoder, wave-profile
+   pool with dedupe (calm 16-phase profile = 6K, half the rough one),
+   generated loaders (courseGeom/waveProfLoad/courseNameTo) + runtime
+   courseLoad(), byte-budget report. Verified: WRAM/VRAM byte-exact vs
+   the bake, two-race flow bit-identical to the pre-restructure build,
+   ISLAND + LAGOON selectable. ~29K/course + ~6-12K/profile.
 4. **Palette + ambient per course** — painter palette editor + ambient
    swatch, bake tint pass + per-course OBJ palettes + collapse lint,
    buoys to OBJ palette 5, courseLoad CGRAM upload.

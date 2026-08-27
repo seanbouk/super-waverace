@@ -17,9 +17,16 @@ make -C game            # bake (python) -> compile -> link game/superwaverace.sf
 - The bake (`tools/bake_tables.py`) regenerates `game/`: sea.pc7/mp7/pal,
   wavetables.asm, wavedata.c/h, sea.png (post-quantise preview), ski.png.
   All gitignored. `rm game/bake.stamp` forces a rebake.
-- Inputs: `tools/wave_params.json` (wave lab export), `assets/sea_pattern.png`
-  + `assets/water_params.json` (water designer), `assets/course.json` (course
-  painter). Committed; user iterates via the web tools and drops files in.
+- Inputs: `assets/courses/<nn>_<name>/course.json` (course painter; the
+  MENU NAME comes from the folder name past the underscore - the bake
+  FAILS if a legacy `assets/course.json` exists). A course folder may
+  carry its own `sea_pattern.png` / `water_params.json` (else the shared
+  `assets/` ones apply) and name a wave profile: `"wave_profile": "calm"`
+  -> `assets/waves/calm.json` (wave lab export; identical profiles dedupe
+  in ROM). `tools/wave_params.json` is the DEFAULT profile AND the global
+  camera (camH/pitch/fov/skiDist - profiles must not change those; the
+  bake asserts). Committed; user iterates via the web tools and drops
+  files in. The bake prints a per-course/per-profile byte-budget report.
 - Commit + push to main without asking (user's standing preference); CI builds
   and deploys the web player. Screenshots for the README live in `docs/`.
 
@@ -251,6 +258,22 @@ Mesen.exe --testrunner --timeout=30 <rom> <script.lua>   # arg order-free
   emits a branch-to-self (80 FE) right after the init stores - an instant
   silent hang before the body ever runs. Use do/while (verified) instead.
   Found via the PC-sampling Lua pattern (emu.getState) + hand-disassembly.
+- **tcc copies only 16 BITS of a pointer-var to pointer-var assignment**
+  (`a.mem.p = b.mem.p` never writes the bank byte). LITERAL stores
+  (`p = (u8 *)&symbol`) write all 4 bytes, and passing a pointer VALUE as
+  a function arg works - it is var-to-var copies that truncate. Copy
+  dmaMemory addr+bank member-by-member. Related: **returning `char *`
+  from a function loses the bank too** - courseNameTo copies into a
+  caller buffer instead. Both found via Mesen exec/memory callbacks.
+- **The course/profile loaders (courseLoad in main.c)** swap everything
+  per course under force blank: courseGeom + waveProfLoad (generated),
+  waveRawLoad (delta-d decode + a synthesis), packed collision ->
+  $7F7000, map (copy-from-16-back codec - plain RLE is BIGGER than raw
+  because the water texture tiles with a 16-entry period) through the
+  $7F8000 buffer, tiles/map to the VRAM planes via dmaCopyVram7, and
+  ONLY CGRAM entries 1-15 + 48-51 (a full palette load wipes the
+  boot-loaded UI/sky/HUD/OBJ rows - this shipped one build as all-black
+  sprites). NEVER call bgInitMapTileSet7 after boot for this reason.
 - **The wave d/a arrays live in WRAM $7F0000/$7F3800** (WRD/WRA in
   camera.asm), expanded at load by waveRawLoad: ROM stores only d,
   delta-encoded (~7K instead of 28.7K); a = max(1,(d*18919+32768)>>16)
@@ -310,7 +333,12 @@ move waypoint 0/1 in the painter to move the grid.
   git history). Menu text lives in BG1 map rows below the sky band - rows
   the race's mode switch never shows, so menu and race share the map with
   zero cleanup. Multi-course is the active project: docs/PLAN.md
-  "Multi-course" has the agreed design; phases 1-2 done.
+  "Multi-course" has the agreed design; phases 1-3 done - two courses
+  build today (01_island + 02_lagoon, a placeholder island clone on the
+  16-phase "calm" profile), the menu lists them with an Up/Down cursor
+  (cursor movement not yet exercised on hardware - testrunner has no
+  input; the flow was verified with AUTOPILOT_COURSE). Next: phase 4,
+  palette + ambient light per course.
 - Race mode in progress — see docs/PLAN.md "Race mode" for the agreed design
   and phase list. Done: phases 1-4 — racing line + laps + waypoint autopilot;
   3 kinematic NPCs (sprites 5-7); rear-view NPC ski art at the 5 buoy scales

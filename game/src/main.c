@@ -91,8 +91,10 @@ u8 skiFlip;       // lean direction (hflip)
 u8 skiDist8, thrF8, thrR8;
 
 // build-time debug: drive itself (the emulator test runner has no input);
-// also auto-confirms the course-select menu and the results screen
-#define AUTOPILOT 1
+// also auto-confirms the course-select menu (picking AUTOPILOT_COURSE)
+// and the results screen
+#define AUTOPILOT 0
+#define AUTOPILOT_COURSE 0
 
 #define TURN_SPEED 2
 #define THRUST 144 // applied at >>6: top speed = THRUST*32 (8.8 world/loop)
@@ -820,7 +822,10 @@ static void courseSelect(void)
             break;
 #if AUTOPILOT
         if (menuT > 90)
+        {
+            courseSel = AUTOPILOT_COURSE;
             break;
+        }
 #endif
     }
 }
