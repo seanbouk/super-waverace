@@ -52,6 +52,8 @@ extern void npcAim(void); // aimT/aimP/aimBias + npcTrig -> wpdx/wpdy (bias-
                           // aimed), apc = cross, apd = dot
 extern void npcVel(void); // apc/apd = ((bq >> 5) * npcSin/Cos) >> 2
 extern void irqOn(void);  // camera.asm: cli, once the timer regs are set
+extern void waveRawLoad(void); // camera.asm: copy the wave d/a arrays to
+                               // WRAM $7F (the camera-build/rowDepth source)
 
 // ---- camera state shared with camera.asm (accessed via long addressing) ----
 u8 camTheta;
@@ -511,6 +513,7 @@ int main(void)
 {
     waveTablesInit();
     camTabsInitHeaders();
+    waveRawLoad(); // d/a arrays -> WRAM $7F before anything projects
 
     bgInitMapTileSet7(&sea_patterns, &sea_map, &sea_palette,
                       WAVE_PC7_SIZE, 0x0000);
@@ -687,7 +690,7 @@ int main(void)
     buildWinTab(200, 210);
 
     // build-time debug: drive itself (the emulator test runner has no input)
-#define AUTOPILOT 0
+#define AUTOPILOT 1
 
     while (1)
     {

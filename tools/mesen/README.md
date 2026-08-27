@@ -16,3 +16,16 @@ fixed frame window (tickrate.lua) are the only trustworthy before/after numbers.
   equivalence harnesses: calls/bad). ADDR_CALLS / ADDR_BAD env vars, hex.
 - `oamdump.lua`   — sprites 0-25 (x/y/tile/attr) + screenshot at fixed frames.
   Only valid for comparing builds with identical timing (see CLAUDE.md).
+- `tickshot.lua`  — TICK-keyed position trace + screenshots: the equivalence
+  harness for builds whose INIT length differs (fixed-frame comparison is
+  invalid there — init shifts tick/frame alignment). Screenshots still
+  jitter by ±1 frame (HUD clock digits, odd sea rows); the trace is the
+  ground truth. TICKADDR/WXADDR/WYADDR/THADDR/OUTDIR/TAG env vars.
+- `tabdump.lua`   — dumps camTabs (7200 bytes, the renderer's whole HDMA
+  output) at tick 300, plus the $7F wave arrays with DUMP7F=1. The
+  jitter-free way to prove two builds render identically. TICKADDR/TABADDR.
+
+Dual-build equivalence runs need `Snes.RamPowerOnState: "AllZeros"` in
+Mesen's settings.json for the duration (there are latent read-before-write
+reads; with Random they make same-ROM runs diverge). RESTORE "Random" after
+— zeros hide init bugs that hardware shows.

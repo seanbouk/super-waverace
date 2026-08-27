@@ -7,8 +7,10 @@
 ;   M7X_i  = (camPX + d_i * sin(theta)) & 1023
 ;   M7Y_i  = (camPY + d_i * cos(theta)) & 1023
 ;   HOFS_i = (M7X_i - 128) as signed 13-bit
-; d_i / a_i come from the baked ROM arrays wave_rawd / wave_rawa (32 phases
-; x 224 words, stride 448, one bank => one DBR covers all reads).
+; d_i / a_i live in WRAM bank $7F (WRD/WRA below): waveRawLoad copies the
+; baked ROM arrays there at load time (32 phases x 224 words, stride 448,
+; one bank => one DBR covers all reads). WRAM so the per-course loader can
+; swap/expand them - the hot loop reads WRAM at the same cycle cost as ROM.
 ;
 ; Optimised path (vs the straightforward first version):
 ;  - four sign-specialised loop bodies (sin/cos sign combos), chosen once per
@@ -71,6 +73,13 @@ camDP dsb 64 ; 0-15 build, 16-31 projectPoint, 32-39 ski, 40-51 npc
 .DEFINE RD_HI  $36
 .DEFINE RD_MID $38
 
+; the expanded wave d/a arrays, WRAM bank $7F (filled by waveRawLoad):
+; d words at +0, a words right after - same contiguous layout as the ROM
+.DEFINE WRD  $0000        ; 32 phases x 224 x u16 = 14336 bytes
+.DEFINE WRA  $3800        ; ditto
+.DEFINE WRD_L $7F0000     ; long-address form (rowDepth runs with DBR=$00)
+.DEFINE WRAW_SIZE 28672
+
 ;----------------------------------------------------------------------------
 ; one product: (16-bit word at wave_raw?,y) * (s0.8 mag at dp) >> 8
 ; PRODLO: full sequence loading lo+hi; leaves hi byte in $4202 for PRODHI
@@ -123,14 +132,14 @@ camDP dsb 64 ; 0-15 build, 16-31 projectPoint, 32-39 ski, 40-51 npc
     ; pair A (a_i): M7A = a*cos, M7C = -a*sin
     ; table entries are 4 bytes (paired-register HDMA mode 3); the second
     ; word of the A, C and HOFS entries is B / D / VOFS = 0, pre-zeroed
-    PRODLO wave_rawa, DP_COSM2
+    PRODLO WRA, DP_COSM2
     .IF \1 == 1
     eor #$FFFF
     inc a
     .ENDIF
     sta.l camTabs + 0,x        ; M7A (M7B word stays 0)
 
-    PRODHI wave_rawa, DP_SINM2
+    PRODHI WRA, DP_SINM2
     .IF \2 == 1
     eor #$FFFF
     inc a
@@ -138,7 +147,7 @@ camDP dsb 64 ; 0-15 build, 16-31 projectPoint, 32-39 ski, 40-51 npc
     sta.l camTabs + 1800,x     ; M7C (M7D word stays 0)
 
     ; pair D (d_i): M7X/HOFS from d*sin, M7Y from d*cos
-    PRODLO wave_rawd, DP_SINM2
+    PRODLO WRD, DP_SINM2
     .IF \3 == 1
     eor #$FFFF
     inc a
@@ -154,7 +163,7 @@ camDP dsb 64 ; 0-15 build, 16-31 projectPoint, 32-39 ski, 40-51 npc
     and #$1FFF                 ; signed 13-bit: (HOFS - M7X) must stay -128
     sta.l camTabs + 5400,x     ; HOFS (VOFS word stays 0)
 
-    PRODHI wave_rawd, DP_COSM2
+    PRODHI WRD, DP_COSM2
     .IF \4 == 1
     eor #$FFFF
     inc a
@@ -295,9 +304,9 @@ _cv_done:
     lda.l camBlk1Ct
     sta.b DP_CT
 
-    ; ---- DBR = bank of the raw ROM arrays ----
+    ; ---- DBR = the WRAM bank holding the expanded d/a arrays ----
     sep #$20
-    lda #:wave_rawd
+    lda #$7F
     pha
     plb
 
@@ -365,7 +374,7 @@ rowDepth:
     clc
     adc #446
     tax
-    lda.l wave_rawd,x    ; P(223): bottom row already deep enough?
+    lda.l WRD_L,x        ; P(223): bottom row already deep enough?
     cmp.l rdV
     bcc _rd_srch
     sta.l rdD
@@ -375,7 +384,7 @@ rowDepth:
 _rd_srch:
     lda.l camPhaseOff
     tax
-    lda.l wave_rawd,x    ; P(0): anything at all in range?
+    lda.l WRD_L,x        ; P(0): anything at all in range?
     cmp.l rdV
     bcs _rd_bin
     lda #$FFFF
@@ -396,7 +405,7 @@ _rd_iter:
     clc
     adc.l camPhaseOff
     tax
-    lda.l wave_rawd,x
+    lda.l WRD_L,x
     cmp.l rdV
     bcc _rd_hi
     lda.b RD_MID
@@ -417,7 +426,7 @@ _rd_step:
     clc
     adc.l camPhaseOff
     tax
-    lda.l wave_rawd,x
+    lda.l WRD_L,x
     sta.l rdD
 _rd_done:
     plx
@@ -1149,6 +1158,26 @@ collProbe:
     lda.l wave_coll,x
     sta.l collVal
     rep #$30
+    plx
+    plp
+    rtl
+
+;----------------------------------------------------------------------------
+; waveRawLoad - copy the baked wave d/a arrays into WRAM bank $7F (the
+; buildCamTables/rowDepth source). Load-time only (~120ms); WRAM so the
+; multi-course loader can drop a different profile in later.
+waveRawLoad:
+    php
+    rep #$30
+    phx
+    ldx #0
+_wrl_loop:
+    lda.l wave_rawd,x
+    sta.l WRD_L,x
+    inx
+    inx
+    cpx #WRAW_SIZE
+    bne _wrl_loop
     plx
     plp
     rtl
