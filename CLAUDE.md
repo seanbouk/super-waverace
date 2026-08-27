@@ -292,8 +292,10 @@ tools/wave_params.json via the wave lab. NPC race feel: npcFade[] (which
 player lap each racer fades) and the SPD_* tiers — percentages of paceEma
 (the player's measured pace), so they survive course redesigns; tune the
 percentages, not absolute speeds. The start grid is baked from the racing
-line (WAVE_START_*/WAVE_NPC_* in wavedata.h) — move waypoint 0/1 in the
-painter to move the grid.
+line (startX/Y/Theta + npcGrid* runtime vars, set by waveTablesInit — the
+per-course geometry is ALL runtime now: buoyCount/pathCount too, with
+WAVE_MAX_BUOYS/WAVE_MAX_PATH fixing array sizes and the OAM layout) —
+move waypoint 0/1 in the painter to move the grid.
 
 ## State / not yet done
 

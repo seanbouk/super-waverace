@@ -58,6 +58,11 @@ CLOUD_ROW0 = 5       # strip's top map/screen tile row (scanline 40)
 CLOUD_TROWS = 4      # strip height in tile rows
 CLOUD_SHADE = (204, 222, 242)  # CGRAM 50: soft cloud underside
 
+# fixed per-course maxima: WRAM array sizes and the OAM layout hang off
+# these (NOT per-course - see wavedata.h comment); actual counts are runtime
+MAX_BUOYS = 16
+MAX_PATH = 24
+
 DEFAULTS = {
     "camH": 34.0, "pitch": -10.0, "fovV": 25.0, "fovH": 60.0,
     "amp": 18.0, "wavelength": 128.0, "maxX": 2048.0,
@@ -1591,8 +1596,11 @@ def main():
 #define WAVE_ROT_FRAMES {3}
 #define WAVE_RAW_STRIDE 448
 #define WAVE_PC7_SIZE {{PC7SIZE}}
-#define WAVE_BUOY_COUNT {{NBUOYS}}
-#define WAVE_PATH_COUNT {{NPATH}}
+/* fixed maxima: array sizes and the OAM layout (NPC_SPR) hang off these,
+   so they stay constant across courses; the ACTUAL counts are runtime
+   (buoyCount/pathCount, set by waveTablesInit - per-course later) */
+#define WAVE_MAX_BUOYS {{MXB}}
+#define WAVE_MAX_PATH {{MXP}}
 /* OBJ sheet: byte size, and the wake conveyor cells (16x16, names +2 each,
    one per intensity level) */
 #define WAVE_SKI_SHEET {{SHB}}
@@ -1613,16 +1621,6 @@ def main():
 #define WAVE_CLOUD_TROWS {{CLTR}}
 #define WAVE_CLOUD_CHARS {{CLCH}}
 #define WAVE_CLOUD_SHADE 0x{{CLSH}}
-/* start grid (world units, ski positions; heading in binary degrees) */
-#define WAVE_START_X {{STX}}
-#define WAVE_START_Y {{STY}}
-#define WAVE_START_THETA {{STTH}}
-#define WAVE_NPC_X0 {{NX0}}
-#define WAVE_NPC_Y0 {{NY0}}
-#define WAVE_NPC_X1 {{NX1}}
-#define WAVE_NPC_Y1 {{NY1}}
-#define WAVE_NPC_X2 {{NX2}}
-#define WAVE_NPC_Y2 {{NY2}}
 #define WAVE_UI_LINES {4}
 #define WAVE_BASE_ROLL 64
 #define WAVE_STEPS_PER_TEXEL {5}
@@ -1636,27 +1634,34 @@ extern u8 *waveG[WAVE_PHASES];
 extern u8 waveSky[WAVE_PHASES];
 extern u8 waveSkiRow[WAVE_PHASES];
 extern s8 waveSurfH[WAVE_PHASES];
-extern u16 buoyX[WAVE_BUOY_COUNT + 1];
-extern u16 buoyY[WAVE_BUOY_COUNT + 1];
-extern u8 buoyType[WAVE_BUOY_COUNT + 1];
-extern u16 pathX[WAVE_PATH_COUNT + 1];
-extern u16 pathY[WAVE_PATH_COUNT + 1];
+/* per-course geometry: counts, start grid (world units, ski positions;
+   heading in binary degrees), buoys, racing line - all runtime, filled by
+   waveTablesInit */
+extern u8 buoyCount, pathCount;
+extern u16 startX, startY;
+extern u8 startTheta;
+extern u16 npcGridX[3], npcGridY[3];
+extern u16 buoyX[WAVE_MAX_BUOYS + 1];
+extern u16 buoyY[WAVE_MAX_BUOYS + 1];
+extern u8 buoyType[WAVE_MAX_BUOYS + 1];
+extern u16 pathX[WAVE_MAX_PATH + 1];
+extern u16 pathY[WAVE_MAX_PATH + 1];
 /* power gates: the buoys again, sorted into racing-line order, with the
    line direction at each (s8, unit * 64) and the segment they belong to */
-extern u16 gateX[WAVE_BUOY_COUNT + 1];
-extern u16 gateY[WAVE_BUOY_COUNT + 1];
-extern u8 gateLeft[WAVE_BUOY_COUNT + 1];
-extern s8 gateNx[WAVE_BUOY_COUNT + 1];
-extern s8 gateNy[WAVE_BUOY_COUNT + 1];
-extern u8 gateWp[WAVE_BUOY_COUNT + 1];
+extern u16 gateX[WAVE_MAX_BUOYS + 1];
+extern u16 gateY[WAVE_MAX_BUOYS + 1];
+extern u8 gateLeft[WAVE_MAX_BUOYS + 1];
+extern s8 gateNx[WAVE_MAX_BUOYS + 1];
+extern s8 gateNy[WAVE_MAX_BUOYS + 1];
+extern u8 gateWp[WAVE_MAX_BUOYS + 1];
 
 void waveTablesInit(void);
 void waveRotateStep(u8 offset);
 
 #endif
-""".replace("{{PC7SIZE}}", str(len(pc7))).replace("{{NBUOYS}}",
-             str(len(course[2]) if course else 0)).replace("{{NPATH}}",
-             str(len(course[3]) if course else 0))
+""".replace("{{PC7SIZE}}", str(len(pc7))).replace("{{MXB}}",
+             str(MAX_BUOYS if course else 0)).replace("{{MXP}}",
+             str(MAX_PATH if course else 0))
            .replace("{{SHB}}", str(len(ski_tiles)))
            .replace("{{TLB}}", str(len(tall_tiles)))
            .replace("{{SPLV}}", str(SPRAY_LEVELS))
@@ -1672,15 +1677,7 @@ void waveRotateStep(u8 offset);
            .replace("{{CLSH}}", "{0:04X}".format(
                ((CLOUD_SHADE[2] >> 3) << 10) | ((CLOUD_SHADE[1] >> 3) << 5)
                | (CLOUD_SHADE[0] >> 3)))
-           .replace("{{STX}}", str(start_slot[0]))
-           .replace("{{STY}}", str(start_slot[1]))
-           .replace("{{STTH}}", str(start_theta))
-           .replace("{{NX0}}", str(npc_slots[0][0]))
-           .replace("{{NY0}}", str(npc_slots[0][1]))
-           .replace("{{NX1}}", str(npc_slots[1][0]))
-           .replace("{{NY1}}", str(npc_slots[1][1]))
-           .replace("{{NX2}}", str(npc_slots[2][0]))
-           .replace("{{NY2}}", str(npc_slots[2][1])).format(phases, tick_shift, rot_count, rot_frames, UI_LINES,
+           .format(phases, tick_shift, rot_count, rot_frames, UI_LINES,
            round(256.0 * phases / P["wavelength"]), phases * 256 - 1,
            # screen px per world texel at the ski's distance, x2 for drama,
            # in 4.4 fixed point
@@ -1697,14 +1694,28 @@ void waveRotateStep(u8 offset);
         f.write("u8 *waveTM[WAVE_PHASES];\nu8 *waveG[WAVE_PHASES];\n")
         f.write("u8 waveSky[WAVE_PHASES];\n")
         f.write("u8 waveSkiRow[WAVE_PHASES];\ns8 waveSurfH[WAVE_PHASES];\n\n")
-        f.write("u16 buoyX[WAVE_BUOY_COUNT + 1];\nu16 buoyY[WAVE_BUOY_COUNT + 1];\n")
-        f.write("u8 buoyType[WAVE_BUOY_COUNT + 1];\n")
-        f.write("u16 pathX[WAVE_PATH_COUNT + 1];\nu16 pathY[WAVE_PATH_COUNT + 1];\n")
-        f.write("u16 gateX[WAVE_BUOY_COUNT + 1];\nu16 gateY[WAVE_BUOY_COUNT + 1];\n")
-        f.write("u8 gateLeft[WAVE_BUOY_COUNT + 1];\n")
-        f.write("s8 gateNx[WAVE_BUOY_COUNT + 1];\ns8 gateNy[WAVE_BUOY_COUNT + 1];\n")
-        f.write("u8 gateWp[WAVE_BUOY_COUNT + 1];\n\n")
+        f.write("u8 buoyCount, pathCount;\n")
+        f.write("u16 startX, startY;\nu8 startTheta;\n")
+        f.write("u16 npcGridX[3], npcGridY[3];\n")
+        f.write("u16 buoyX[WAVE_MAX_BUOYS + 1];\nu16 buoyY[WAVE_MAX_BUOYS + 1];\n")
+        f.write("u8 buoyType[WAVE_MAX_BUOYS + 1];\n")
+        f.write("u16 pathX[WAVE_MAX_PATH + 1];\nu16 pathY[WAVE_MAX_PATH + 1];\n")
+        f.write("u16 gateX[WAVE_MAX_BUOYS + 1];\nu16 gateY[WAVE_MAX_BUOYS + 1];\n")
+        f.write("u8 gateLeft[WAVE_MAX_BUOYS + 1];\n")
+        f.write("s8 gateNx[WAVE_MAX_BUOYS + 1];\ns8 gateNy[WAVE_MAX_BUOYS + 1];\n")
+        f.write("u8 gateWp[WAVE_MAX_BUOYS + 1];\n\n")
         f.write("void waveTablesInit(void)\n{\n")
+        if course:
+            assert len(course[2]) <= MAX_BUOYS, "too many buoys for WAVE_MAX_BUOYS"
+            assert len(course[3]) <= MAX_PATH, "too many waypoints for WAVE_MAX_PATH"
+            f.write("    buoyCount = {0};\n    pathCount = {1};\n".format(
+                len(course[2]), len(course[3])))
+            f.write("    startX = {0};\n    startY = {1};\n"
+                    "    startTheta = {2};\n".format(
+                        start_slot[0], start_slot[1], start_theta))
+            for i, (nx, ny) in enumerate(npc_slots):
+                f.write("    npcGridX[{0}] = {1};\n    npcGridY[{0}] = {2};\n"
+                        .format(i, nx, ny))
         for name in ("tm", "g"):
             f.write("\n".join(inits[name]) + "\n")
         for p, n in enumerate(sky_counts):

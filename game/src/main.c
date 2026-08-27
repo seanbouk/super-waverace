@@ -149,7 +149,7 @@ s16 wpdx, wpdy, apc, apd, apu;
 // (0 bottom, 1 top), buoys 2.., then the NPC PAIRS - assigned by depth
 // each tick, nearest racer first, so passes stack correctly and a
 // racer's two halves always sit in the same layer.
-#define NPC_SPR (2 + WAVE_BUOY_COUNT) // first NPC id; 2 consecutive each
+#define NPC_SPR (2 + WAVE_MAX_BUOYS) // first NPC id; 2 consecutive each
 #define NPC_TURN 2 // binary degrees/loop = the player's full turn rate
 u16 npcX[NPC_COUNT], npcY[NPC_COUNT]; // world units, wrap & 4095
 s16 npcFX[NPC_COUNT], npcFY[NPC_COUNT]; // sub-unit accumulators (8.8)
@@ -576,9 +576,9 @@ int main(void)
     // start pose comes from the bake (behind the racing line's waypoint 0,
     // facing along the opening segment); the camera hangs back so the SKI
     // sits on the exported grid slot
-    camTheta = WAVE_START_THETA;
-    camTheta16 = (u16)WAVE_START_THETA << 8;
-    npcA = WAVE_START_THETA;
+    camTheta = startTheta;
+    camTheta16 = (u16)startTheta << 8;
+    npcA = startTheta;
     npcTrig();
     camSinVal = npcSin;
     camCosVal = npcCos;
@@ -589,8 +589,8 @@ int main(void)
     camSinNeg = npcSin < 0 ? 1 : 0;
     camCosMag = (u8)(npcCos < 0 ? -npcCos : npcCos);
     camCosNeg = npcCos < 0 ? 1 : 0;
-    camPX = (u16)(WAVE_START_X - ((WAVE_SKI_DIST * npcSin) >> 7)) & 4095;
-    camPY = (u16)(WAVE_START_Y - ((WAVE_SKI_DIST * npcCos) >> 7)) & 4095;
+    camPX = (u16)(startX - ((WAVE_SKI_DIST * npcSin) >> 7)) & 4095;
+    camPY = (u16)(startY - ((WAVE_SKI_DIST * npcCos) >> 7)) & 4095;
     skiLean = 0; // BSS is not zero-initialised: garbage here reached
     skiFlip = 0; // oamSet as flip bits until the first steer input
     skiDist8 = WAVE_SKI_DIST; // 200 - must stay < 256 for the multiplier
@@ -634,13 +634,13 @@ int main(void)
     pProg = 0;
     lapTicks = 0;
     lastLap = 0;
-    skiWX = WAVE_START_X; // autopilot reads these before the first pass
-    skiWY = WAVE_START_Y;
+    skiWX = startX; // autopilot reads these before the first pass
+    skiWY = startY;
     // NPC grid slots come from the bake too: just ahead of the player,
     // staggered in depth so no scanline drowns in sprites
     for (bi = 0; bi < NPC_COUNT; bi++)
     {
-        npcTheta[bi] = WAVE_START_THETA;
+        npcTheta[bi] = startTheta;
         npcFX[bi] = 0;
         npcFY[bi] = 0;
         npcWp[bi] = 0;
@@ -650,12 +650,11 @@ int main(void)
     npcBias[0] = -56; // green aims left of the line, purple right,
     npcBias[1] = 56;  // orange up the middle: three distinct lines
     npcBias[2] = 0;
-    npcX[0] = WAVE_NPC_X0;
-    npcY[0] = WAVE_NPC_Y0;
-    npcX[1] = WAVE_NPC_X1;
-    npcY[1] = WAVE_NPC_Y1;
-    npcX[2] = WAVE_NPC_X2;
-    npcY[2] = WAVE_NPC_Y2;
+    for (bi = 0; bi < NPC_COUNT; bi++)
+    {
+        npcX[bi] = npcGridX[bi];
+        npcY[bi] = npcGridY[bi];
+    }
     // the race is scripted to unwind: green fades two laps in, purple one
     // lap in, orange from the gun - pass one racer per lap
     npcFade[0] = 2;
@@ -700,7 +699,7 @@ int main(void)
         loopVbl = snes_vblank_count;
         pad0 = padsCurrent(0);
 #if AUTOPILOT
-#if WAVE_PATH_COUNT > 0
+#if WAVE_MAX_PATH > 0
         // waypoint chaser — also the seed of the NPC racer brain.
         // apc = r*sin(heading - bearing): negative means the target is to
         // the right (theta must grow). Deadband ~7 deg (apd>>3 = tan-ish).
@@ -936,7 +935,7 @@ int main(void)
         }
         camPY += stepY;
 
-#if WAVE_PATH_COUNT > 0
+#if WAVE_MAX_PATH > 0
         // ---- race progress: next waypoint reached within ~1.5 cells
         // (Manhattan, world units; skiWX is one step stale — harmless) ----
         wpdx = (s16)((pathX[nextWp] - skiWX) & 4095);
@@ -972,13 +971,13 @@ int main(void)
                 }
             }
             nextWp++;
-            if (nextWp >= WAVE_PATH_COUNT)
+            if (nextWp >= pathCount)
                 nextWp = 0;
             pProg++;
         }
         lapTicks++;
 
-#if WAVE_BUOY_COUNT > 0
+#if WAVE_MAX_BUOYS > 0
         // ---- power gates: judge the armed buoy (racing-line order) when
         // the player crosses its perpendicular. The along-track dot product
         // flips sign on the crossing tick no matter how fast you move -
@@ -991,9 +990,9 @@ int main(void)
         {
             gRel = (s16)nextWp - (s16)gateWp[nextGate];
             if (gRel < 0)
-                gRel += WAVE_PATH_COUNT;
-            if (gRel > WAVE_PATH_COUNT / 2)
-                gRel -= WAVE_PATH_COUNT;
+                gRel += pathCount;
+            if (gRel > (pathCount >> 1))
+                gRel -= pathCount;
             if (gRel < 0)
                 break; // gate segments ahead: not in reach yet
             wpdx = (s16)((skiWX - gateX[nextGate]) & 4095);
@@ -1029,7 +1028,7 @@ int main(void)
             thrR8 = thrF8 >> 1;
             gateNeg = 0;
             nextGate++;
-            if (nextGate >= WAVE_BUOY_COUNT)
+            if (nextGate >= buoyCount)
                 nextGate = 0;
         }
 #endif
@@ -1101,7 +1100,7 @@ int main(void)
                 if (npcDist[bi] < 200)
                 {
                     npcWp[bi]++;
-                    if (npcWp[bi] >= WAVE_PATH_COUNT)
+                    if (npcWp[bi] >= pathCount)
                         npcWp[bi] = 0;
                     npcProg[bi]++;
                 }
@@ -1258,8 +1257,8 @@ int main(void)
         pjPfA = scanline(); // profile the projection block (buoys + NPCs)
         pjPfV = snes_vblank_count;
 #endif
-#if WAVE_BUOY_COUNT > 0
-        for (bi = 0; bi < WAVE_BUOY_COUNT; bi++)
+#if WAVE_MAX_BUOYS > 0
+        for (bi = 0; bi < buoyCount; bi++)
         {
             pjX = buoyX[bi];
             pjY = buoyY[bi];
@@ -1270,7 +1269,7 @@ int main(void)
                 oamSetVisible((2 + bi) << 2, OBJ_HIDE);
         }
 #endif
-#if WAVE_PATH_COUNT > 0
+#if WAVE_MAX_PATH > 0
         // ---- start-light tree: reds count the gun down one at a time,
         // greens light together at GO, and a couple of seconds later the
         // whole tree floats up, each row hiding as it meets the HUD ----
@@ -1469,13 +1468,13 @@ int main(void)
             uiPrintNum(13, 0, camTheta, 3);
             uiPrint(17, 0, "V");
             uiPrintNum(18, 0, vAlong >= 0 ? vAlong : -vAlong, 4);
-#if WAVE_PATH_COUNT > 0
+#if WAVE_MAX_PATH > 0
             // race progress: lap.waypoint, and the last lap's tick count
             uiPrint(23, 0, "L");
             uiPrintNum(24, 0, lapCount, 1);
             uiPrint(25, 0, ".");
             uiPrintNum(26, 0, nextWp, 2);
-#if WAVE_BUOY_COUNT > 0
+#if WAVE_MAX_BUOYS > 0
             uiPrint(28, 0, "G"); // power level + armed gate
             uiPrintNum(29, 0, power, 1);
             uiPrintNum(30, 0, nextGate, 2);
@@ -1500,7 +1499,7 @@ int main(void)
             uiPrintS16(15, 2, skiVv, 4);
             uiPrint(21, 2, "W");
             uiPrintNum(22, 2, waterRow, 3);
-#if WAVE_PATH_COUNT > 0
+#if WAVE_MAX_PATH > 0
             // NPC 0 total progress vs the player's (debug)
             uiPrint(25, 2, "N");
             uiPrintNum(26, 2, npcProg[0], 3);
@@ -1593,7 +1592,7 @@ int main(void)
                     uiHudBigClear(18, 1);
                 uiHudBigDigit(19, bq - dly * 10);
             }
-#if WAVE_BUOY_COUNT > 0
+#if WAVE_MAX_BUOYS > 0
             // power pips under the POWER title: filled up to the chain
             if (pwDrawn != power)
             {
