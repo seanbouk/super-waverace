@@ -73,12 +73,20 @@ camDP dsb 64 ; 0-15 build, 16-31 projectPoint, 32-39 ski, 40-51 npc
 .DEFINE RD_HI  $36
 .DEFINE RD_MID $38
 
-; the expanded wave d/a arrays, WRAM bank $7F (filled by waveRawLoad):
-; d words at +0, a words right after - same contiguous layout as the ROM
-.DEFINE WRD  $0000        ; 32 phases x 224 x u16 = 14336 bytes
-.DEFINE WRA  $3800        ; ditto
-.DEFINE WRD_L $7F0000     ; long-address form (rowDepth runs with DBR=$00)
-.DEFINE WRAW_SIZE 28672
+; the expanded wave d/a arrays, WRAM bank $7F (filled by waveRawLoad)
+.DEFINE WRD  $0000        ; d: 32 phases x 224 x u16 = 14336 bytes
+.DEFINE WRA  $3800        ; a: ditto (synthesised from d at load)
+.DEFINE WRD_L $7F0000     ; long-address forms (rowDepth runs with DBR=$00)
+.DEFINE WRA_L $7F3800
+
+; waveRawLoad's direct-page frame (shares camDP; nothing else runs at load)
+.DEFINE WL_P2L $00
+.DEFINE WL_P2H $02
+.DEFINE WL_P1L $04
+.DEFINE WL_P1H $06
+.DEFINE WL_RLO $08
+.DEFINE WL_RHI $0A
+.DEFINE WL_PRV $0C
 
 ;----------------------------------------------------------------------------
 ; one product: (16-bit word at wave_raw?,y) * (s0.8 mag at dp) >> 8
@@ -1163,22 +1171,124 @@ collProbe:
     rtl
 
 ;----------------------------------------------------------------------------
-; waveRawLoad - copy the baked wave d/a arrays into WRAM bank $7F (the
-; buildCamTables/rowDepth source). Load-time only (~120ms); WRAM so the
-; multi-course loader can drop a different profile in later.
+; waveRawLoad - expand the baked wave arrays into WRAM bank $7F (the
+; buildCamTables/rowDepth source). Load-time only; two passes:
+;  1. d: delta-decode the ROM stream (first word raw, then one signed byte
+;     per word, $80 = escape + raw word) into WRD.
+;  2. a: synthesised, not stored - a = max(1, (d*18919 + 32768) >> 16),
+;     where 18919 = round(tan(fovH/2)/2 * 65536) = 74*256 - 25: two
+;     positive factors for the PPU 16x8 multiplier (M7A=d, M7B=74 then
+;     25, product at $2134-36). The bake asserts this decomposition; the
+;     camera (fovH included) is global across courses BY DESIGN.
+; MUST run with the screen blanked and HDMA off: mode 7 owns M7A/M7B once
+; the frame runs. Both passes are straight-line single-mode regions (the
+; WLA immediate-sizing gotcha).
 waveRawLoad:
     php
+    phb
+    phd
     rep #$30
     phx
-    ldx #0
-_wrl_loop:
-    lda.l wave_rawd,x
+    phy
+    pea camDP
+    pld
+    sep #$20
+    lda #:wave_rawd
+    pha
+    plb
+    rep #$20
+
+    ; ---- pass 1: delta-decode d into $7F0000 ----
+    ldy #2               ; ROM index: past the first raw word
+    ldx #0               ; dest byte offset
+    lda.w wave_rawd      ; first word raw
+    bra _wr_store
+_wr_next:
+    lda.w wave_rawd,y    ; control byte (word read, low byte matters)
+    iny
+    and #$00FF
+    cmp #$0080
+    beq _wr_esc
+    bit #$0080           ; sign-extend the delta
+    beq _wr_pos
+    ora #$FF00
+_wr_pos:
+    clc
+    adc.b WL_PRV
+    bra _wr_store
+_wr_esc:
+    lda.w wave_rawd,y    ; raw word follows the escape
+    iny
+    iny
+_wr_store:
+    sta.b WL_PRV
     sta.l WRD_L,x
     inx
     inx
-    cpx #WRAW_SIZE
-    bne _wrl_loop
+    cpx #WRA
+    bne _wr_next
+
+    ; ---- pass 2: a[i] from d[i] via the PPU multiplier ----
+    ldx #0
+_wr_a:
+    rep #$20
+    lda.l WRD_L,x        ; d
+    sep #$20
+    sta.l $00211B        ; M7A lo
+    xba
+    sta.l $00211B        ; M7A hi
+    lda #74
+    sta.l $00211C        ; M7B: P2 = d * 74 (combinational, no wait)
+    rep #$20
+    lda.l $002134        ; P2 lo16
+    sta.b WL_P2L
+    lda.l $002135        ; $2136:$2135 - keep the hi byte
+    xba
+    and #$00FF
+    sta.b WL_P2H
+    sep #$20
+    lda #25
+    sta.l $00211C        ; M7B: P1 = d * 25
+    rep #$20
+    lda.l $002134
+    sta.b WL_P1L
+    lda.l $002135
+    xba
+    and #$00FF
+    sta.b WL_P1H
+    ; R = (P2 << 8) + $8000 - P1; a = R >> 16  (= (d*18919 + $8000) >> 16)
+    lda.b WL_P2L
+    xba
+    and #$FF00           ; (p2 & $FF) << 8
+    clc
+    adc #$8000
+    sta.b WL_RLO         ; carry C1 rides through to the Rhi add
+    lda.b WL_P2H
+    xba                  ; p2h << 8
+    sta.b WL_RHI
+    lda.b WL_P2L
+    xba
+    and #$00FF           ; p2 >> 8 (low half)
+    adc.b WL_RHI         ; + C1: Rhi = (P2 >> 8) + carry
+    sta.b WL_RHI
+    lda.b WL_RLO
+    sec
+    sbc.b WL_P1L         ; borrow chains into the high word
+    lda.b WL_RHI
+    sbc.b WL_P1H         ; a = high word of R
+    bne _wr_anz
+    lda #1               ; floor: a >= 1 (d = 0 rows)
+_wr_anz:
+    sta.l WRA_L,x
+    inx
+    inx
+    cpx #WRA
+    bne _wr_a
+
+    ply
     plx
+    pld
+    plb
     plp
     rtl
 

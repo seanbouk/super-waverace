@@ -391,18 +391,35 @@ def build_hud_font():
     return encode_4bpp(grid, 1, n * 3), bytes(pal)
 
 
+# a = d * tan(fovH/2)/2, as the EXACT integer formula the console uses to
+# synthesise a from d at course load (waveRawLoad in camera.asm): only d is
+# stored in ROM. 18919 = round(tan(30 deg)/2 * 65536) = 74*256 - 25, the
+# two positive-signed-byte factors the PPU 16x8 multiplier needs. The
+# camera (fovH included) is global across courses BY DESIGN - the asserts
+# below fail the bake if that ever drifts, because camera.asm hardcodes
+# the 74/25 decomposition.
+A_MUL = 18919
+
+
+def a_from_d(d):
+    return max(1, (d * A_MUL + 32768) >> 16)
+
+
 def phase_raw(phi):
     """Raw per-scanline arrays for the runtime camera-table builder:
-    d = hit distance (texels, 16-bit), a = horizontal scale (8.8).
+    d = hit distance (texels, 16-bit), a = horizontal scale (8.8),
+    derived from d by the shared integer formula (a_from_d).
     Sky lines carry the far-cap values; the TM channel hides them."""
+    assert round(TAN_HALF_H / 2.0 * 65536) == A_MUL == 74 * 256 - 25, \
+        "fovH changed: update A_MUL here AND the 74/25 pair in camera.asm"
     n_sky, sea_x = raycast_phase(phi)
     xs = [P["maxX"]] * n_sky + sea_x
     d_words, a_words = [], []
     for x in xs:
         assert x < 4096, "maxX must stay below 4096 for the 16x8 multiplier"
-        d_words.append(round(x) & 0xFFFF)
-        # /4: one texture texel spans four world units (the world-scale)
-        a_words.append(max(1, min(0x7FFF, round(x * TAN_HALF_H / 128.0 * 64.0))))
+        d = round(x) & 0xFFFF
+        d_words.append(d)
+        a_words.append(a_from_d(d))
     return d_words, a_words
 
 
@@ -1422,13 +1439,29 @@ def main():
         asm.append(".ends")
         asm.append("")
 
-    # raw distance/scale arrays, all phases contiguous (stride 448 bytes).
-    # Both in ONE section: camera.asm reads them with a single data bank.
+    # raw distance array, delta-encoded (waveRawLoad expands it into WRAM
+    # $7F and synthesises the a array from it - see a_from_d): first word
+    # raw, then one signed byte per word ($80 = escape + raw word; d is
+    # non-increasing within a phase so deltas are small, and the phase
+    # seams ride the escape). The a words are not stored at all.
+    enc = bytearray()
+    prev = None
+    for w in raw_d:
+        if prev is None:
+            enc += struct.pack("<H", w)
+        else:
+            dlt = w - prev
+            if -127 <= dlt <= 127:
+                enc.append(dlt & 0xFF)
+            else:
+                enc.append(0x80)
+                enc += struct.pack("<H", w)
+        prev = w
+    print("wave raw: {0} d-words -> {1} bytes encoded (a computed at load; "
+          "was {2} bytes raw)".format(len(raw_d), len(enc), 4 * len(raw_d)))
     asm.append('.section ".wave_raw" superfree')
     asm.append("wave_rawd:")
-    asm.append(dw_lines(raw_d))
-    asm.append("wave_rawa:")
-    asm.append(dw_lines(raw_a))
+    asm.append(db_lines(bytes(enc)))
     asm.append(".ends")
     asm.append("")
 
