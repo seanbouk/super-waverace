@@ -1474,10 +1474,19 @@ def main():
     asm.append(".ends")
     asm.append("")
 
-    # collision byte-map (128x128 cells, 0 water / 1 sand / 2 rope)
+    # collision map (128x128 cells, 0 water / 1 sand / 2 rope), packed 2
+    # bits per cell - cell i lives in byte i>>2 at bit (i&3)*2 (collProbe
+    # unpacks). The sum line is the exhaustive-unpack check's expected
+    # value (sum of all 16384 cells, mod 65536).
+    packed_coll = bytearray(len(coll) // 4)
+    for ci, cv in enumerate(coll):
+        assert cv < 4, "collision cell value overflows 2 bits"
+        packed_coll[ci >> 2] |= cv << ((ci & 3) * 2)
+    print("collision: {0} bytes packed (sum {1})".format(
+        len(packed_coll), sum(coll) & 0xFFFF))
     asm.append('.section ".wave_coll" superfree')
     asm.append("wave_coll:")
-    asm.append(db_lines(coll))
+    asm.append(db_lines(bytes(packed_coll)))
     asm.append(".ends")
     asm.append("")
 

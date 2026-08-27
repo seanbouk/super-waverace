@@ -690,7 +690,7 @@ int main(void)
     buildWinTab(200, 210);
 
     // build-time debug: drive itself (the emulator test runner has no input)
-#define AUTOPILOT 1
+#define AUTOPILOT 0
 
     while (1)
     {

@@ -52,6 +52,16 @@ Mesen.exe --testrunner --timeout=30 <rom> <script.lua>   # arg order-free
   from game/superwaverace.sym, then emu.read16(0x7Exxxx,
   emu.memType.snesMemory) in the endFrame callback (see git history:
   npctrace.lua pattern). Position traces beat screenshot archaeology.
+- Equivalence between builds whose INIT length differs (fixed frames are
+  invalid then): tickshot.lua (tick-keyed trace) + tabdump.lua (camTabs
+  dump = the renderer's whole HDMA output, jitter-free). Both need
+  settings.json Snes.RamPowerOnState=AllZeros FOR THE RUNS (latent
+  read-before-write BSS makes same-ROM runs diverge under Random!) -
+  restore Random after. Tick-keyed screenshots still jitter +/-1 frame
+  (HUD clock digits differ); compare data, not pixels.
+- BSS reads Mesen flags before first write (the nondeterminism source,
+  pre-existing, to fix with the race-replay reset work): $7E3CE5/3CE9,
+  $7E3C6A/6B/6E/6F, camDP $16/17, plus one garbage-derived address.
 
 ## Hardware/toolchain gotchas (each cost real debugging time)
 
@@ -233,6 +243,23 @@ Mesen.exe --testrunner --timeout=30 <rom> <script.lua>   # arg order-free
   for the project's whole life (OPVCT never latched -> BUILD "262" was
   profFrames*262, a constant). Reads that matter must be assigned to a
   variable, even a throwaway one.
+- **tcc miscompiles `for` with an EMPTY condition**: `for (x = 0;; x++)`
+  emits a branch-to-self (80 FE) right after the init stores - an instant
+  silent hang before the body ever runs. Use do/while (verified) instead.
+  Found via the PC-sampling Lua pattern (emu.getState) + hand-disassembly.
+- **The wave d/a arrays live in WRAM $7F0000/$7F3800** (WRD/WRA in
+  camera.asm), expanded at load by waveRawLoad: ROM stores only d,
+  delta-encoded (~7K instead of 28.7K); a = max(1,(d*18919+32768)>>16)
+  is synthesised with the PPU 16x8 multiplier (M7A/M7B as d*74*256-d*25;
+  needs force blank + HDMA off - fine at init, remember it per course
+  load). 18919 = round(tan(fovH/2)/2*65536); the bake asserts the 74/25
+  split, so changing fovH fails the bake instead of silently diverging.
+  The camera (camH/pitch/fov/skiDist) is global across ALL courses BY
+  DESIGN - never make it per-course, half the projection constants and
+  the sprite scale bands assume it.
+- **The collision map is packed 2 bits/cell** (4K not 16K): collProbe
+  unpacks (byte ofs>>2, bit (ofs&3)*2). Verified exhaustively: an
+  in-ROM checksum loop over all 16384 cells vs the bake's printed sum.
 
 ## Rider art pipeline (user-authored, Photoshop)
 

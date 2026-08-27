@@ -1154,18 +1154,35 @@ _nv_c:
     rtl
 
 ;----------------------------------------------------------------------------
-; collProbe � read the course collision byte-map (C cannot do far ROM reads)
+; collProbe - read the course collision map (C cannot do far ROM reads).
+; Packed 2 bits per cell: byte collOfs>>2, bit (collOfs&3)*2.
 ; in: collOfs = cellY*128 + cellX; out: collVal = 0 water / 1 sand / 2 rope
 collProbe:
     php
     rep #$30
     phx
+    phy
     lda.l collOfs
+    and #$0003
+    asl a
+    tay                  ; Y = unpack shift (0/2/4/6 lsr steps)
+    lda.l collOfs
+    lsr a
+    lsr a
     tax
     sep #$20
-    lda.l wave_coll,x
+    lda.l wave_coll,x    ; packed byte
+    cpy #0
+    beq _cp_mask
+_cp_sh:
+    lsr a
+    dey
+    bne _cp_sh
+_cp_mask:
+    and #$03
     sta.l collVal
     rep #$30
+    ply
     plx
     plp
     rtl
