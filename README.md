@@ -207,10 +207,18 @@ The line in the sand — update this table whenever an allocation changes.
 | 51–63 | BG reserve | Unallocated |
 | 64–111 | HUD ramps | Palette rows 4–6: the gradient-font colour ramps (titles / value tops / value bottoms) |
 | 112–127 | BG reserve | Unallocated |
-| 128–143 | Rider + buoys | OBJ palette 0: the player's role slots (neutrals, skin/clothing/jetski pairs); buoys borrow the red and warm-yellow pairs |
-| 144–191 | NPC racers | OBJ palettes 1–3: full rider recolours (skin + two clothing pairs + jetski pair; tiles shared) |
-| 192–207 | Start lamps | OBJ palette 4: the start-tree lamps (moved out of the rider palette) |
-| 208–255 | Sprites reserve | OBJ palettes 5–7 — do not touch from BG code |
+| 128–143 | Rider + spray | OBJ palette 0: the player's role slots (neutrals, skin/clothing/jetski pairs, 13 = spray shade). Per course (ambient-lit) |
+| 144–191 | NPC racers | OBJ palettes 1–3: full rider recolours (skin + two clothing pairs + jetski pair; tiles shared). Per course (ambient-lit) |
+| 192–207 | Start lamps | OBJ palette 4: the start-tree lamps — self-lit, exempt from the ambient |
+| 208–223 | Buoys | OBJ palette 5: red / warm-yellow pairs + outline/white at the rider slot numbers. Per course (ambient-lit) |
+| 224–255 | Sprites reserve | OBJ palettes 6–7 — do not touch from BG code |
+
+Entries 1–15 and 48–51 are also per course. A course's `course.json` may carry a
+`palette` (role → `#rrggbb`: sand, sand_shade, foam, wet_sand, float, calm, teal,
+teal_sand, check_dark, check_white, plus the sand fade's `sand_far`/`sand_deep`)
+and an `ambient` RGB multiplier (`#ffffff` = neutral) that the bake applies to
+every in-world colour — course, water, sand fade, riders, buoys, spray — at
+zero runtime cost. The HUD ramps, the start lamps and the sky band are exempt.
 
 ## Building the ROM
 
@@ -261,7 +269,9 @@ The course editor: paint water/sand zones at tile resolution (wrap-aware — map
 islands on a repeating 4096-unit sea), draw rope float-lines as polylines, place
 L/R buoys, and draw the racing line (an ordered waypoint loop — point 0 is the
 start/finish; arrows show race direction). Fill tool, undo, tiled 2×2 preview,
-budget readouts. Exports/imports `assets/course.json`; the bake composes it over
+budget readouts, and the course's **palette + ambient light** (colour swatches
+per palette role, an ambient multiplier previewed live on the map). Exports/imports
+`course.json` (drop it in `assets/courses/<nn>_<name>/`); the bake composes it over
 the water pattern (auto shoreline foam + 2-band shallow surf on the water side),
-derives the collision map, and exports the waypoints for lap counting and (soon)
-NPC steering.
+derives the collision map, tints everything by the ambient, and exports the
+waypoints for lap counting and NPC steering.

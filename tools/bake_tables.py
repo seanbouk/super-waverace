@@ -624,11 +624,20 @@ MINI_L = ["100", "100", "100", "100", "111"]
 MINI_R = ["110", "101", "110", "101", "101"]
 
 
+# buoys draw with their OWN OBJ palette (5, CGRAM 208-223) so rider
+# recolours and the per-course ambient never argue over them; the slot
+# numbers still mirror the player's red / warm-yellow pairs (the art was
+# authored against palette 0 and the indices are baked into the tiles)
+BUOY_PAL = 5
+BUOY_PALETTE = [(0, 0, 0)] * 16
+for _i in (1, 2, 9, 10, 11, 12):
+    BUOY_PALETTE[_i] = SKI_PALETTE[_i]
+
+
 def buoy_grid(size, right):
     """Flat-bottomed circle (stable silhouette across scales), letter always."""
     g = [[0] * size for _ in range(size)]
-    # palette-0 slots: red = the player's clothing B pair, yellow = the
-    # player's warm-yellow jetski pair (constant: buoys always draw pal 0)
+    # BUOY_PALETTE slots: 9/10 red, 11/12 yellow, 1 outline, 2 white
     body, shade = (9, 10) if right else (11, 12)
     letter_col = 2 if right else 1
     c = (size - 1) / 2.0
@@ -763,18 +772,25 @@ def build_ski_sheet():
     blitg(lamp_cell(10, 11), 16, 112, 16)
     blitg(lamp_cell(12, 13), 32, 112, 16)
     tiles = encode_4bpp(sheet, 16, 16)
+    return tiles, pal_bytes(SKI_PALETTE), sheet
 
-    def pal_bytes(cols):
-        out = bytearray()
-        for r, g, b in cols:
-            out += struct.pack("<H", ((b >> 3) << 10) | ((g >> 3) << 5) | (r >> 3))
-        return out
 
-    pal = pal_bytes(SKI_PALETTE)
-    npc = bytearray()
+def obj_palettes(amb, where):
+    """The per-course OBJ palette block: palettes 0-3 (player + 3 NPC
+    recolours, CGRAM 128-191, 128 bytes) and the buoy palette 5 (CGRAM
+    208-223, 32 bytes), all under the course's ambient light. Spray rides
+    in palette 0 (slots 2/13) so it dims too; lamps (4) and HUD are exempt."""
+    riders = [list(SKI_PALETTE)]
     for over in NPC_PALETTES:
-        npc += pal_bytes([over.get(i, c) for i, c in enumerate(SKI_PALETTE)])
-    return tiles, bytes(pal), bytes(npc), sheet
+        riders.append([over.get(i, c) for i, c in enumerate(SKI_PALETTE)])
+    block = bytearray()
+    for n, cols in enumerate(riders):
+        cols = [tint(c, amb) for c in cols]
+        lint_pairs(cols, RIDER_PAIRS, "rider {0} palette".format(n + 1), where)
+        block += pal_bytes(cols)
+    buoy = [tint(c, amb) for c in BUOY_PALETTE]
+    lint_pairs(buoy, ((9, 10), (11, 12)), "buoy palette", where)
+    return bytes(block), pal_bytes(buoy)
 
 
 def build_tall_sheet():
@@ -928,6 +944,89 @@ COURSE_COLORS = {
     # SHAL_BLUE is set at bake time to the lightest deep-water rotation
     # colour (fixed copy, so the shallows don't flow)
 }
+CHECK_COLORS = {CHECK_DARK: (16, 16, 20), CHECK_WHITE: (250, 250, 250)}
+# the sand distance fade's end colours (not CGRAM entries: the HDMA table
+# sweeps entry 8 from `sand_far` at the horizon through SAND to `sand_deep`
+# at the ski)
+SAND_FAR_DEFAULT = (248, 244, 228)   # pale horizon, still warm-tinted
+SAND_DEEP_DEFAULT = (212, 184, 120)  # darker + more saturated at the ski
+
+# ---- per-course palette + ambient light (course.json "palette"/"ambient") -
+# Palette ROLES are fixed (the bake paints by index; EXTBG bits, glow
+# exemption and the sand-fade HDMA all key on indices) - a course only
+# changes the RGB behind a role. Names are what the course painter shows.
+PALETTE_ROLES = {
+    "sand": SAND, "sand_shade": SAND_SH, "foam": FOAM, "wet_sand": WET_SAND,
+    "float": FLOAT_A, "calm": CALM, "teal": TEAL, "teal_sand": TEAL_SAND,
+    "check_dark": CHECK_DARK, "check_white": CHECK_WHITE,
+}
+FADE_ROLES = ("sand_far", "sand_deep")
+# shade pairs that must survive the ambient multiply + 5-bit quantisation
+# (a dark ambient can fold light and dark into one CGRAM value and flatten
+# the art); indices are CGRAM entries
+COURSE_PAIRS = ((SAND, WET_SAND), (SAND, SAND_SH), (TEAL, TEAL_SAND),
+                (FOAM, SHAL_BLUE), (CHECK_DARK, CHECK_WHITE))
+RIDER_PAIRS = ((3, 4), (5, 6), (7, 8), (9, 10), (11, 12))
+
+
+def parse_rgb(v, where):
+    """'#rrggbb' or [r, g, b] -> (r, g, b)."""
+    if isinstance(v, str):
+        s = v.lstrip("#")
+        assert len(s) == 6, where + ": colour must be #rrggbb"
+        return tuple(int(s[i:i + 2], 16) for i in (0, 2, 4))
+    assert len(v) == 3, where + ": colour must be #rrggbb or [r,g,b]"
+    return tuple(int(x) for x in v)
+
+
+def load_style(cj, where):
+    """course.json -> (index -> rgb overrides, fade endpoints, ambient).
+    Ambient is an RGB multiplier, 255 = neutral; it is applied AT BAKE to
+    every in-world palette (course + water, sand fade, all rider OBJ
+    palettes, buoys, spray) - zero runtime cost. HUD text and the start
+    lamps are exempt (readability / self-lit), and so is the sky band."""
+    over = {}
+    fade = {"sand_far": SAND_FAR_DEFAULT, "sand_deep": SAND_DEEP_DEFAULT}
+    for name, v in (cj.get("palette") or {}).items():
+        if name in PALETTE_ROLES:
+            over[PALETTE_ROLES[name]] = parse_rgb(v, where + " palette." + name)
+        elif name in FADE_ROLES:
+            fade[name] = parse_rgb(v, where + " palette." + name)
+        else:
+            raise AssertionError(where + ": unknown palette role '" + name
+                                 + "' (roles: " + ", ".join(
+                                     sorted(list(PALETTE_ROLES) + list(FADE_ROLES)))
+                                 + ")")
+    amb = parse_rgb(cj.get("ambient", (255, 255, 255)), where + " ambient")
+    return over, fade, amb
+
+
+def tint(rgb, amb):
+    """Ambient multiply, 255 = identity (exact: the default course bakes
+    byte-identical to the pre-ambient build)."""
+    return tuple(min(255, (c * a + 127) // 255) for c, a in zip(rgb, amb))
+
+
+def rgb15(rgb):
+    r, g, b = rgb
+    return ((b >> 3) << 10) | ((g >> 3) << 5) | (r >> 3)
+
+
+def pal_bytes(cols):
+    out = bytearray()
+    for c in cols:
+        out += struct.pack("<H", rgb15(c))
+    return bytes(out)
+
+
+def lint_pairs(cols, pairs, what, where):
+    """Warn when a shade pair quantises to one CGRAM value - the art loses
+    its shading silently otherwise."""
+    for i, j in pairs:
+        if rgb15(cols[i]) == rgb15(cols[j]):
+            print("WARNING: {0}: {1} slots {2}/{3} collapse to one 15-bit "
+                  "colour {4} under this ambient".format(where, what, i, j,
+                                                          cols[i]))
 
 
 def load_course(path):
@@ -1468,16 +1567,22 @@ def bake_profile(pp, sky_switch, sky_ref):
     return out
 
 
-def bake_course(cdir, cjson_extra):
+def bake_course(cdir, sky_switch):
     """Everything derived from one course folder: canvas -> tiles/map/pal,
-    packed collision, gates, start grid, rotation colours, sand fade
-    (needs the GLOBAL sky_switch - filled in by the caller)."""
+    packed collision, gates, start grid, rotation colours, the course's
+    OBJ palettes and sand fade (the fade needs the GLOBAL sky_switch)."""
     c = {}
+    where = os.path.basename(cdir)
+    with open(os.path.join(cdir, "course.json")) as f:
+        cj = json.load(f)
+    over, fade, amb = load_style(cj, where)
     pat, palette = load_pattern(cdir)
     for idx, rgb in COURSE_COLORS.items():
         palette[idx] = rgb
-    palette[CHECK_DARK] = (16, 16, 20)     # start-line checker black
-    palette[CHECK_WHITE] = (250, 250, 250)  # start-line checker white
+    for idx, rgb in CHECK_COLORS.items():
+        palette[idx] = rgb
+    for idx, rgb in over.items():
+        palette[idx] = rgb
     wp = dict(rotStart=P["rotStart"], rotCount=P["rotCount"],
               rotFrames=P["rotFrames"])
     wpath = os.path.join(cdir, "water_params.json")
@@ -1491,6 +1596,17 @@ def bake_course(cdir, cjson_extra):
                 wp[k] = int(wj[k])
     rs, rc = wp["rotStart"], wp["rotCount"]
     palette[SHAL_BLUE] = max((palette[rs + i] for i in range(rc)), key=sum)
+    # ambient light: every CGRAM entry the course ships (1-15 water +
+    # course block, 48-51 checker + teals) is tinted here, once, so the
+    # tiles, the preview PNG, the rotation colours and the ROM palette all
+    # agree. Entry 0 (sky backdrop) and everything above 51 are not ours.
+    for idx in list(range(1, 16)) + [CHECK_DARK, CHECK_WHITE, TEAL_SAND]:
+        palette[idx] = tint(palette[idx], amb)
+    lint_pairs(palette, COURSE_PAIRS, "course palette", where)
+    c["obj_pal"], c["buoy_pal"] = obj_palettes(amb, where)
+    c["fade"] = sand_fade_table(sky_switch, palette[SAND],
+                                tint(fade["sand_far"], amb),
+                                tint(fade["sand_deep"], amb))
     course = load_course(os.path.join(cdir, "course.json"))
     assert course, "unreadable course.json in " + cdir
 
@@ -1552,22 +1668,21 @@ def bake_course(cdir, cjson_extra):
     return c
 
 
-def sand_fade_table(sky_switch):
+def sand_fade_table(sky_switch, sand, sand_far, sand_deep):
     """HDMA ch0 hold-run table: CGRAM entry 8 (dry sand) repainted down the
     frame - paler/washed far, richer/darker near; wave-phase independent BY
-    DESIGN (divorces the land's light from the breathing sea)."""
-    sand_far = (248, 244, 228)   # pale horizon, still warm-tinted
-    sand_deep = (212, 184, 120)  # darker + more saturated at the ski
+    DESIGN (divorces the land's light from the breathing sea). Per course:
+    the three colours arrive already under the course's ambient."""
     fade = []
     sand_mid = (sky_switch + 224) // 2
     for y in range(224):
         if y <= sand_mid:
             t = 0.0 if y <= sky_switch else \
                 (y - sky_switch) / float(sand_mid - sky_switch)
-            a, b = sand_far, COURSE_COLORS[SAND]
+            a, b = sand_far, sand
         else:
             t = (y - sand_mid) / float(223 - sand_mid)
-            a, b = COURSE_COLORS[SAND], sand_deep
+            a, b = sand, sand_deep
         c5 = [round(f + (n - f) * t) >> 3 for f, n in zip(a, b)]
         fade.append((c5[2] << 10) | (c5[1] << 5) | c5[0])
     tab = bytearray()
@@ -1632,8 +1747,8 @@ def main():
 
     # ---- bake every profile and course ----
     baked_profs = [bake_profile(pp, sky_switch, sky_ref) for pp in profiles]
-    baked_courses = [bake_course(cdir, None) for _, cdir, _, _ in course_meta]
-    sand_tab = sand_fade_table(sky_switch)  # shared until per-course palettes
+    baked_courses = [bake_course(cdir, sky_switch)
+                     for _, cdir, _, _ in course_meta]
     for i, ((folder, cdir, mname, pi), bc) in enumerate(
             zip(course_meta, baked_courses)):
         rows, pal = bc["preview"]
@@ -1681,11 +1796,20 @@ def main():
         asm.append(db_lines(bc["pal"][2:32]))
         asm.append("crs{0}_pal48:".format(ci))
         asm.append(db_lines(bc["pal"][96:104]))
+        # OBJ palettes 0-3 (128-191) + buoy palette 5 (208-223) and the
+        # sand-fade HDMA table, all under the course's ambient light
+        asm.append("crs{0}_obj:".format(ci))
+        asm.append(db_lines(bc["obj_pal"]))
+        asm.append("crs{0}_buoy:".format(ci))
+        asm.append(db_lines(bc["buoy_pal"]))
+        asm.append("crs{0}_fade:".format(ci))
+        asm.append(db_lines(bc["fade"]))
         asm.append("crs{0}_coll:".format(ci))
         asm.append(db_lines(bc["coll"]))
         asm.append(".ends")
         asm.append("")
-        for lbl in ("tiles", "map", "pal1", "pal48", "coll"):
+        for lbl in ("tiles", "map", "pal1", "pal48", "obj", "buoy", "fade",
+                    "coll"):
             externs.append("extern char crs{0}_{1};".format(ci, lbl))
 
     # s0.7 sine table for the camera heading (256 binary degrees)
@@ -1698,7 +1822,7 @@ def main():
     asm.append("")
 
     # jet ski sprite sheet (4bpp OBJ tiles) + palette
-    ski_tiles, ski_pal, npc_pals, ski_sheet = build_ski_sheet()
+    ski_tiles, ski_pal, ski_sheet = build_ski_sheet()
     tall_tiles, tall_sheet = build_tall_sheet()
     write_png(os.path.join(OUT_DIR, "ski.png"),
               [bytes(r) for r in ski_sheet + tall_sheet],
@@ -1708,16 +1832,12 @@ def main():
     asm.append(db_lines(ski_tiles))
     asm.append("tall_tiles:")
     asm.append(db_lines(tall_tiles))
+    # boot-time palette 0 for oamInitGfxSet; courseLoad replaces palettes
+    # 0-3 + 5 with the course's ambient-lit set before the first frame
     asm.append("ski_pal:")
     asm.append(db_lines(ski_pal))
-    asm.append("npc_pals:")
-    asm.append(db_lines(npc_pals))
-    lampb = bytearray()
-    for r, g, b in LAMP_PALETTE:
-        lampb += struct.pack("<H", ((b >> 3) << 10) | ((g >> 3) << 5)
-                             | (r >> 3))
     asm.append("lamp_pal:")
-    asm.append(db_lines(bytes(lampb)))
+    asm.append(db_lines(pal_bytes(LAMP_PALETTE)))
     asm.append("sky_gfx:")
     asm.append(db_lines(sky_gfx))
     asm.append("sky_pal2:")
@@ -1736,15 +1856,6 @@ def main():
     asm.append(db_lines(hud_pal))
     asm.append(".ends")
     asm.append("")
-
-    # sand distance-fade table (shared while palettes are; per-course when
-    # the ambient-light pass lands)
-    asm.append('.section ".sandfade" superfree')
-    asm.append("sand_fade:")
-    asm.append(db_lines(sand_tab))
-    asm.append(".ends")
-    asm.append("")
-    externs.append("extern char sand_fade;")
 
     with open(os.path.join(OUT_DIR, "wavetables.asm"), "w", newline="\n") as f:
         f.write("\n".join(asm))
@@ -1821,8 +1932,12 @@ extern u8 gateLeft[WAVE_MAX_BUOYS + 1];
 extern s8 gateNx[WAVE_MAX_BUOYS + 1];
 extern s8 gateNy[WAVE_MAX_BUOYS + 1];
 extern u8 gateWp[WAVE_MAX_BUOYS + 1];
-/* per-course blobs (ROM addresses for the loaders) + texture rotation */
-extern dmaMemory csTiles, csMap, csPal1, csPal48, csColl, csFade;
+/* per-course blobs (ROM addresses for the loaders) + texture rotation.
+   csObj = OBJ palettes 0-3 (CGRAM 128, 128 bytes), csBuoy = palette 5
+   (CGRAM 208, 32 bytes), csFade = the sand-fade HDMA table - all baked
+   under the course's ambient light */
+extern dmaMemory csTiles, csMap, csPal1, csPal48, csObj, csBuoy, csColl, csFade;
+#define WAVE_BUOY_PAL {6}
 extern u16 csTilLen;
 extern u8 wvRotStart, wvRotCount, wvRotFrames;
 extern u16 rotCols[8];
@@ -1853,7 +1968,7 @@ void courseNameTo(u8 c, char *out);
            .format(MAX_PHASES, len(baked_courses), UI_LINES,
                    round((P["camH"] / (P["skiDist"] ** 2 + P["camH"] ** 2))
                          * ((SCANLINES - 1) / math.radians(P["fovV"])) * 2 * 16),
-                   SKI_WATERLINE_ROW - 32, round(P["skiDist"])))
+                   SKI_WATERLINE_ROW - 32, round(P["skiDist"]), BUOY_PAL))
 
     # ---- wavedata.c ----
     with open(os.path.join(OUT_DIR, "wavedata.c"), "w", newline="\n") as f:
@@ -1874,7 +1989,8 @@ void courseNameTo(u8 c, char *out);
         f.write("u8 gateLeft[WAVE_MAX_BUOYS + 1];\n")
         f.write("s8 gateNx[WAVE_MAX_BUOYS + 1];\ns8 gateNy[WAVE_MAX_BUOYS + 1];\n")
         f.write("u8 gateWp[WAVE_MAX_BUOYS + 1];\n")
-        f.write("dmaMemory csTiles, csMap, csPal1, csPal48, csColl, csFade;\n")
+        f.write("dmaMemory csTiles, csMap, csPal1, csPal48, csObj, csBuoy, "
+                "csColl, csFade;\n")
         f.write("u16 csTilLen;\n")
         f.write("u8 wvRotStart, wvRotCount, wvRotFrames;\nu16 rotCols[8];\n\n")
 
@@ -1937,8 +2053,10 @@ void courseNameTo(u8 c, char *out);
             f.write("        csMap.mem.p = (u8 *)&crs{0}_map;\n".format(ci))
             f.write("        csPal1.mem.p = (u8 *)&crs{0}_pal1;\n".format(ci))
             f.write("        csPal48.mem.p = (u8 *)&crs{0}_pal48;\n".format(ci))
+            f.write("        csObj.mem.p = (u8 *)&crs{0}_obj;\n".format(ci))
+            f.write("        csBuoy.mem.p = (u8 *)&crs{0}_buoy;\n".format(ci))
             f.write("        csColl.mem.p = (u8 *)&crs{0}_coll;\n".format(ci))
-            f.write("        csFade.mem.p = (u8 *)&sand_fade;\n")
+            f.write("        csFade.mem.p = (u8 *)&crs{0}_fade;\n".format(ci))
             f.write("        wvRotStart = {0};\n".format(bc["rot"]["rotStart"]))
             f.write("        wvRotCount = {0};\n".format(bc["rot"]["rotCount"]))
             f.write("        wvRotFrames = {0};\n".format(bc["rot"]["rotFrames"]))
@@ -1957,7 +2075,7 @@ void courseNameTo(u8 c, char *out);
 
     # ---- byte-budget report ----
     fixed = len(ski_tiles) + len(tall_tiles) + len(sky_gfx) + len(cloud_gfx) \
-        + len(cloud_map) + len(hud_gfx) + len(hud_pal) + 256 + len(sand_tab)
+        + len(cloud_map) + len(hud_gfx) + len(hud_pal) + 256
     total_prof = 0
     for pf, (bp, nm) in enumerate(zip(baked_profs, prof_names)):
         sz = len(bp["rawd"]) + sum(len(t) for t in bp["tm"]) \
@@ -1967,11 +2085,13 @@ void courseNameTo(u8 c, char *out);
             pf, nm, bp["phases"], sz))
     total_crs = 0
     for ci, bc in enumerate(baked_courses):
-        sz = len(bc["pc7"]) + len(bc["mp7_rle"]) + 38 + len(bc["coll"])
+        pals = 38 + len(bc["obj_pal"]) + len(bc["buoy_pal"]) + len(bc["fade"])
+        sz = len(bc["pc7"]) + len(bc["mp7_rle"]) + pals + len(bc["coll"])
         total_crs += sz
-        print("course {0}: {1} bytes ({2} tiles raw, {3} map rle, {4} coll)"
-              .format(ci, sz, len(bc["pc7"]), len(bc["mp7_rle"]),
-                      len(bc["coll"])))
+        print("course {0}: {1} bytes ({2} tiles raw, {3} map rle, {4} coll, "
+              "{5} palettes+fade)".format(ci, sz, len(bc["pc7"]),
+                                         len(bc["mp7_rle"]), len(bc["coll"]),
+                                         pals))
     print("BUDGET: baked shared gfx ~{0}K, profiles {1}K, courses {2}K "
           "(+ code/sfx; 512K cap)".format(
               fixed // 1024, total_prof // 1024, total_crs // 1024))

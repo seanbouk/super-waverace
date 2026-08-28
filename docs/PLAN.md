@@ -207,7 +207,7 @@ ROM maths (512K jam cap): fixed content ~175K; per course ~37K raw
 HDMA tables ~5K; a is synthesised). 8 courses + 8 profiles ≈ ~465K.
 The bake grows a byte-budget report; calm 16-phase profiles cost half.
 
-Phases (1 done):
+Phases (1-4 done):
 1. **Decouple** ✓ — wave d/a to WRAM $7F (waveRawLoad expands: delta-d +
    PPU-multiplier a synthesis), collision packed 2bpc, course geometry
    (counts/start/grid/gates) runtime. Each step verified bit-exact
@@ -224,9 +224,19 @@ Phases (1 done):
    courseLoad(), byte-budget report. Verified: WRAM/VRAM byte-exact vs
    the bake, two-race flow bit-identical to the pre-restructure build,
    ISLAND + LAGOON selectable. ~29K/course + ~6-12K/profile.
-4. **Palette + ambient per course** — painter palette editor + ambient
-   swatch, bake tint pass + per-course OBJ palettes + collapse lint,
-   buoys to OBJ palette 5, courseLoad CGRAM upload.
+4. **Palette + ambient per course** ✓ — course.json `palette` (role ->
+   #rrggbb: the ten course CGRAM roles + the sand fade's far/deep ends)
+   and `ambient` (#rrggbb multiplier). The bake tints entries 1-15 +
+   48-51, the sand-fade HDMA table and OBJ palettes 0-3 (riders + spray)
+   per course; buoys moved to their own OBJ palette 5 (CGRAM 208) so they
+   stop aliasing the player's pairs; courseLoad uploads 128 bytes at 128
+   and 32 at 208 (lamps at 192 and the HUD stay lit; the sky band is
+   exempt too). Shade-pair collapse lint warns per palette. Painter grew
+   a Palette & light group with live map preview; export writes only
+   non-default values. Verified: ISLAND (no palette/ambient) bakes
+   byte-identical to the phase-3 build (every blob + fade + the OBJ block
+   == old ski_pal+npc_pals); LAGOON given a warm ambient + pale sand as
+   the first styled course, screenshot-checked. ~+280 bytes/course.
 5. **Content** — author courses 2..N; per-course gate lint + NPC pace
    check ride along.
 

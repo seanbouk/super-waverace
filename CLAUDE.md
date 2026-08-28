@@ -29,8 +29,15 @@ Machines: `seanb` (original) and `Sean` (Aug-28 clone, `C:\Users\Sean\Downloads\
   -> `assets/waves/calm.json` (wave lab export; identical profiles dedupe
   in ROM). `tools/wave_params.json` is the DEFAULT profile AND the global
   camera (camH/pitch/fov/skiDist - profiles must not change those; the
-  bake asserts). Committed; user iterates via the web tools and drops
-  files in. The bake prints a per-course/per-profile byte-budget report.
+  bake asserts). course.json may also carry `"palette"` (role ->
+  "#rrggbb"; roles = PALETTE_ROLES + sand_far/sand_deep in the bake, the
+  painter's Palette & light group edits them) and `"ambient"` ("#rrggbb"
+  multiplier, applied at bake to CGRAM 1-15/48-51, the sand fade and OBJ
+  palettes 0-3 + 5; NOT to the HUD, lamps or sky). Absent = defaults =
+  byte-identical to the pre-palette bake. Committed; user iterates via
+  the web tools and drops files in. The bake prints a per-course/
+  per-profile byte-budget report and WARNINGs for shade pairs that
+  collapse under a dark ambient.
 - Commit + push to main without asking (user's standing preference); CI builds
   and deploys the web player. Screenshots for the README live in `docs/`.
 
@@ -47,8 +54,9 @@ Machines: `seanb` (original) and `Sean` (Aug-28 clone, `C:\Users\Sean\Downloads\
    LoROM; `Mesen.exe --testrunner --timeout=60 game/superwaverace.sfc
    tools/mesen/tickshot.lua` (with the env vars from its header) proves
    the harness works. The conversation history does not travel: this
-   file + docs/PLAN.md "Multi-course" ARE the state. Phases 1-3 done,
-   next is phase 4 (palette + ambient per course, starts in the painter).
+   file + docs/PLAN.md "Multi-course" ARE the state. Phases 1-4 done,
+   next is phase 5 (content: author courses 2..N in the painter; LAGOON
+   is still an ISLAND clone with a warm palette).
 
 Lessons from the Aug-28 machine (`Sean`), all of which bit:
 - `winget install Git.Git`, `Python.Python.3.12`, `ezwinports.make` all need
@@ -346,7 +354,10 @@ KEY_LEFT sets hflip). Buoys borrow player slots 9/10 (red) and 11/12
 are the per-rider HULL pair now, and spray must not tint with it); the
 start lamps have their OWN palette (OBJ 4, CGRAM 192, LAMP_PALETTE in
 the bake). NPC recolours override slots 3-12 (hull + skin + kit - five
-adjustable pairs per rider).
+adjustable pairs per rider). Buoys draw with OBJ palette 5 (CGRAM 208,
+BUOY_PALETTE = the player's slots 1/2/9-12 copied, so the buoy art's
+baked indices still work) - WAVE_BUOY_PAL in drawLadder. All of 0-3 + 5
+are baked PER COURSE under its ambient (crs<n>_obj / crs<n>_buoy).
 
 ## Tuning knobs (game feel — user-driven, ask before big changes)
 
@@ -380,8 +391,10 @@ move waypoint 0/1 in the painter to move the grid.
   build today (01_island + 02_lagoon, a placeholder island clone on the
   16-phase "calm" profile), the menu lists them with an Up/Down cursor
   (cursor movement not yet exercised on hardware - testrunner has no
-  input; the flow was verified with AUTOPILOT_COURSE). Next: phase 4,
-  palette + ambient light per course.
+  input; the flow was verified with AUTOPILOT_COURSE). Phase 4 (palette
+  + ambient per course, buoys on OBJ palette 5) landed Aug 28: OBJ
+  palettes 0-3 + 5 are now loaded by courseLoad, NOT at boot (npc_pals is
+  gone; ski_pal only seeds oamInitGfxSet). Next: phase 5, content.
 - Race mode in progress — see docs/PLAN.md "Race mode" for the agreed design
   and phase list. Done: phases 1-4 — racing line + laps + waypoint autopilot;
   3 kinematic NPCs (sprites 5-7); rear-view NPC ski art at the 5 buoy scales

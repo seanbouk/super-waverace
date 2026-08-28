@@ -26,6 +26,10 @@
   #coords { font:12px monospace; color:var(--dim); margin-top:6px; min-height:16px; }
   #mini { margin-top:10px; }
   .hint { font-size:11px; color:var(--dim); }
+  .swatch { display:grid; grid-template-columns:90px 40px 1fr; align-items:center; gap:8px; margin-bottom:3px; font-size:12px; }
+  .swatch input[type=color] { width:40px; height:22px; padding:0; border:1px solid #3d4658; border-radius:4px; background:none; cursor:pointer; }
+  .swatch.lit label { color:var(--ink); }
+  .swatch .hex { font:11px monospace; color:var(--dim); }
   #refs { background:var(--panel); border-radius:8px; padding:14px 16px; width:300px; }
   #refs > b { font-size:12px; text-transform:uppercase; letter-spacing:.08em; color:var(--dim); display:block; margin-bottom:6px; }
   .refcard { position:relative; margin:8px 0; cursor:grab; border:1px solid #3d4658; border-radius:6px; overflow:hidden; }
@@ -61,6 +65,18 @@
       <button id="endRope">End current rope (Esc)</button>
       <button id="undoRope">Delete last rope</button>
       <button id="clearAll">Clear everything</button>
+    </div>
+    <div class="group"><b>Palette &amp; light</b>
+      <div id="palette"></div>
+      <div class="swatch"><label for="ambient">ambient</label><input type="color" id="ambient" value="#ffffff"><span class="hint">×</span></div>
+      <div class="hint" style="margin:4px 0 6px">
+        Roles are fixed CGRAM slots &mdash; a course changes only the RGB
+        behind each. <b>ambient</b> multiplies every in-world colour at
+        bake (course, water, sand fade, riders, buoys, spray); HUD, start
+        lamps and the sky are exempt. Very dark ambients collapse light /
+        dark pairs (the bake warns).
+      </div>
+      <button id="palReset">Reset palette to defaults</button>
     </div>
     <div class="group"><b>File</b>
       <button id="undoBtn">Undo (Ctrl+Z)</button>
@@ -114,11 +130,87 @@ let buoys = [];       // [x, y, "L"/"R"] texel coords
 let path = [];        // racing line waypoints [x,y] texel coords, race order
 let notes = [];       // [x, y, "text"] annotations (exported; the bake ignores them)
 let current = null;   // rope being drawn
+let importedExtra = {}; // pass-through course.json keys (wave_profile)
 let painting = false;
 let drag = null;      // {kind:"path"|"buoy"|"note", idx}
 
-const COL = { w: "#1d4f94", s: "#e0d2a2" };
 const WP_RADIUS = 50; // texels: the game's 200-world-unit Manhattan advance radius
+
+// ---- palette roles + ambient light (mirrors COURSE_COLORS etc. in the bake) --
+// [role, label, default]. The first ten are CGRAM entries the bake paints
+// by index; sand_far / sand_deep are the sand distance fade's end colours.
+const ROLES = [
+  ["sand",        "sand",            "#e8d6a4"],
+  ["sand_shade",  "sand shade",      "#d4be8e"],
+  ["foam",        "foam",            "#acd6f6"],
+  ["wet_sand",    "wet sand / rope", "#baa476"],
+  ["float",       "rope float",      "#d82cd6"],
+  ["calm",        "calm wake",       "#163e7a"],
+  ["teal",        "shallows teal",   "#3cb6d6"],
+  ["teal_sand",   "shore teal",      "#80c4a8"],
+  ["check_dark",  "checker dark",    "#101014"],
+  ["check_white", "checker white",   "#fafafa"],
+  ["sand_far",    "sand @ horizon",  "#f8f4e4"],
+  ["sand_deep",   "sand @ ski",      "#d4b878"],
+];
+let palette = {};            // role -> "#rrggbb" (always complete)
+let ambient = "#ffffff";     // RGB multiplier, white = neutral
+function defaultPalette() {
+  const p = {};
+  for (const [k, , d] of ROLES) p[k] = d;
+  return p;
+}
+palette = defaultPalette();
+function hexRgb(h) { return [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16)); }
+function rgbHex(c) { return "#" + c.map(v => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, "0")).join(""); }
+// the bake's tint(): multiply by ambient, 255 = identity
+function lit(h) {
+  const a = hexRgb(ambient);
+  return rgbHex(hexRgb(h).map((v, i) => Math.floor((v * a[i] + 127) / 255)));
+}
+// map colours follow the palette: sand = the role, water = the sea texture's
+// mid blue (fixed here; the water designer owns it) - both under the ambient
+const WATER_BASE = "#1d4f94";
+let COL = { w: WATER_BASE, s: "#e0d2a2" };
+function buildPaletteUI() {
+  const box = document.getElementById("palette");
+  box.innerHTML = "";
+  for (const [k, label] of ROLES) {
+    const row = document.createElement("div");
+    row.className = "swatch" + (ambient !== "#ffffff" ? " lit" : "");
+    const lab = document.createElement("label");
+    lab.textContent = label;
+    const inp = document.createElement("input");
+    inp.type = "color";
+    inp.value = palette[k];
+    inp.title = k;
+    const hex = document.createElement("span");
+    hex.className = "hex";
+    hex.textContent = ambient === "#ffffff" ? palette[k] : "→ " + lit(palette[k]);
+    inp.addEventListener("input", () => {
+      palette[k] = inp.value;
+      hex.textContent = ambient === "#ffffff" ? palette[k] : "→ " + lit(palette[k]);
+      render();
+    });
+    inp.addEventListener("change", pushUndo);
+    row.append(lab, inp, hex);
+    box.appendChild(row);
+  }
+  document.getElementById("ambient").value = ambient;
+}
+document.getElementById("ambient").addEventListener("input", ev => {
+  ambient = ev.target.value;
+  buildPaletteUI();
+  render();
+});
+document.getElementById("ambient").addEventListener("change", pushUndo);
+document.getElementById("palReset").addEventListener("click", () => {
+  pushUndo();
+  palette = defaultPalette();
+  ambient = "#ffffff";
+  buildPaletteUI();
+  render();
+});
 
 document.getElementById("bsize").addEventListener("input", e => {
   e.target.parentElement.querySelector("output").value = e.target.value;
@@ -131,13 +223,16 @@ function tool() { return document.querySelector('input[name="tool"]:checked').va
 let undoStack = [], redoStack = [];
 function snapshot() {
   return JSON.stringify({ zones: zones.map(r => r.join("")),
-                          ropes, buoys, path, notes, current });
+                          ropes, buoys, path, notes, current, palette, ambient });
 }
 function restore(s) {
   const c = JSON.parse(s);
   zones = c.zones.map(r => r.split(""));
   ropes = c.ropes; buoys = c.buoys; path = c.path; notes = c.notes;
   current = c.current;
+  palette = Object.assign(defaultPalette(), c.palette || {});
+  ambient = c.ambient || "#ffffff";
+  buildPaletteUI();
   render();
 }
 function pushUndo() {
@@ -165,13 +260,14 @@ document.addEventListener("keydown", e => {
 
 // ---- rendering --------------------------------------------------------------
 function render() {
+  COL = { w: lit(WATER_BASE), s: lit(palette.sand) };
   for (let y = 0; y < N; y++)
     for (let x = 0; x < N; x++) {
       ctx.fillStyle = COL[zones[y][x]];
       ctx.fillRect(x * CELL, y * CELL, CELL, CELL);
     }
   // shore hint
-  ctx.fillStyle = "#f4f2e6";
+  ctx.fillStyle = lit(palette.foam);
   for (let y = 0; y < N; y++)
     for (let x = 0; x < N; x++) {
       if (zones[y][x] !== "s") continue;
@@ -182,7 +278,7 @@ function render() {
   // ropes
   const drawRope = (pts, open) => {
     if (pts.length < 1) return;
-    ctx.strokeStyle = open ? "#ffd24a" : "#e04a3c";
+    ctx.strokeStyle = open ? "#ffd24a" : lit(palette.float);
     ctx.lineWidth = 1.5;
     ctx.beginPath();
     ctx.moveTo(pts[0][0] / 2, pts[0][1] / 2);
@@ -228,7 +324,7 @@ function render() {
         for (let s = 0; s < 6; s += 3) {
           const x = horiz ? (sx + t + 1024) % 1024 : (sx - 3 + s + 1024) % 1024;
           const y = horiz ? (sy - 3 + s + 1024) % 1024 : (sy + t + 1024) % 1024;
-          ctx.fillStyle = ((t / 3 + s / 3) & 1) ? "#f4f4f4" : "#16161a";
+          ctx.fillStyle = ((t / 3 + s / 3) & 1) ? lit(palette.check_white) : lit(palette.check_dark);
           ctx.fillRect(x / 2, y / 2, 1.5, 1.5);
         }
     }
@@ -557,7 +653,7 @@ document.getElementById("undoRope").addEventListener("click", () => {
   render();
 });
 document.getElementById("clearAll").addEventListener("click", () => {
-  if (!confirm("Clear the map, ropes, buoys, path and notes? (undoable)")) return;
+  if (!confirm("Clear the map, ropes, buoys, path and notes? (palette kept; undoable)")) return;
   pushUndo();
   zones = Array.from({length: N}, () => Array(N).fill("w"));
   ropes = [];
@@ -569,13 +665,22 @@ document.getElementById("clearAll").addEventListener("click", () => {
 });
 
 document.getElementById("exportBtn").addEventListener("click", () => {
-  const json = JSON.stringify({
+  // palette/ambient are written only when they differ from the defaults,
+  // so an untouched course stays byte-identical to its pre-palette bake
+  const defs = defaultPalette();
+  const pal = {};
+  for (const k in palette) if (palette[k] !== defs[k]) pal[k] = palette[k];
+  const out = {
     zones: zones.map(r => r.join("")),
     ropes: ropes,
     buoys: buoys,
     path: path,
     notes: notes
-  }) + "\n";
+  };
+  if (importedExtra.wave_profile) out.wave_profile = importedExtra.wave_profile;
+  if (Object.keys(pal).length) out.palette = pal;
+  if (ambient !== "#ffffff") out.ambient = ambient;
+  const json = JSON.stringify(out) + "\n";
   const a = document.createElement("a");
   a.href = URL.createObjectURL(new Blob([json], { type: "application/json" }));
   a.download = "course.json";
@@ -594,7 +699,12 @@ document.getElementById("importFile").addEventListener("change", ev => {
     buoys = c.buoys || [];
     path = c.path || [];
     notes = c.notes || [];
+    palette = Object.assign(defaultPalette(), c.palette || {});
+    ambient = c.ambient || "#ffffff";
+    // keys the painter does not edit but must not drop on re-export
+    importedExtra = { wave_profile: c.wave_profile };
     current = null;
+    buildPaletteUI();
     render();
   });
   ev.target.value = "";
@@ -686,6 +796,7 @@ for (const r of document.querySelectorAll('input[name="tool"]'))
   r.addEventListener("change", render);
 
 renderRefs();
+buildPaletteUI();
 render();
 </script>
 </body>

@@ -33,7 +33,8 @@ u16 cpDst;       // $7F offset
 u16 cpLen;       // bytes (even), copyTo7F only
 dmaMemory mapBuf; // the $7F8000 decode buffer, as a pointer for the lib
 u8 courseSel;     // menu cursor; persists between menus
-extern char ski_tiles, ski_pal, npc_pals;
+extern char ski_tiles, ski_pal; // OBJ palettes 0-3 + 5 are per course
+                                // (csObj/csBuoy, loaded by courseLoad)
 extern char tall_tiles; // OBJ name table 2: the stacked tall racers
 extern char lamp_pal;   // start-tree lamps: own OBJ palette (4) - the ski
                         // palette's slots are all rider roles now
@@ -384,32 +385,39 @@ static void sprayInject(void)
 //---------------------------------------------------------------------------------
 // draw OAM sprite `oid` (byte-offset id!) at the projected point: five scales,
 // all bottom-anchored to the surface row so a scale change never reads as
-// movement. `right` picks the red R art over the yellow L art.
+// movement. `right` picks the red R art over the yellow L art. Buoys draw
+// with their own OBJ palette (WAVE_BUOY_PAL, CGRAM 208): they used to
+// borrow the player's, which the per-course ambient now recolours.
 static void drawLadder(u16 oid, u8 right)
 {
     if (pjV < SCALE_V1)
     {
-        oamSet(oid, pjCol - 16, rdRow - 31, 3, 0, 0, right ? 12 : 8, 0);
+        oamSet(oid, pjCol - 16, rdRow - 31, 3, 0, 0, right ? 12 : 8,
+               WAVE_BUOY_PAL);
         oamSetEx(oid, OBJ_LARGE, OBJ_SHOW);
     }
     else if (pjV < SCALE_V2)
     {
-        oamSet(oid, pjCol - 16, rdRow - 31, 3, 0, 0, right ? 68 : 64, 0);
+        oamSet(oid, pjCol - 16, rdRow - 31, 3, 0, 0, right ? 68 : 64,
+               WAVE_BUOY_PAL);
         oamSetEx(oid, OBJ_LARGE, OBJ_SHOW);
     }
     else if (pjV < SCALE_V3)
     {
-        oamSet(oid, pjCol - 8, rdRow - 15, 3, 0, 0, right ? 74 : 72, 0);
+        oamSet(oid, pjCol - 8, rdRow - 15, 3, 0, 0, right ? 74 : 72,
+               WAVE_BUOY_PAL);
         oamSetEx(oid, OBJ_SMALL, OBJ_SHOW);
     }
     else if (pjV < SCALE_V4)
     {
-        oamSet(oid, pjCol - 8, rdRow - 15, 3, 0, 0, right ? 78 : 76, 0);
+        oamSet(oid, pjCol - 8, rdRow - 15, 3, 0, 0, right ? 78 : 76,
+               WAVE_BUOY_PAL);
         oamSetEx(oid, OBJ_SMALL, OBJ_SHOW);
     }
     else
     {
-        oamSet(oid, pjCol - 8, rdRow - 15, 3, 0, 0, right ? 106 : 104, 0);
+        oamSet(oid, pjCol - 8, rdRow - 15, 3, 0, 0, right ? 106 : 104,
+               WAVE_BUOY_PAL);
         oamSetEx(oid, OBJ_SMALL, OBJ_SHOW);
     }
 }
@@ -569,6 +577,10 @@ static void courseLoad(u8 c)
     dmaCopyVram7(mapBuf.mem.p, 0x0000, 16384, 0x00, 0x1800);
     dmaCopyCGram(csPal1.mem.p, 1, 30);   // 1-15: water + course block
     dmaCopyCGram(csPal48.mem.p, 48, 8);  // 48-51: checker + teal
+    // the course's ambient light is baked into its OBJ palettes too:
+    // 0-3 riders (+ spray in 0), 5 buoys. 4 (lamps) and the HUD stay lit
+    dmaCopyCGram(csObj.mem.p, 128, 128);
+    dmaCopyCGram(csBuoy.mem.p, 208, 32);
     setScreenOn();
 }
 
@@ -847,8 +859,7 @@ int main(void)
     // the UI map moved to 0x7000 to make room), OBJ palette 0 (CGRAM 128+)
     oamInitGfxSet(&ski_tiles, WAVE_SKI_SHEET, &ski_pal, 32, 0, 0x6000,
                   OBJ_SIZE16_L32);
-    // NPC racer recolours: OBJ palettes 1-3 (CGRAM 144-191), shared tiles
-    dmaCopyCGram((u8 *)&npc_pals, 144, 96);
+    // (OBJ palettes 0-3 riders + 5 buoys come from courseLoad, per course)
     dmaCopyCGram((u8 *)&lamp_pal, 192, 32); // start-tree lamps: palette 4
     // stacked tall racers: name table 2 right after the sheet
     dmaCopyVram((u8 *)&tall_tiles, 0x7000, WAVE_TALL_SHEET);
