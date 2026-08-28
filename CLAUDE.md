@@ -30,6 +30,22 @@ make -C game            # bake (python) -> compile -> link game/superwaverace.sf
 - Commit + push to main without asking (user's standing preference); CI builds
   and deploys the web player. Screenshots for the README live in `docs/`.
 
+## New machine checklist (nothing below is in the repo)
+
+1. Clone; run `scripts/setup-windows.sh` -> recreates `~/pvsneslib` (4.6.0)
+   WITH the two `devkitsnes/snes_rules` patches. Install make via WinGet
+   (the PATH export above).
+2. Mesen 2.1.1 portable -> `~/mesen2/Mesen.exe`. Run it once, then in
+   `Documents/Mesen2/settings.json` set `Debug.ScriptWindow.AllowIoOsAccess`
+   = true (Lua io) and `Snes.RamPowerOnState` = "Random" (hardware-like
+   garbage; flip to "AllZeros" ONLY for dual-build equivalence runs).
+3. `make -C game` should print the byte-budget report and link a 512K-cap
+   LoROM; `Mesen.exe --testrunner --timeout=60 game/superwaverace.sfc
+   tools/mesen/tickshot.lua` (with the env vars from its header) proves
+   the harness works. The conversation history does not travel: this
+   file + docs/PLAN.md "Multi-course" ARE the state. Phases 1-3 done,
+   next is phase 4 (palette + ambient per course, starts in the painter).
+
 ## Headless verification loop (Mesen 2)
 
 Mesen 2.1.1 portable at `~/mesen2/Mesen.exe`. `Documents/Mesen2/settings.json`
