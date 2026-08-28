@@ -230,13 +230,15 @@ Phases (1-4 done):
    48-51, the sand-fade HDMA table and OBJ palettes 0-3 (riders + spray)
    per course; buoys moved to their own OBJ palette 5 (CGRAM 208) so they
    stop aliasing the player's pairs; courseLoad uploads 128 bytes at 128
-   and 32 at 208 (lamps at 192 and the HUD stay lit; the sky band is
-   exempt too). Shade-pair collapse lint warns per palette. Painter grew
+   and 32 at 208 (lamps at 192 and the HUD stay lit). The sky is per
+   course too (`sky` = zenith -> CGRAM 0 + the 16 band anchors at 32; the
+   BG3 cloud pair 29-30 rides the ambient). Shade-pair lint per palette. Painter grew
    a Palette & light group with live map preview; export writes only
    non-default values. Verified: ISLAND (no palette/ambient) bakes
    byte-identical to the phase-3 build (every blob + fade + the OBJ block
-   == old ski_pal+npc_pals); LAGOON given a warm ambient + pale sand as
-   the first styled course, screenshot-checked. ~+280 bytes/course.
+   == old ski_pal+npc_pals, sky == old sky_pal2); LAGOON is a sunset
+   (orange zenith, #ffb080 ambient, warm sand, red floats) - the first
+   styled course, screenshot-checked. ~+320 bytes/course.
 5. **Content** — author courses 2..N; per-course gate lint + NPC pace
    check ride along.
 

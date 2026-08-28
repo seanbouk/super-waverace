@@ -220,6 +220,25 @@ def phase_tables(phi, sky_ref, switch):
     return tab_tm, tab_g, n_sky
 
 
+def sky_palette(switch, sky_ref, sky_rgb):
+    """The 16 band anchors for one zenith colour: 5-bit base plus the
+    INTEGER white adds COLDATA uses, so the solid mode-7 strip below (which
+    adds the last anchor's value to backdrop 0 = the same base) continues
+    bit-exactly. Per course: a sunset is a warm zenith paling to peach."""
+    base5 = [c >> 3 for c in sky_rgb]
+
+    def anchor_add(k):
+        line = UI_LINES + (switch - UI_LINES) * k / 15.0
+        return min(31, round(sky_add_at(line, sky_ref)))
+
+    pal = bytearray()
+    for k in range(16):
+        a = anchor_add(k)
+        r, g, b = (min(31, c + a) for c in base5)
+        pal += struct.pack("<H", (b << 10) | (g << 5) | r)
+    return bytes(pal)
+
+
 def build_sky_band(switch, sky_ref):
     """Mode-1 sky tiles: an azure gradient from the UI band down to the
     mode switch, 16-colour palette with per-line 4px dithering (2D once
@@ -230,22 +249,13 @@ def build_sky_band(switch, sky_ref):
     does - so the solid mode-7 strip below continues the last anchor
     bit-exactly. Returns (tiles, palette bytes, n_map_rows)."""
     n_rows = (switch - UI_LINES) // 8 + 1  # +1: the scroll off-by-one row
-    base5 = [c >> 3 for c in SKY_RGB]
-
     # index 0 is TRANSPARENT in 4bpp: those pixels show the backdrop -
     # which IS the gradient's first colour (add 0, same as the HUD's
     # background), giving 16 gradient colours from a 15-entry palette.
     # The top must DITHER out of it, never sit flat: that needs anchor 1
-    # to differ from anchor 0, which the linear field guarantees.
-    def anchor_add(k):
-        line = UI_LINES + (switch - UI_LINES) * k / 15.0
-        return min(31, round(sky_add_at(line, sky_ref)))
-
-    pal = bytearray()
-    for k in range(16):
-        a = anchor_add(k)
-        r, g, b = (min(31, c + a) for c in base5)
-        pal += struct.pack("<H", (b << 10) | (g << 5) | r)
+    # to differ from anchor 0, which the linear field guarantees. The
+    # tiles are colour-agnostic (index dithers); the PALETTE is per course.
+    pal = sky_palette(switch, sky_ref, SKY_RGB)  # boot default
     pats = ((0, 0, 0, 0), (1, 0, 0, 0), (1, 0, 1, 0), (1, 1, 1, 0))
     grid = [[0] * 8 for _ in range(n_rows * 8)]
     for g in range(n_rows * 8):
@@ -961,6 +971,7 @@ PALETTE_ROLES = {
     "check_dark": CHECK_DARK, "check_white": CHECK_WHITE,
 }
 FADE_ROLES = ("sand_far", "sand_deep")
+SKY_ROLES = ("sky",)  # the zenith colour: backdrop 0 + the band's 16 anchors
 # shade pairs that must survive the ambient multiply + 5-bit quantisation
 # (a dark ambient can fold light and dark into one CGRAM value and flatten
 # the art); indices are CGRAM entries
@@ -987,18 +998,22 @@ def load_style(cj, where):
     lamps are exempt (readability / self-lit), and so is the sky band."""
     over = {}
     fade = {"sand_far": SAND_FAR_DEFAULT, "sand_deep": SAND_DEEP_DEFAULT}
+    sky = SKY_RGB
     for name, v in (cj.get("palette") or {}).items():
         if name in PALETTE_ROLES:
             over[PALETTE_ROLES[name]] = parse_rgb(v, where + " palette." + name)
         elif name in FADE_ROLES:
             fade[name] = parse_rgb(v, where + " palette." + name)
+        elif name in SKY_ROLES:
+            sky = parse_rgb(v, where + " palette." + name)
         else:
             raise AssertionError(where + ": unknown palette role '" + name
                                  + "' (roles: " + ", ".join(
-                                     sorted(list(PALETTE_ROLES) + list(FADE_ROLES)))
+                                     sorted(list(PALETTE_ROLES) + list(FADE_ROLES)
+                                            + list(SKY_ROLES)))
                                  + ")")
     amb = parse_rgb(cj.get("ambient", (255, 255, 255)), where + " ambient")
-    return over, fade, amb
+    return over, fade, amb, sky
 
 
 def tint(rgb, amb):
@@ -1567,15 +1582,16 @@ def bake_profile(pp, sky_switch, sky_ref):
     return out
 
 
-def bake_course(cdir, sky_switch):
+def bake_course(cdir, sky_switch, sky_ref):
     """Everything derived from one course folder: canvas -> tiles/map/pal,
     packed collision, gates, start grid, rotation colours, the course's
-    OBJ palettes and sand fade (the fade needs the GLOBAL sky_switch)."""
+    OBJ palettes, sand fade and sky palette (the last two need the GLOBAL
+    sky_switch / sky_ref)."""
     c = {}
     where = os.path.basename(cdir)
     with open(os.path.join(cdir, "course.json")) as f:
         cj = json.load(f)
-    over, fade, amb = load_style(cj, where)
+    over, fade, amb, sky = load_style(cj, where)
     pat, palette = load_pattern(cdir)
     for idx, rgb in COURSE_COLORS.items():
         palette[idx] = rgb
@@ -1607,6 +1623,12 @@ def bake_course(cdir, sky_switch):
     c["fade"] = sand_fade_table(sky_switch, palette[SAND],
                                 tint(fade["sand_far"], amb),
                                 tint(fade["sand_deep"], amb))
+    # sky: the zenith colour is authored directly (NOT ambient-multiplied -
+    # the sky is the light source); the clouds ARE lit by the ambient
+    c["sky_pal"] = sky_palette(sky_switch, sky_ref, sky)
+    c["sky0"] = rgb15(sky)
+    c["cloud_pal"] = pal_bytes([tint((255, 255, 255), amb),
+                                tint(CLOUD_SHADE, amb)])
     course = load_course(os.path.join(cdir, "course.json"))
     assert course, "unreadable course.json in " + cdir
 
@@ -1747,7 +1769,7 @@ def main():
 
     # ---- bake every profile and course ----
     baked_profs = [bake_profile(pp, sky_switch, sky_ref) for pp in profiles]
-    baked_courses = [bake_course(cdir, sky_switch)
+    baked_courses = [bake_course(cdir, sky_switch, sky_ref)
                      for _, cdir, _, _ in course_meta]
     for i, ((folder, cdir, mname, pi), bc) in enumerate(
             zip(course_meta, baked_courses)):
@@ -1804,12 +1826,17 @@ def main():
         asm.append(db_lines(bc["buoy_pal"]))
         asm.append("crs{0}_fade:".format(ci))
         asm.append(db_lines(bc["fade"]))
+        # sky band anchors (CGRAM 32-47) + the ambient-lit cloud pair (29-30)
+        asm.append("crs{0}_sky:".format(ci))
+        asm.append(db_lines(bc["sky_pal"]))
+        asm.append("crs{0}_cloud:".format(ci))
+        asm.append(db_lines(bc["cloud_pal"]))
         asm.append("crs{0}_coll:".format(ci))
         asm.append(db_lines(bc["coll"]))
         asm.append(".ends")
         asm.append("")
         for lbl in ("tiles", "map", "pal1", "pal48", "obj", "buoy", "fade",
-                    "coll"):
+                    "sky", "cloud", "coll"):
             externs.append("extern char crs{0}_{1};".format(ci, lbl))
 
     # s0.7 sine table for the camera heading (256 binary degrees)
@@ -1937,6 +1964,11 @@ extern u8 gateWp[WAVE_MAX_BUOYS + 1];
    (CGRAM 208, 32 bytes), csFade = the sand-fade HDMA table - all baked
    under the course's ambient light */
 extern dmaMemory csTiles, csMap, csPal1, csPal48, csObj, csBuoy, csColl, csFade;
+/* csSky = the mode-1 sky band's 16 anchors (CGRAM 32, 32 bytes), csSky0 =
+   backdrop entry 0 (the same zenith colour), csCloud = BG3 cloud white +
+   shade under the ambient (CGRAM 29, 4 bytes) */
+extern dmaMemory csSky, csCloud;
+extern u16 csSky0;
 #define WAVE_BUOY_PAL {6}
 extern u16 csTilLen;
 extern u8 wvRotStart, wvRotCount, wvRotFrames;
@@ -1990,7 +2022,7 @@ void courseNameTo(u8 c, char *out);
         f.write("s8 gateNx[WAVE_MAX_BUOYS + 1];\ns8 gateNy[WAVE_MAX_BUOYS + 1];\n")
         f.write("u8 gateWp[WAVE_MAX_BUOYS + 1];\n")
         f.write("dmaMemory csTiles, csMap, csPal1, csPal48, csObj, csBuoy, "
-                "csColl, csFade;\n")
+                "csColl, csFade, csSky, csCloud;\nu16 csSky0;\n")
         f.write("u16 csTilLen;\n")
         f.write("u8 wvRotStart, wvRotCount, wvRotFrames;\nu16 rotCols[8];\n\n")
 
@@ -2057,6 +2089,9 @@ void courseNameTo(u8 c, char *out);
             f.write("        csBuoy.mem.p = (u8 *)&crs{0}_buoy;\n".format(ci))
             f.write("        csColl.mem.p = (u8 *)&crs{0}_coll;\n".format(ci))
             f.write("        csFade.mem.p = (u8 *)&crs{0}_fade;\n".format(ci))
+            f.write("        csSky.mem.p = (u8 *)&crs{0}_sky;\n".format(ci))
+            f.write("        csCloud.mem.p = (u8 *)&crs{0}_cloud;\n".format(ci))
+            f.write("        csSky0 = 0x{0:04X};\n".format(bc["sky0"]))
             f.write("        wvRotStart = {0};\n".format(bc["rot"]["rotStart"]))
             f.write("        wvRotCount = {0};\n".format(bc["rot"]["rotCount"]))
             f.write("        wvRotFrames = {0};\n".format(bc["rot"]["rotFrames"]))
@@ -2085,7 +2120,8 @@ void courseNameTo(u8 c, char *out);
             pf, nm, bp["phases"], sz))
     total_crs = 0
     for ci, bc in enumerate(baked_courses):
-        pals = 38 + len(bc["obj_pal"]) + len(bc["buoy_pal"]) + len(bc["fade"])
+        pals = 38 + len(bc["obj_pal"]) + len(bc["buoy_pal"]) + len(bc["fade"]) \
+            + len(bc["sky_pal"]) + len(bc["cloud_pal"]) + 2
         sz = len(bc["pc7"]) + len(bc["mp7_rle"]) + pals + len(bc["coll"])
         total_crs += sz
         print("course {0}: {1} bytes ({2} tiles raw, {3} map rle, {4} coll, "

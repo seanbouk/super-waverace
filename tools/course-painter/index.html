@@ -72,9 +72,10 @@
       <div class="hint" style="margin:4px 0 6px">
         Roles are fixed CGRAM slots &mdash; a course changes only the RGB
         behind each. <b>ambient</b> multiplies every in-world colour at
-        bake (course, water, sand fade, riders, buoys, spray); HUD, start
-        lamps and the sky are exempt. Very dark ambients collapse light /
-        dark pairs (the bake warns).
+        bake (course, water, sand fade, riders, buoys, spray, clouds); HUD
+        and start lamps are exempt. <b>sky</b> is the zenith: the band
+        always pales toward the horizon from it (sunset = a warm zenith).
+        Very dark ambients collapse light / dark pairs (the bake warns).
       </div>
       <button id="palReset">Reset palette to defaults</button>
     </div>
@@ -152,6 +153,7 @@ const ROLES = [
   ["check_white", "checker white",   "#fafafa"],
   ["sand_far",    "sand @ horizon",  "#f8f4e4"],
   ["sand_deep",   "sand @ ski",      "#d4b878"],
+  ["sky",         "sky (zenith)",    "#103c96"],
 ];
 let palette = {};            // role -> "#rrggbb" (always complete)
 let ambient = "#ffffff";     // RGB multiplier, white = neutral

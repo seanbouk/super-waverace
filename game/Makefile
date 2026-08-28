@@ -11,7 +11,9 @@ AUTOHDR := 0
 
 include ${PVSNESLIB_HOME}/devkitsnes/snes_rules
 
-PYTHON := $(shell command -v python3 2>/dev/null || command -v python 2>/dev/null)
+# prefer python3 only if it RUNS: on Windows the Store's App Execution Alias
+# stub is named python3 (and comes back after being deleted) and exits 49
+PYTHON := $(shell (python3 -c "pass" >/dev/null 2>&1 && echo python3) || (python -c "pass" >/dev/null 2>&1 && echo python) || echo python3)
 
 .PHONY: all cleanLogs gen
 

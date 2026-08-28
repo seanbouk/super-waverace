@@ -31,9 +31,12 @@ Machines: `seanb` (original) and `Sean` (Aug-28 clone, `C:\Users\Sean\Downloads\
   camera (camH/pitch/fov/skiDist - profiles must not change those; the
   bake asserts). course.json may also carry `"palette"` (role ->
   "#rrggbb"; roles = PALETTE_ROLES + sand_far/sand_deep in the bake, the
-  painter's Palette & light group edits them) and `"ambient"` ("#rrggbb"
-  multiplier, applied at bake to CGRAM 1-15/48-51, the sand fade and OBJ
-  palettes 0-3 + 5; NOT to the HUD, lamps or sky). Absent = defaults =
+  painter's Palette & light group edits them; `sky` = the zenith, CGRAM 0
+  + the band anchors 32-47 - the band ALWAYS pales toward the horizon from
+  it because the mode-7 safe strip continues the last anchor via a uniform
+  COLDATA add) and `"ambient"` ("#rrggbb" multiplier, applied at bake to
+  CGRAM 1-15/48-51, the sand fade, the cloud pair 29-30 and OBJ palettes
+  0-3 + 5; NOT to the HUD, lamps or the sky colour). Absent = defaults =
   byte-identical to the pre-palette bake. Committed; user iterates via
   the web tools and drops files in. The bake prints a per-course/
   per-profile byte-budget report and WARNINGs for shade pairs that

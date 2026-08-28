@@ -581,6 +581,12 @@ static void courseLoad(u8 c)
     // 0-3 riders (+ spray in 0), 5 buoys. 4 (lamps) and the HUD stay lit
     dmaCopyCGram(csObj.mem.p, 128, 128);
     dmaCopyCGram(csBuoy.mem.p, 208, 32);
+    // the sky is per course too: band anchors, backdrop 0 (same zenith
+    // colour - the mode-7 strip's COLDATA add continues the band from it)
+    // and the ambient-lit BG3 cloud pair
+    dmaCopyCGram(csSky.mem.p, 32, 32);
+    dmaCopyCGram(csCloud.mem.p, 29, 4);
+    setPaletteColor(0, csSky0);
     setScreenOn();
 }
 
@@ -878,7 +884,7 @@ int main(void)
     dmaCopyCGram((u8 *)&lamp_pal, 192, 32); // start-tree lamps: palette 4
     // stacked tall racers: name table 2 right after the sheet
     dmaCopyVram((u8 *)&tall_tiles, 0x7000, WAVE_TALL_SHEET);
-    setPaletteColor(0, RGB8(16, 60, 150)); // deep azure zenith
+    setPaletteColor(0, RGB8(16, 60, 150)); // boot zenith; courseLoad owns it
 
     // Additive colour math with the fixed colour: BG1 = crest glow, and
     // the backdrop too (bit 5) - the baked COLDATA table ramps white into
