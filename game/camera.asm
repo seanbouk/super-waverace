@@ -1265,6 +1265,73 @@ _mt_next:
     rtl
 
 ;----------------------------------------------------------------------------
+; tilesTo7F - assemble a course's 16K mode-7 tile set in $7F8000 from the
+; shared TILE POOL: the course's 256 pool ids (u16, copied to $7FC000 by
+; copyTo7F first) each select one 64-byte tile from tpSrc (dmaMemory: the
+; pool's ROM address - one bank, the bake asserts <= 32K). All courses share
+; the pool because every tile set is drawn from one water pattern plus the
+; same 8-periodic shore/rope patterns (5 courses = 266 distinct tiles).
+; 16-bit A/X/Y throughout (no long,Y addressing exists - X carries both the
+; id read and the store, parked in DP between). Load-time only.
+.DEFINE TP_CNT $08
+.DEFINE TP_DST $0A
+.DEFINE TP_WRD $0C
+tilesTo7F:
+    php
+    phb
+    phd
+    rep #$30
+    phx
+    phy
+    pea camDP
+    pld
+    sep #$20
+    lda.l tpSrc + 2
+    pha
+    plb                  ; DBR = pool bank
+    rep #$20
+    stz.b TP_CNT         ; index-table cursor: 0..510 step 2
+    lda #$8000
+    sta.b TP_DST         ; $7F write offset
+_tt_tile:
+    ldx.b TP_CNT
+    lda.l $7FC000,x      ; pool id
+    asl a
+    asl a
+    asl a
+    asl a
+    asl a
+    asl a                ; * 64
+    clc
+    adc.l tpSrc          ; + pool base (stays inside the bank)
+    tay
+    ldx.b TP_DST
+    lda #32
+    sta.b TP_WRD
+_tt_word:
+    lda.w $0000,y
+    sta.l $7F0000,x
+    iny
+    iny
+    inx
+    inx
+    dec.b TP_WRD
+    bne _tt_word
+    stx.b TP_DST
+    lda.b TP_CNT
+    inc a
+    inc a
+    sta.b TP_CNT
+    cmp #512
+    bne _tt_tile
+    ply
+    plx
+    pld
+    plb
+    plp
+    rtl
+
+;----------------------------------------------------------------------------
 ; collProbe - read the course collision map (copied to $7F7000 at course
 ; load; C cannot do far reads and the source moves per course).
 ; Packed 2 bits per cell: byte collOfs>>2, bit (collOfs&3)*2.

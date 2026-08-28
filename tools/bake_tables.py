@@ -1802,42 +1802,75 @@ def main():
         asm.append("")
         externs.append("extern char wave_rawd_f{0};".format(pf))
 
+    # ---- the cross-course TILE POOL ----
+    # Every course's 256 Mode 7 tiles come from the same water pattern and
+    # the same 8-periodic shore/rope/buoy patterns, so the union of distinct
+    # 64-byte tiles across ALL courses is only a few hundred (measured: 266
+    # for 5 courses). ROM holds the pool once; each course stores a 256-entry
+    # table of pool ids (512 bytes instead of 16K) and the loader
+    # (tilesTo7F) assembles its 16K tile set in the $7F8000 buffer.
+    pool, pool_ix = bytearray(), {}
+    for bc in baked_courses:
+        pc7 = bc["pc7"]
+        tix = []
+        for j in range(0, len(pc7), 64):
+            t = pc7[j:j + 64]
+            k = pool_ix.get(t)
+            if k is None:
+                k = pool_ix[t] = len(pool) // 64
+                pool += t
+            tix.append(k)
+        tix += [0] * (256 - len(tix))  # unused local ids -> pool tile 0
+        bc["tix"] = b"".join(struct.pack("<H", k) for k in tix)
+    assert len(pool) <= 32704, \
+        "tile pool {0} bytes: exceeds one 32K bank (split it)".format(len(pool))
+    pool_tiles = len(pool) // 64
+    asm.append('.section ".tpool" superfree')
+    asm.append("tile_pool:")
+    asm.append(db_lines(bytes(pool)))
+    asm.append(".ends")
+    asm.append("")
+    externs.append("extern char tile_pool;")
+
+    # per-course blobs, with IDENTICAL blobs shared between courses (a
+    # clone's collision map, a repeated map...): blob_ref returns the label
+    # to point at and emits the bytes only the first time
+    seen = {}
+
+    def blob_ref(ci, lbl, data):
+        key = (lbl, bytes(data))
+        if key in seen:
+            return seen[key]
+        name = "crs{0}_{1}".format(ci, lbl)
+        seen[key] = name
+        asm.append(name + ":")
+        asm.append(db_lines(data))
+        externs.append("extern char {0};".format(name))
+        return name
+
     for ci, bc in enumerate(baked_courses):
-        asm.append('.section ".crs{0}t" superfree'.format(ci))
-        asm.append("crs{0}_tiles:".format(ci))
-        asm.append(db_lines(bc["pc7"]))
-        asm.append(".ends")
         asm.append('.section ".crs{0}d" superfree'.format(ci))
-        asm.append("crs{0}_map:".format(ci))
-        asm.append(db_lines(bc["mp7_rle"]))
+        refs = {}
+        refs["tix"] = blob_ref(ci, "tix", bc["tix"])
+        refs["map"] = blob_ref(ci, "map", bc["mp7_rle"])
         # palette: ONLY the entries the course owns - 1-15 (water pattern +
         # course block; 0 is the backdrop, owned by the sky) and 48-51
         # (checker + shallows teal). A full 512-byte load would wipe the
         # UI/sky/HUD/OBJ palettes, which load once at boot.
-        asm.append("crs{0}_pal1:".format(ci))
-        asm.append(db_lines(bc["pal"][2:32]))
-        asm.append("crs{0}_pal48:".format(ci))
-        asm.append(db_lines(bc["pal"][96:104]))
+        refs["pal1"] = blob_ref(ci, "pal1", bc["pal"][2:32])
+        refs["pal48"] = blob_ref(ci, "pal48", bc["pal"][96:104])
         # OBJ palettes 0-3 (128-191) + buoy palette 5 (208-223) and the
         # sand-fade HDMA table, all under the course's ambient light
-        asm.append("crs{0}_obj:".format(ci))
-        asm.append(db_lines(bc["obj_pal"]))
-        asm.append("crs{0}_buoy:".format(ci))
-        asm.append(db_lines(bc["buoy_pal"]))
-        asm.append("crs{0}_fade:".format(ci))
-        asm.append(db_lines(bc["fade"]))
+        refs["obj"] = blob_ref(ci, "obj", bc["obj_pal"])
+        refs["buoy"] = blob_ref(ci, "buoy", bc["buoy_pal"])
+        refs["fade"] = blob_ref(ci, "fade", bc["fade"])
         # sky band anchors (CGRAM 32-47) + the ambient-lit cloud pair (29-30)
-        asm.append("crs{0}_sky:".format(ci))
-        asm.append(db_lines(bc["sky_pal"]))
-        asm.append("crs{0}_cloud:".format(ci))
-        asm.append(db_lines(bc["cloud_pal"]))
-        asm.append("crs{0}_coll:".format(ci))
-        asm.append(db_lines(bc["coll"]))
+        refs["sky"] = blob_ref(ci, "sky", bc["sky_pal"])
+        refs["cloud"] = blob_ref(ci, "cloud", bc["cloud_pal"])
+        refs["coll"] = blob_ref(ci, "coll", bc["coll"])
         asm.append(".ends")
         asm.append("")
-        for lbl in ("tiles", "map", "pal1", "pal48", "obj", "buoy", "fade",
-                    "sky", "cloud", "coll"):
-            externs.append("extern char crs{0}_{1};".format(ci, lbl))
+        bc["refs"] = refs
 
     # s0.7 sine table for the camera heading (256 binary degrees)
     sin_bytes = [(round(127 * math.sin(2 * math.pi * i / 256))) & 0xFF
@@ -1963,14 +1996,17 @@ extern u8 gateWp[WAVE_MAX_BUOYS + 1];
    csObj = OBJ palettes 0-3 (CGRAM 128, 128 bytes), csBuoy = palette 5
    (CGRAM 208, 32 bytes), csFade = the sand-fade HDMA table - all baked
    under the course's ambient light */
+/* csTiles = this course's 256-entry POOL INDEX table (u16 pool tile ids;
+   512 bytes), tpSrc = the shared tile pool: tilesTo7F (camera.asm) builds
+   the 16K tile set from them in the $7F8000 buffer */
 extern dmaMemory csTiles, csMap, csPal1, csPal48, csObj, csBuoy, csColl, csFade;
+extern dmaMemory tpSrc;
 /* csSky = the mode-1 sky band's 16 anchors (CGRAM 32, 32 bytes), csSky0 =
    backdrop entry 0 (the same zenith colour), csCloud = BG3 cloud white +
    shade under the ambient (CGRAM 29, 4 bytes) */
 extern dmaMemory csSky, csCloud;
 extern u16 csSky0;
 #define WAVE_BUOY_PAL {6}
-extern u16 csTilLen;
 extern u8 wvRotStart, wvRotCount, wvRotFrames;
 extern u16 rotCols[8];
 
@@ -2022,8 +2058,7 @@ void courseNameTo(u8 c, char *out);
         f.write("s8 gateNx[WAVE_MAX_BUOYS + 1];\ns8 gateNy[WAVE_MAX_BUOYS + 1];\n")
         f.write("u8 gateWp[WAVE_MAX_BUOYS + 1];\n")
         f.write("dmaMemory csTiles, csMap, csPal1, csPal48, csObj, csBuoy, "
-                "csColl, csFade, csSky, csCloud;\nu16 csSky0;\n")
-        f.write("u16 csTilLen;\n")
+                "csColl, csFade, csSky, csCloud, tpSrc;\nu16 csSky0;\n")
         f.write("u8 wvRotStart, wvRotCount, wvRotFrames;\nu16 rotCols[8];\n\n")
 
         f.write("void waveProfLoad(u8 pf)\n{\n    switch (pf)\n    {\n")
@@ -2080,17 +2115,18 @@ void courseNameTo(u8 c, char *out);
                 f.write("        gateNx[{0}] = {1};\n".format(i, nx))
                 f.write("        gateNy[{0}] = {1};\n".format(i, ny))
                 f.write("        gateWp[{0}] = {1};\n".format(i, wp2))
-            f.write("        csTiles.mem.p = (u8 *)&crs{0}_tiles;\n".format(ci))
-            f.write("        csTilLen = {0};\n".format(len(bc["pc7"])))
-            f.write("        csMap.mem.p = (u8 *)&crs{0}_map;\n".format(ci))
-            f.write("        csPal1.mem.p = (u8 *)&crs{0}_pal1;\n".format(ci))
-            f.write("        csPal48.mem.p = (u8 *)&crs{0}_pal48;\n".format(ci))
-            f.write("        csObj.mem.p = (u8 *)&crs{0}_obj;\n".format(ci))
-            f.write("        csBuoy.mem.p = (u8 *)&crs{0}_buoy;\n".format(ci))
-            f.write("        csColl.mem.p = (u8 *)&crs{0}_coll;\n".format(ci))
-            f.write("        csFade.mem.p = (u8 *)&crs{0}_fade;\n".format(ci))
-            f.write("        csSky.mem.p = (u8 *)&crs{0}_sky;\n".format(ci))
-            f.write("        csCloud.mem.p = (u8 *)&crs{0}_cloud;\n".format(ci))
+            r = bc["refs"]
+            f.write("        tpSrc.mem.p = (u8 *)&tile_pool;\n")
+            f.write("        csTiles.mem.p = (u8 *)&{0};\n".format(r["tix"]))
+            f.write("        csMap.mem.p = (u8 *)&{0};\n".format(r["map"]))
+            f.write("        csPal1.mem.p = (u8 *)&{0};\n".format(r["pal1"]))
+            f.write("        csPal48.mem.p = (u8 *)&{0};\n".format(r["pal48"]))
+            f.write("        csObj.mem.p = (u8 *)&{0};\n".format(r["obj"]))
+            f.write("        csBuoy.mem.p = (u8 *)&{0};\n".format(r["buoy"]))
+            f.write("        csColl.mem.p = (u8 *)&{0};\n".format(r["coll"]))
+            f.write("        csFade.mem.p = (u8 *)&{0};\n".format(r["fade"]))
+            f.write("        csSky.mem.p = (u8 *)&{0};\n".format(r["sky"]))
+            f.write("        csCloud.mem.p = (u8 *)&{0};\n".format(r["cloud"]))
             f.write("        csSky0 = 0x{0:04X};\n".format(bc["sky0"]))
             f.write("        wvRotStart = {0};\n".format(bc["rot"]["rotStart"]))
             f.write("        wvRotCount = {0};\n".format(bc["rot"]["rotCount"]))
@@ -2111,6 +2147,10 @@ void courseNameTo(u8 c, char *out);
     # ---- byte-budget report ----
     fixed = len(ski_tiles) + len(tall_tiles) + len(sky_gfx) + len(cloud_gfx) \
         + len(cloud_map) + len(hud_gfx) + len(hud_pal) + 256
+    print("tile pool: {0} distinct tiles, {1} bytes (vs {2} bytes as {3} "
+          "separate 16K sets)".format(pool_tiles, len(pool),
+                                       16384 * len(baked_courses),
+                                       len(baked_courses)))
     total_prof = 0
     for pf, (bp, nm) in enumerate(zip(baked_profs, prof_names)):
         sz = len(bp["rawd"]) + sum(len(t) for t in bp["tm"]) \
@@ -2119,18 +2159,27 @@ void courseNameTo(u8 c, char *out);
         print("profile {0} '{1}': {2} phases, {3} bytes".format(
             pf, nm, bp["phases"], sz))
     total_crs = 0
+    emitted = set()
     for ci, bc in enumerate(baked_courses):
-        pals = 38 + len(bc["obj_pal"]) + len(bc["buoy_pal"]) + len(bc["fade"]) \
-            + len(bc["sky_pal"]) + len(bc["cloud_pal"]) + 2
-        sz = len(bc["pc7"]) + len(bc["mp7_rle"]) + pals + len(bc["coll"])
-        total_crs += sz
-        print("course {0}: {1} bytes ({2} tiles raw, {3} map rle, {4} coll, "
-              "{5} palettes+fade)".format(ci, sz, len(bc["pc7"]),
-                                         len(bc["mp7_rle"]), len(bc["coll"]),
-                                         pals))
-    print("BUDGET: baked shared gfx ~{0}K, profiles {1}K, courses {2}K "
-          "(+ code/sfx; 512K cap)".format(
-              fixed // 1024, total_prof // 1024, total_crs // 1024))
+        # count only blobs this course EMITTED (shared ones cost nothing)
+        own = 0
+        shared = []
+        for lbl, data in (("tix", bc["tix"]), ("map", bc["mp7_rle"]),
+                          ("coll", bc["coll"]), ("fade", bc["fade"]),
+                          ("obj", bc["obj_pal"]), ("sky", bc["sky_pal"])):
+            if bc["refs"][lbl].startswith("crs{0}_".format(ci)):
+                own += len(data)
+            else:
+                shared.append(lbl)
+        own += 38 + len(bc["buoy_pal"]) + len(bc["cloud_pal"]) + 2
+        total_crs += own
+        print("course {0}: {1} bytes (512 tile index, {2} map rle, 4096 coll{3})"
+              .format(ci, own, len(bc["mp7_rle"]),
+                      "; shares " + "/".join(shared) if shared else ""))
+    print("BUDGET: baked shared gfx ~{0}K + tile pool {1}K, profiles {2}K, "
+          "courses {3}K (+ code/sfx; 512K cap)".format(
+              fixed // 1024, len(pool) // 1024, total_prof // 1024,
+              total_crs // 1024))
 
 
 if __name__ == "__main__":

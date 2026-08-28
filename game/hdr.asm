@@ -38,7 +38,7 @@
 
 .endif
 
-.ROMBANKS 8
+.ROMBANKS 16                    ; 512K LoROM = the jam cap (was 8 = 256K, ~98% full at 5 courses)
 
 .SNESHEADER
   ID "SNES"
@@ -46,7 +46,7 @@
   SLOWROM
   LOROM
   CARTRIDGETYPE $00
-  ROMSIZE $08
+  ROMSIZE $09                   ; 2^9 KB = 512K
   SRAMSIZE $00
   COUNTRY $01
   LICENSEECODE $00

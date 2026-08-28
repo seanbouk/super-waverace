@@ -244,7 +244,54 @@ Phases (1-4 done):
    (orange zenith, #ffb080 ambient, warm sand, red floats) - the first
    styled course, screenshot-checked. ~+320 bytes/course.
 5. **Content** — author courses 2..N; per-course gate lint + NPC pace
-   check ride along.
+   check ride along. (Aug 29: six clone courses with distinct looks -
+   SUNNY ISLAND, SUNSET COVE, GREY LAKE, DEEP BLUE, DAWN COAST, TWILIGHT
+   SKY; layouts still to author.)
+
+### ROM budget (Aug 29) — what was done and the options kept for later
+
+Measured before the work: 252K of a 256K LoROM, courses 149K (60%) of
+which tiles 80K / maps 48K / collision 20K; profiles 29K; code+lib ~54K;
+shared gfx 18K. Facts that drove the decisions: only 266 DISTINCT tiles
+exist across all courses' 16K tile sets (one water pattern + 8-periodic
+shore/rope patterns); 74% of a real course's map cells are the pure water
+pattern; clone courses differ only by palette.
+
+Done:
+- **512K LoROM** (hdr.asm .ROMBANKS 16 / ROMSIZE $09) - the jam cap.
+- **Cross-course tile pool**: ROM holds the union of distinct tiles once
+  (`tile_pool`, asserted <= one 32K bank = 512 tiles); each course stores a
+  256-entry u16 pool-id table (512 bytes, not 16K) and `tilesTo7F`
+  (camera.asm) assembles the 16K set in the $7F8000 buffer at load
+  (index table staged at $7FC000). Identical per-course blobs (collision,
+  OBJ palettes...) are emitted once and shared by label. Verified: the
+  loaded VRAM tile + map planes are byte-identical to the bake and to the
+  pre-pool build. Result: 6 courses = 66K + 16K pool (was ~30K each).
+
+Kept for later, in the order they pay off:
+- **B. Map codec: pattern + sparse overrides.** Default every cell to the
+  water pattern tile for (x mod 16, y mod 16) and store only skip/literal
+  runs of authored cells. Measured on the island: ~5.4K vs 9.8K (4264
+  authored cells, 364 runs). Halves the biggest remaining per-course blob.
+  Decoder = a small asm loop like mapTo7F.
+- **C. Collision derived from the map** (class-per-tile table, 64 bytes
+  instead of 4K; classify 16384 cells at load). REJECTED for now by the
+  user: collision is going to need authoring control beyond "what the
+  tile is" once gameplay testing starts. Revisit only if 4K/course ever
+  matters (it does not at 512K).
+- **D. Synthesise the crest-glow HDMA tables at load** from `d` (already
+  in WRAM) + a 256-entry sin^gamma table, into the free $7FC000+ WRAM
+  (16K). ~5K per profile (~40K at 8 profiles), and the same trick covers
+  a two-player second-viewport table set. Needs the bit-exact discipline
+  (bake computes glow through the same quantised table). Riskiest.
+- **E. Authoring: keep most profiles at 16 phases** (6K) - only a rough
+  sea needs 32 (12K). Free.
+- **F. Code (~54K)** is tcc-verbose but not worth attacking for bytes.
+  Reserve ~40K for music (SPC driver + module + samples) and ~30K for
+  game modes / two-player code.
+
+Projection at 8 courses / 8 profiles with today's format: ~120K courses
++ pool, ~80K profiles, ~72K code+gfx = ~270K of 512K, leaving ~240K.
 
 ---
 

@@ -343,9 +343,15 @@ Mesen.exe --testrunner --timeout=30 <rom> <script.lua>   # arg order-free
 - **The course/profile loaders (courseLoad in main.c)** swap everything
   per course under force blank: courseGeom + waveProfLoad (generated),
   waveRawLoad (delta-d decode + a synthesis), packed collision ->
-  $7F7000, map (copy-from-16-back codec - plain RLE is BIGGER than raw
-  because the water texture tiles with a 16-entry period) through the
-  $7F8000 buffer, tiles/map to the VRAM planes via dmaCopyVram7, and
+  $7F7000, TILES from the cross-course pool (the course's 512-byte u16
+  pool-id table -> $7FC000 via copyTo7F, then tilesTo7F assembles the
+  16K set in $7F8000; DMA it to the tile plane BEFORE the map decode
+  reuses that buffer - order is load-bearing), map (copy-from-16-back
+  codec - plain RLE is BIGGER than raw because the water texture tiles
+  with a 16-entry period) through the $7F8000 buffer, both to the VRAM
+  planes via dmaCopyVram7 (verified byte-identical to the bake with a
+  Lua VRAM dump - scratchpad pattern: read 2i+1 = tile plane, 2i = map),
+  and
   ONLY CGRAM entries 1-15 + 48-51 (a full palette load wipes the
   boot-loaded UI/sky/HUD/OBJ rows - this shipped one build as all-black
   sprites). NEVER call bgInitMapTileSet7 after boot for this reason.
@@ -420,9 +426,10 @@ move waypoint 0/1 in the painter to move the grid.
   calm). All are geometric clones of course 1 - layouts are the open
   authoring work. Per-course water colour = a recoloured copy of the
   shared pattern (same indices, new PLTE) dropped in the course folder.
-  **The ROM is a 256K LoROM and sits at ~98% full with 5 courses**: course
-  6 needs the size bumped to 512K in hdr.asm (hand-maintained) - still
-  inside the jam cap. The menu lists them with an Up/Down cursor
+  06_twilight_sky (night: near-black zenith, dim blue ambient, black sand).
+  The ROM is a **512K LoROM** since Aug 29 (hdr.asm .ROMBANKS 16 /
+  ROMSIZE $09) and courses cost ~11K each thanks to the tile pool (see
+  the loader bullet + PLAN.md "ROM budget"). The menu lists them with an Up/Down cursor
   (cursor Up/Down + START verified in Mesen GUI mode with scripted input,
   Aug 28, after fixing the redraw - see the vblank-DMA gotcha). Phase 4 (palette
   + ambient per course, buoys on OBJ palette 5) landed Aug 28: OBJ

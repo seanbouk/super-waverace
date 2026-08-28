@@ -28,6 +28,7 @@
 // bank $7F, source + destination via the globals below
 extern void copyTo7F(void);
 extern void mapTo7F(void);
+extern void tilesTo7F(void); // pool index at $7FC000 + tpSrc -> $7F8000
 dmaMemory cpSrc; // ROM address (addr+bank)
 u16 cpDst;       // $7F offset
 u16 cpLen;       // bytes (even), copyTo7F only
@@ -561,19 +562,28 @@ static void courseLoad(u8 c)
     cpDst = 0x7000;
     cpLen = 4096;
     copyTo7F();
+    mapBuf.mem.p = (u8 *)0;
+    mapBuf.mem.c.addr = 0x8000;
+    mapBuf.mem.c.bank = 0x7F;
+    // tiles: the course's 256 pool ids -> $7FC000, then tilesTo7F pulls
+    // each 64-byte tile out of the shared pool into the $7F8000 buffer
+    // (16K); DMA it to the tile plane BEFORE the map reuses the buffer
+    cpSrc.mem.c.addr = csTiles.mem.c.addr;
+    cpSrc.mem.c.bank = csTiles.mem.c.bank;
+    cpDst = 0xC000;
+    cpLen = 512;
+    copyTo7F();
+    tilesTo7F();
+    dmaCopyVram7(mapBuf.mem.p, 0x0000, 16384, 0x80, 0x1900);
     cpSrc.mem.c.addr = csMap.mem.c.addr; // map -> decode buffer -> VRAM
     cpSrc.mem.c.bank = csMap.mem.c.bank;
     cpDst = 0x8000;
     mapTo7F();
-    mapBuf.mem.p = (u8 *)0;
-    mapBuf.mem.c.addr = 0x8000;
-    mapBuf.mem.c.bank = 0x7F;
     // mode-7 VRAM planes by hand (NOT bgInitMapTileSet7: its 512-byte
     // palette load wipes the UI/sky/HUD/OBJ palettes, which load once at
     // boot - this bit as all-black sprites + a garbage HUD band):
     // tiles = high bytes ($2119, VMAIN $80), map = low bytes ($2118,
     // VMAIN $00), then just the palette entries the course owns
-    dmaCopyVram7(csTiles.mem.p, 0x0000, csTilLen, 0x80, 0x1900);
     dmaCopyVram7(mapBuf.mem.p, 0x0000, 16384, 0x00, 0x1800);
     dmaCopyCGram(csPal1.mem.p, 1, 30);   // 1-15: water + course block
     dmaCopyCGram(csPal48.mem.p, 48, 8);  // 48-51: checker + teal
