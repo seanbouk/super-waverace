@@ -181,14 +181,29 @@ void uiClear(void) // every band cell -> the font space
 // under force blank or in vblank.
 static u16 menuRow[UI_COLS];
 
-void uiMenuRow(u16 row, u16 x, char *s)
+// compose one 32-entry map row into dst (any time - it is only RAM) ...
+void uiMenuCompose(u16 *dst, u16 x, char *s)
 {
     u16 i;
     for (i = 0; i < UI_COLS; i++)
-        menuRow[i] = UI_ATTR;
+        dst[i] = UI_ATTR;
     while (*s)
-        menuRow[x++] = UI_ATTR | (u16)(*s++ - 32);
-    dmaCopyVram((u8 *)menuRow, 0x4000 + row * 32, 64);
+        dst[x++] = UI_ATTR | (u16)(*s++ - 32);
+}
+
+// ... and push a composed row to VRAM: vblank or force blank ONLY. Kept
+// separate because composing under tcc costs ~45 scanlines per row: the
+// menu cursor redraw used to compose+DMA after WaitForVBlank and its DMAs
+// landed at scanline 12/57 of the NEXT frame - silently dropped by the PPU.
+void uiMenuRowDma(u16 *src, u16 row)
+{
+    dmaCopyVram((u8 *)src, 0x4000 + row * 32, 64);
+}
+
+void uiMenuRow(u16 row, u16 x, char *s)
+{
+    uiMenuCompose(menuRow, x, s);
+    uiMenuRowDma(menuRow, row);
 }
 
 void uiMenuClearRows(void)

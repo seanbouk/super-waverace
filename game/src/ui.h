@@ -43,6 +43,8 @@ void uiHdma(void);
 // under force blank or in vblank.
 void uiClear(void);
 void uiMenuRow(u16 row, u16 x, char *s);
+void uiMenuCompose(u16 *dst, u16 x, char *s); // RAM only: call any time
+void uiMenuRowDma(u16 *src, u16 row);         // vblank / force blank only
 void uiMenuClearRows(void);
 
 // write text / a right-aligned decimal into the band (rows 0..UI_ROWS-1)

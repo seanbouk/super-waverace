@@ -15,6 +15,9 @@ fixed frame window (tickrate.lua) are the only trustworthy before/after numbers.
 - `counters.lua`  — logs two u16 WRAM counters every 500 frames (dual-run
   equivalence harnesses: calls/bad). ADDR_CALLS / ADDR_BAD env vars, hex.
 - `oamdump.lua`   — sprites 0-25 (x/y/tile/attr) + screenshot at fixed frames.
+- `menuinput.lua` — GUI MODE ONLY (no --testrunner): scripted pad input via
+  emu.setInput for the course-select menu (Down, then Start) + screenshots.
+  Needs Snes.Port1.Type = SnesController in Mesen's settings; kill Mesen when done.
   Only valid for comparing builds with identical timing (see CLAUDE.md).
 - `tickshot.lua`  — TICK-keyed position trace + screenshots: the equivalence
   harness for builds whose INIT length differs (fixed-frame comparison is

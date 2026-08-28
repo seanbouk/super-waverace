@@ -80,6 +80,12 @@ Lessons from the Aug-28 machine (`Sean`), all of which bit:
   the harnesses work - just budget the timeout and ignore exit codes.
 - Mesen.exe is a GUI process: from PowerShell use `Start-Process -Wait`
   or the call returns instantly with no exit code. From Git Bash it waits.
+- **A hand-written settings.json leaves `Snes.Port1.Type` = "None"**: no
+  controller is plugged into the emulated console, so NO input works in
+  Mesen (the first-run dialog normally sets this + a keyboard preset).
+  Set `"Snes": {"Port1": {"Type": "SnesController"}}` and bind keys in
+  Settings > Input > Player 1 > Setup (preset). This masqueraded as a
+  game bug ("menu ignores up/down/start") for a while.
 
 ## Headless verification loop (Mesen 2)
 
@@ -98,8 +104,12 @@ Mesen.exe --testrunner --timeout=30 <rom> <script.lua>   # arg order-free
   Pattern: ONE endFrame callback, save PNGs at target frames, emu.exit();
   Claude can Read the PNGs to verify visually. WRAM addresses come from
   superwaverace.sym and MOVE between builds - always re-grep.
-- **Scripted controller input does NOT work in testrunner mode.** To test
-  driving, flip `#define AUTOPILOT 1` in `game/src/main.c` (steers around
+- **Scripted controller input does NOT work in testrunner mode** - but it
+  DOES in GUI mode: `Mesen.exe rom.sfc script.lua` (no --testrunner) with
+  Port1 = SnesController honours `emu.setInput({down=true}, 0)` from an
+  inputPolled callback (tools/mesen/menuinput.lua - kill the process when
+  done, it has no exit). Use it for menus; for driving, flip
+  `#define AUTOPILOT 1` in `game/src/main.c` (steers around
   the racing-line waypoints at full throttle — laps in ~750-900 ticks;
   also auto-confirms the course select after ~90 frames and the results
   after the FINISH banner, so the whole state loop cycles hands-free) and
@@ -301,6 +311,16 @@ Mesen.exe --testrunner --timeout=30 <rom> <script.lua>   # arg order-free
   ticks (the race clocks do this); (b) per-loop speeds breathe ~25% with
   scene load. Restoring a fixed loop is a deliberate backlog item (see
   PLAN.md race-mode notes) because all feel tuning would shift.
+- **Anything that DMAs to VRAM right after WaitForVBlank must be TINY.**
+  tcc code is slow: composing one 32-entry menu row costs ~45 scanlines,
+  so "WaitForVBlank; compose+DMA two rows" put the DMAs at scanline 12
+  and 57 of the NEXT frame - active display, where the PPU drops VRAM
+  writes, silently. The course-select cursor never moved on screen while
+  courseSel changed underneath (START then launched the right course).
+  Pattern: compose into RAM buffers mid-frame, kick only the DMAs after
+  the wait (uiMenuCompose / uiMenuRowDma). Diagnosed with a Lua memory
+  callback on $420B logging ppu.scanline - that pattern finds any
+  "write landed outside vblank" bug in one run.
 - **tcc silently drops (void)-cast volatile reads.** This broke scanline()
   for the project's whole life (OPVCT never latched -> BUILD "262" was
   profFrames*262, a constant). Reads that matter must be assigned to a
@@ -390,8 +410,8 @@ move waypoint 0/1 in the painter to move the grid.
   "Multi-course" has the agreed design; phases 1-3 done - two courses
   build today (01_island + 02_lagoon, a placeholder island clone on the
   16-phase "calm" profile), the menu lists them with an Up/Down cursor
-  (cursor movement not yet exercised on hardware - testrunner has no
-  input; the flow was verified with AUTOPILOT_COURSE). Phase 4 (palette
+  (cursor Up/Down + START verified in Mesen GUI mode with scripted input,
+  Aug 28, after fixing the redraw - see the vblank-DMA gotcha). Phase 4 (palette
   + ambient per course, buoys on OBJ palette 5) landed Aug 28: OBJ
   palettes 0-3 + 5 are now loaded by courseLoad, NOT at boot (npc_pals is
   gone; ski_pal only seeds oamInitGfxSet). Next: phase 5, content.

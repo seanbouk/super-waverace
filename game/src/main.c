@@ -759,10 +759,15 @@ static void raceInit(void)
 static u16 menuPrev;
 static u8 menuDirty;
 static char menuBuf[16];
+static u16 menuRows[WAVE_COURSES][UI_COLS]; // composed list rows (RAM)
 
 // the course list: cursor column + name (console font; names come from
-// the bake's courseName). One 64-byte row DMA per course - vblank-safe.
-static void menuDrawList(void)
+// the bake's courseName). Composed into menuRows HERE - mid-frame, it is
+// only RAM - and pushed to VRAM by menuDmaList right after WaitForVBlank.
+// Composing costs ~45 scanlines per row under tcc: doing both after the
+// wait put the DMAs into the next frame's active display, where the PPU
+// drops VRAM writes - the cursor never moved on screen (courseSel did).
+static void menuComposeList(void)
 {
     u8 i;
     for (i = 0; i < WAVE_COURSES; i++)
@@ -770,8 +775,15 @@ static void menuDrawList(void)
         menuBuf[0] = i == courseSel ? '>' : ' ';
         menuBuf[1] = ' ';
         courseNameTo(i, menuBuf + 2); // writes the terminator too
-        uiMenuRow(16 + i, 9, menuBuf);
+        uiMenuCompose(menuRows[i], 9, menuBuf);
     }
+}
+
+static void menuDmaList(void) // vblank / force blank only
+{
+    u8 i;
+    for (i = 0; i < WAVE_COURSES; i++)
+        uiMenuRowDma(menuRows[i], 16 + i);
 }
 
 //---------------------------------------------------------------------------------
@@ -797,7 +809,8 @@ static void courseSelect(void)
     uiFlush();
     uiMenuClearRows();
     uiMenuRow(14, 9, "SUPER WAVERACE");
-    menuDrawList();
+    menuComposeList();
+    menuDmaList(); // force blank: safe
     uiMenuRow(17 + WAVE_COURSES, 10, "PRESS START");
     setScreenOn();
     startHeld = 1; // a confirm held over from the results must not re-fire
@@ -807,10 +820,10 @@ static void courseSelect(void)
     while (1)
     {
         WaitForVBlank();
-        if (menuDirty) // row DMAs belong in vblank: right after the wait
+        if (menuDirty) // only the DMA kicks here: rows are pre-composed
         {
             menuDirty = 0;
-            menuDrawList();
+            menuDmaList();
         }
         REG_BG3HOFS = (u8)(menuT >> 2); // idle cloud drift
         REG_BG3HOFS = 0;
@@ -819,12 +832,14 @@ static void courseSelect(void)
         if ((pad0 & KEY_UP) && !(menuPrev & KEY_UP) && courseSel)
         {
             courseSel--;
+            menuComposeList();
             menuDirty = 1;
         }
         if ((pad0 & KEY_DOWN) && !(menuPrev & KEY_DOWN)
             && courseSel < WAVE_COURSES - 1)
         {
             courseSel++;
+            menuComposeList();
             menuDirty = 1;
         }
         menuPrev = pad0;
