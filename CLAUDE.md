@@ -6,10 +6,14 @@ hard-won gotchas that aren't obvious from the code.
 ## Build & run
 
 ```bash
-export PATH="$PATH:/c/Users/seanb/AppData/Local/Microsoft/WinGet/Links"  # make
-export PVSNESLIB_HOME=/c/Users/seanb/pvsneslib
+# make: WinGet puts ezwinports.make on the USER PATH (Links/ on one machine, the
+# package's bin/ on another) - Git Bash inherits it; add it here only if not.
+export PVSNESLIB_HOME=$HOME/pvsneslib
 make -C game            # bake (python) -> compile -> link game/superwaverace.sfc
 ```
+
+Machines: `seanb` (original) and `Sean` (Aug-28 clone, `C:\Users\Sean\Downloads\super waverace`
+- a path WITH a space, which the setup script's `-I.` patch exists for).
 
 - PVSnesLib 4.6.0 lives at `~/pvsneslib` with TWO local patches to
   `devkitsnes/snes_rules` (Git Bash + native make compatibility). If it's ever
@@ -45,6 +49,29 @@ make -C game            # bake (python) -> compile -> link game/superwaverace.sf
    the harness works. The conversation history does not travel: this
    file + docs/PLAN.md "Multi-course" ARE the state. Phases 1-3 done,
    next is phase 4 (palette + ambient per course, starts in the painter).
+
+Lessons from the Aug-28 machine (`Sean`), all of which bit:
+- `winget install Git.Git`, `Python.Python.3.12`, `ezwinports.make` all need
+  `--source winget` (msstore ambiguity) and the Store's `python`/`python3`
+  App Execution Alias stubs MUST be deleted from
+  `%LOCALAPPDATA%\Microsoft\WindowsApps` - the Makefile prefers `python3`,
+  which resolves to the stub and fails with "Python was not found".
+- The bake is pure stdlib (json/math/struct/zlib) - no pip installs.
+- Mesen 2.1.1 is a self-extracting exe: the FIRST launch unpacks its DLLs
+  into `Documents/Mesen2` and only writes settings.json on a clean exit.
+  Hand-writing a minimal settings.json with just the two keys above works
+  (Mesen fills the defaults).
+- **The smoke test needs `AUTOPILOT 1`**: since the course-select screen,
+  a stock build sits on the menu forever (testrunner has no input) and
+  `tick` is race BSS = Random garbage, so tickshot never arms and the
+  trace stays empty. Flip, build, run, flip back.
+- **`emu.exit()` does NOT terminate the testrunner on this machine**
+  (verified: a script calling emu.exit(0) at frame 30 kept running at
+  frame 200). Every run rides `--timeout` to the wall and returns -1;
+  outputs are still written (finish() rewrites its files each frame), so
+  the harnesses work - just budget the timeout and ignore exit codes.
+- Mesen.exe is a GUI process: from PowerShell use `Start-Process -Wait`
+  or the call returns instantly with no exit code. From Git Bash it waits.
 
 ## Headless verification loop (Mesen 2)
 
