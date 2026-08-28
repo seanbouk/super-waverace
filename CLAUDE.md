@@ -58,8 +58,9 @@ Machines: `seanb` (original) and `Sean` (Aug-28 clone, `C:\Users\Sean\Downloads\
    tools/mesen/tickshot.lua` (with the env vars from its header) proves
    the harness works. The conversation history does not travel: this
    file + docs/PLAN.md "Multi-course" ARE the state. Phases 1-4 done,
-   next is phase 5 (content: author courses 2..N in the painter; LAGOON
-   is still an ISLAND clone with a warm palette).
+   phase 5 (content) is in progress: FIVE courses build, all geometric
+   clones of course 1 with distinct palettes/skies/wave profiles (see the
+   State section) - real layouts are the remaining authoring work.
 
 Lessons from the Aug-28 machine (`Sean`), all of which bit:
 - `winget install Git.Git`, `Python.Python.3.12`, `ezwinports.make` all need
@@ -411,8 +412,17 @@ move waypoint 0/1 in the painter to move the grid.
   the race's mode switch never shows, so menu and race share the map with
   zero cleanup. Multi-course is the active project: docs/PLAN.md
   "Multi-course" has the agreed design; phases 1-3 done - two courses
-  build today (01_island + 02_lagoon, a placeholder island clone on the
-  16-phase "calm" profile), the menu lists them with an Up/Down cursor
+  build today - now FIVE (Aug 28): 01_sunny_island (defaults), 02_sunset_cove
+  (orange zenith, warm ambient, calm), 03_grey_lake (overcast, teal-grey
+  water via its own sea_pattern.png, lawn-green sand, "flat" profile amp
+  0.6), 04_deep_blue (deeper blue water with a hint of red, grey sand,
+  "gentle" amp 1.5), 05_dawn_coast (pink zenith + pink ambient, pale sand,
+  calm). All are geometric clones of course 1 - layouts are the open
+  authoring work. Per-course water colour = a recoloured copy of the
+  shared pattern (same indices, new PLTE) dropped in the course folder.
+  **The ROM is a 256K LoROM and sits at ~98% full with 5 courses**: course
+  6 needs the size bumped to 512K in hdr.asm (hand-maintained) - still
+  inside the jam cap. The menu lists them with an Up/Down cursor
   (cursor Up/Down + START verified in Mesen GUI mode with scripted input,
   Aug 28, after fixing the redraw - see the vblank-DMA gotcha). Phase 4 (palette
   + ambient per course, buoys on OBJ palette 5) landed Aug 28: OBJ

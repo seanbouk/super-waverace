@@ -224,6 +224,10 @@ Phases (1-4 done):
    courseLoad(), byte-budget report. Verified: WRAM/VRAM byte-exact vs
    the bake, two-race flow bit-identical to the pre-restructure build,
    ISLAND + LAGOON selectable. ~29K/course + ~6-12K/profile.
+   (Aug 28: five courses - SUNNY ISLAND, SUNSET COVE, GREY LAKE, DEEP
+   BLUE, DAWN COAST - all clones of course 1 with their own palette, sky,
+   ambient, wave profile and, for two, a recoloured sea pattern. The 256K
+   ROM is ~98% full: bump to 512K in hdr.asm before course 6.)
 4. **Palette + ambient per course** ✓ — course.json `palette` (role ->
    #rrggbb: the ten course CGRAM roles + the sand fade's far/deep ends)
    and `ambient` (#rrggbb multiplier). The bake tints entries 1-15 +

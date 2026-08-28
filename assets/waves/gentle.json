@@ -1,0 +1,9 @@
+{
+  "amp": 1.5,
+  "wavelength": 102.4,
+  "maxX": 650,
+  "phases": 16,
+  "framesPerPhase": 2,
+  "crestGlow": 4,
+  "glowGamma": 2
+}
