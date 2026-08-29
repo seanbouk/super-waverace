@@ -84,6 +84,8 @@
     <div class="group"><b>Physics</b>
       <div class="ctl"><label for="gravity">gravity</label><input type="number" id="gravity" min="1" max="255" value="36" style="width:70px"><span class="hint">36 = default</span></div>
       <div class="hint">Airborne fall rate (8.8 texels/loop&sup2;). Only acts in the air &mdash; the buoyancy spring in the water ignores it. Lower = longer hangtime off crests.</div>
+      <div class="ctl"><label for="bounce">bounce</label><input type="number" id="bounce" min="0" max="15" value="0" style="width:70px"><span class="hint">0 = off</span></div>
+      <div class="hint">Takeoff kick: leaving a crest adds bounce &times; (surface rise) to the vertical speed. Without it the hull leaves the water almost flat, so height never exceeds the wave amplitude whatever the gravity.</div>
     </div>
     <div class="group"><b>File</b>
       <button id="undoBtn">Undo (Ctrl+Z)</button>
@@ -139,6 +141,11 @@ let notes = [];       // [x, y, "text"] annotations (exported; the bake ignores 
 let current = null;   // rope being drawn
 let importedExtra = {}; // pass-through course.json keys (wave_profile)
 let gravity = 36;       // course.json "gravity" (default 36)
+let bounce = 0;         // course.json "bounce" (default 0)
+document.getElementById("bounce").addEventListener("change", ev => {
+  pushUndo(); bounce = Math.max(0, Math.min(15, parseInt(ev.target.value, 10) || 0));
+  ev.target.value = bounce;
+});
 document.getElementById("gravity").addEventListener("change", ev => {
   pushUndo(); gravity = Math.max(1, Math.min(255, parseInt(ev.target.value, 10) || 36));
   ev.target.value = gravity;
@@ -237,7 +244,7 @@ function tool() { return document.querySelector('input[name="tool"]:checked').va
 let undoStack = [], redoStack = [];
 function snapshot() {
   return JSON.stringify({ zones: zones.map(r => r.join("")),
-                          ropes, buoys, path, notes, current, palette, ambient, gravity });
+                          ropes, buoys, path, notes, current, palette, ambient, gravity, bounce });
 }
 function restore(s) {
   const c = JSON.parse(s);
@@ -248,6 +255,8 @@ function restore(s) {
   ambient = c.ambient || "#ffffff";
   gravity = c.gravity || 36;
   document.getElementById("gravity").value = gravity;
+  bounce = c.bounce || 0;
+  document.getElementById("bounce").value = bounce;
   buildPaletteUI();
   render();
 }
@@ -697,6 +706,7 @@ document.getElementById("exportBtn").addEventListener("click", () => {
   if (Object.keys(pal).length) out.palette = pal;
   if (ambient !== "#ffffff") out.ambient = ambient;
   if (gravity !== 36) out.gravity = gravity;
+  if (bounce) out.bounce = bounce;
   const json = JSON.stringify(out) + "\n";
   const a = document.createElement("a");
   a.href = URL.createObjectURL(new Blob([json], { type: "application/json" }));
@@ -720,6 +730,8 @@ document.getElementById("importFile").addEventListener("change", ev => {
     ambient = c.ambient || "#ffffff";
     gravity = c.gravity || 36;
     document.getElementById("gravity").value = gravity;
+    bounce = c.bounce || 0;
+    document.getElementById("bounce").value = bounce;
     // keys the painter does not edit but must not drop on re-export
     importedExtra = { wave_profile: c.wave_profile };
     current = null;

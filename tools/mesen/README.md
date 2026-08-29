@@ -15,6 +15,10 @@ fixed frame window (tickrate.lua) are the only trustworthy before/after numbers.
 - `counters.lua`  — logs two u16 WRAM counters every 500 frames (dual-run
   equivalence harnesses: calls/bad). ADDR_CALLS / ADDR_BAD env vars, hex.
 - `oamdump.lua`   — sprites 0-25 (x/y/tile/attr) + screenshot at fixed frames.
+- `vtrace.lua` + `vstats.py` — per-frame vertical physics trace (skiY, surf88,
+  skiVv, courseGrav; env TICKADDR/YADDR/SURFADDR/VVADDR/GRAVADDR/OUTDIR/TAG) and
+  its summary (airborne %, max height, launch speed, longest flight). This is
+  how the gravity/bounce knobs were calibrated - run it before trusting feel.
 - `menuinput.lua` — GUI MODE ONLY (no --testrunner): scripted pad input via
   emu.setInput for the course-select menu (Down, then Start) + screenshots.
   Needs Snes.Port1.Type = SnesController in Mesen's settings; kill Mesen when done.

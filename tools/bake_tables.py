@@ -1670,6 +1670,13 @@ def bake_course(cdir, sky_switch, sky_ref):
     over, fade, amb, sky = load_style(cj, where)
     c["gravity"] = int(cj.get("gravity", GRAVITY_DEFAULT))
     assert 1 <= c["gravity"] <= 255, where + ": gravity must be 1..255"
+    # takeoff kick: on leaving the water the hull gains (bounce/8) * the
+    # steepest surface rise seen since it landed. 0 = off = every course
+    # before Mars. On a rough sea the rise saturates at the wave amplitude
+    # per loop, so bounce/8 * amp is effectively the launch speed: 2 =
+    # ~1.25 texel/loop (MAX_VV_UP clamps at 1.875)
+    c["bounce"] = int(cj.get("bounce", 0))
+    assert 0 <= c["bounce"] <= 15, where + ": bounce must be 0..15"
     pat, palette = load_pattern(cdir)
     for idx, rgb in COURSE_COLORS.items():
         palette[idx] = rgb
@@ -2056,6 +2063,8 @@ extern u16 wrWords;     /* decoded d words (= phases * 224) */
 extern u8 courseProf; /* the course's wave profile: pass to waveProfLoad */
 extern u16 courseGrav; /* airborne gravity, 8.8 texels/loop^2 (course.json
                           "gravity", default 36 = the old GRAV) */
+extern u16 courseBounce; /* takeoff kick gain (course.json "bounce", 0-15,
+                            default 0): skiVv += (bounce * peak surface rise) >> 3 */
 extern u8 buoyCount, pathCount;
 extern u16 startX, startY;
 extern u8 startTheta;
@@ -2132,7 +2141,7 @@ void courseNameTo(u8 c, char *out);
         f.write("u8 waveSky[WAVE_MAX_PHASES];\n")
         f.write("u8 waveSkiRow[WAVE_MAX_PHASES];\ns8 waveSurfH[WAVE_MAX_PHASES];\n")
         f.write("u16 wvSteps;\nu16 wvMask;\ndmaMemory wrSrc;\nu16 wrWords;\n\n")
-        f.write("u8 courseProf;\nu8 buoyCount, pathCount;\nu16 courseGrav;\n")
+        f.write("u8 courseProf;\nu8 buoyCount, pathCount;\nu16 courseGrav;\nu16 courseBounce;\n")
         f.write("u16 startX, startY;\nu8 startTheta;\n")
         f.write("u16 npcGridX[3], npcGridY[3];\n")
         f.write("u16 buoyX[WAVE_MAX_BUOYS + 1];\nu16 buoyY[WAVE_MAX_BUOYS + 1];\n")
@@ -2175,6 +2184,7 @@ void courseNameTo(u8 c, char *out);
             f.write("    case {0}:\n".format(ci))
             f.write("        courseProf = {0};\n".format(pi))
             f.write("        courseGrav = {0};\n".format(bc["gravity"]))
+            f.write("        courseBounce = {0};\n".format(bc["bounce"]))
             f.write("        buoyCount = {0};\n        pathCount = {1};\n"
                     .format(len(course[2]), len(course[3])))
             assert len(course[2]) <= MAX_BUOYS, folder + ": too many buoys"
