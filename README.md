@@ -218,9 +218,7 @@ Entries 1–15 and 48–51 are also per course. A course's `course.json` may car
 teal_sand, check_dark, check_white, the sand fade's `sand_far`/`sand_deep`, and
 `sky` / `sky_horizon` — the band's top and bottom colours; the horizon defaults to
 zenith + the strip's white add, and any authored horizon needs every channel ≥ 112
-so the mode-7 strip above the waterline still matches), optional `gravity`
-(airborne fall rate, default 36) and `bounce` (takeoff kick off crests, in eighths, default 0
-— Mars runs 24 / 4, flying ~2.7× higher than any other course) and an `ambient` RGB multiplier (`#ffffff` =
+so the mode-7 strip above the waterline still matches) and an `ambient` RGB multiplier (`#ffffff` =
 neutral) that the bake applies to every in-world colour — course, water, sand
 fade, riders, buoys, spray, clouds — at zero runtime cost. The HUD ramps and the
 start lamps are exempt; the sky is authored directly rather than multiplied.

@@ -100,9 +100,7 @@ u8 skiDist8, thrF8, thrR8;
 
 #define TURN_SPEED 2
 #define THRUST 144 // applied at >>6: top speed = THRUST*32 (8.8 world/loop)
-// GRAV is per course now: courseGrav (course.json "gravity", default 36 -
-// 8.8 texels/loop^2, floaty hangtime at race pace). Only acts airborne;
-// the in-water buoyancy spring below does not see it.
+#define GRAV 36       // 8.8 texels/loop^2 — floaty hangtime at race pace
 #define DIP 128       // rest waterline: 0.5 texel below surface
 #define MAX_VV_UP 480   // launch clamp: proper air off the big rollers
 #define MAX_VV_DOWN 768 // falls can be faster than launches
@@ -147,9 +145,6 @@ u16 phaseAcc;
 s16 vAlong, vSide;
 s16 turnRate;
 s16 surf88, diff88;
-s16 surfPrev, surfRise; // surface height last loop / its rise this loop
-s16 surfPeak;           // steepest rise since the last landing: the ramp the
-                        // takeoff kick spends ("bounce" courses)
 s16 sprTop;
 u8 rotTimer, rotOfs;
 u8 skip, waterRow, inWater, wasInWater;
@@ -705,9 +700,6 @@ static void raceInit(void)
     thrR8 = thrF8 >> 1;
     skiY = -1536; // spawn below any wave: wet from frame one, bobs up
     skiVv = 0;
-    surfPrev = 0;
-    surfRise = 0;
-    surfPeak = 0;
     skiVX = 0;
     skiVY = 0;
     fracX = 0;
@@ -1077,10 +1069,6 @@ int main(void)
 
         // ---- buoyancy / flight ----
         surf88 = ((s16)waveSurfH[phase]) << 8;
-        surfRise = surf88 - surfPrev; // how fast the crest is lifting us
-        surfPrev = surf88;
-        if (surfRise > surfPeak)
-            surfPeak = surfRise;
         inWater = (skiY <= surf88);
         if (inWater)
         {
@@ -1129,21 +1117,7 @@ int main(void)
         }
         else
         {
-            // takeoff: on "bounce" courses the crest that lifted the hull
-            // THROWS it - the in-water damping (>>1 per loop) otherwise
-            // leaves the water with ~0.2 texel/loop up, so no gravity value
-            // alone can make a course jump higher than its wave amplitude
-            // (measured: ISLAND 6.8 vs MARS 7.1 texels at half gravity)
-            // (tested at the moment of leaving, the CURRENT rise is already
-            // negative - the surface falling away is why we left - so the
-            // kick spends the steepest rise seen since the last landing)
-            // gain is in EIGHTHS: on the rough profile the surface rises up
-            // to the whole amplitude (5 texels = 1280) in one loop, so an
-            // integer gain of 1 already pins the MAX_VV_UP clamp
-            if (wasInWater && courseBounce && surfPeak > 0)
-                skiVv += (surfPeak * courseBounce) >> 3; // 1280 * 15 fits s16
-            surfPeak = 0;
-            skiVv -= courseGrav; // airborne: ballistic, thrust spins the fan in vain
+            skiVv -= GRAV; // airborne: ballistic, thrust spins the fan in vain
         }
         if (skiVv > MAX_VV_UP)
             skiVv = MAX_VV_UP;

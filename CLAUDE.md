@@ -42,9 +42,7 @@ Machines: `seanb` (original) and `Sean` (Aug-28 clone, `C:\Users\Sean\Downloads\
   zenith per course, because backdrop 0 is no longer the zenith) and
   `"ambient"` ("#rrggbb" multiplier, applied at bake to
   CGRAM 1-15/48-51, the sand fade, the cloud pair 29-30 and OBJ palettes
-  0-3 + 5; NOT to the HUD, lamps or the sky colour), and `"gravity"`
-  (1-255, default 36) and `"bounce"` (0-15 eighths, default 0) - the
-  painter's Physics group. Absent = defaults =
+  0-3 + 5; NOT to the HUD, lamps or the sky colour). Absent = defaults =
   byte-identical to the pre-palette bake. Committed; user iterates via
   the web tools and drops files in. The bake prints a per-course/
   per-profile byte-budget report and WARNINGs for shade pairs that
@@ -405,9 +403,7 @@ are baked PER COURSE under its ambient (crs<n>_obj / crs<n>_buoy).
 THRUST*16), GRAV, DIP, MAX_VV_UP/DOWN, splash retention (>>2 on entry),
 power ladder thrTab[6] in init (96..192, [3]=THRUST=the anchor feel; u8 -
 multiplier input - and [5]*32 must stay under the 8192 overflow envelope),
-grip (vSide -= vSide>>3) and rudder (vAlong += |vSide|>>3). Per-course:
-courseGrav / courseBounce (course.json gravity / bounce, see State) - the
-only feel values a course may change; calibrate with vtrace, not vibes. Buoy scale bands
+grip (vSide -= vSide>>3) and rudder (vAlong += |vSide|>>3). Buoy scale bands
 are SCALE_V1..V4 (229/320/457/640) — derived, not tuned: 32 * WAVE_SKI_DIST
 / v crossing the midpoint between neighbouring art sizes, anchored to the
 player's own 32px ski at WAVE_SKI_DIST. Wave feel comes from
@@ -439,24 +435,21 @@ move waypoint 0/1 in the painter to move the grid.
   authoring work. Per-course water colour = a recoloured copy of the
   shared pattern (same indices, new PLTE) dropped in the course folder.
   06_twilight_sky (navy zenith over a sodium-amber horizon, amber ambient,
-  black sand), 07_get_yourself_to_mars (rust sky, red sand, yellow-green
-  water via its own pattern, the rough default profile, and the FIRST
-  per-course GAMEPLAY values: `"gravity": 24` (default 36; courseGrav
-  replaces the GRAV define, airborne only) and `"bounce": 4` (default 0;
-  takeoff kick in EIGHTHS: on leaving the water skiVv += (steepest surface
-  rise since landing * bounce) >> 3). Gravity alone did NOTHING visible -
-  measured with tools/mesen/vtrace.lua: the in-water damping (skiVv -=
-  skiVv>>1 per loop) means the hull leaves a crest at ~0.2 texel/loop, so
-  height is capped by the wave amplitude (ISLAND 6.8 vs MARS 7.1 texels at
-  half gravity) whatever g is. With bounce 4/g24: 18.6 texels, 76%
-  airborne, ~1.9s flights (ISLAND 53%, 0.5s). CONSEQUENCE: the autopilot
-  flies onto the beach and beaches at 0 km/h (no run-aground state) and
-  drops gates (no steering in the air) - Mars is meant as an unlockable
-  stretch; a human must judge it, and shore landings need a design answer
-  (bounce back to water / a stuck-timer respawn). The rise saturates at
-  the amplitude per loop on the rough profile, so bounce/8 * amp IS the
-  launch speed (MAX_VV_UP clamps at 1.875 texel/loop = bounce 5).
-  Menu names may be up to 20 chars (MENU_NAME_MAX; menuBuf is 24).
+  black sand). Menu names may be up to 20 chars (MENU_NAME_MAX; menuBuf
+  24). **The Mars experiment (Aug 29, REMOVED by git revert - do not
+  re-add blind):** a 7th course with per-course gravity + a takeoff
+  "bounce" kick. Findings worth keeping: (1) gravity alone is INVISIBLE -
+  the in-water damping (skiVv -= skiVv>>1 per loop) leaves a crest at
+  ~0.2 texel/loop, so height is capped by the wave amplitude whatever g
+  is (measured ISLAND 6.8 vs half-g 7.1 texels); (2) a kick of (peak
+  surface rise since landing * gain/8) at takeoff DOES work (4/8 at g24 =
+  18.6 texels, 76% airborne, 1.9s flights) but the game around it does
+  not: 2s flights carry the ski onto beaches where it sits at 0 km/h (no
+  run-aground state) and gates get missed (no steering in the air). The
+  user judged the result "not as good as imagined" and dropped it. If
+  big air ever returns, it needs a shore-landing answer first (respawn at
+  the last waypoint or a bounce back to water). Measure with
+  tools/mesen/vtrace.lua + vstats.py, kept for this purpose.
   The ROM is a **512K LoROM** since Aug 29 (hdr.asm .ROMBANKS 16 /
   ROMSIZE $09) and courses cost ~11K each thanks to the tile pool (see
   the loader bullet + PLAN.md "ROM budget"). The menu lists them with an Up/Down cursor

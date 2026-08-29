@@ -246,12 +246,9 @@ Phases (1-4 done):
 5. **Content** — author courses 2..N; per-course gate lint + NPC pace
    check ride along. (Aug 29: six clone courses with distinct looks -
    SUNNY ISLAND, SUNSET COVE, GREY LAKE, DEEP BLUE, DAWN COAST, TWILIGHT
-   SKY, GET YOURSELF TO MARS - the last with per-course gravity (24 vs 36)
-   AND a takeoff "bounce" kick (4/8): the first gameplay parameters a
-   course carries. Gravity alone was invisible (in-water damping caps
-   launch speed; see CLAUDE.md); with the kick Mars flies 2.7x higher and
-   ~4x longer. Open: shore landings beach the ski (no run-aground state)
-   - an unlockable-track design question. Layouts still to author.)
+   SKY; layouts still to author. A low-gravity/high-bounce "Mars" course
+   was built, measured and removed the same day - see CLAUDE.md "Mars
+   experiment" for what was learned before trying big air again.)
 
 ### ROM budget (Aug 29) — what was done and the options kept for later
 
