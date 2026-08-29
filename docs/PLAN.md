@@ -246,7 +246,8 @@ Phases (1-4 done):
 5. **Content** — author courses 2..N; per-course gate lint + NPC pace
    check ride along. (Aug 29: six clone courses with distinct looks -
    SUNNY ISLAND, SUNSET COVE, GREY LAKE, DEEP BLUE, DAWN COAST, TWILIGHT
-   SKY; layouts still to author.)
+   SKY, GET YOURSELF TO MARS - the last with per-course gravity (18 vs 36),
+   the first gameplay parameter a course carries; layouts still to author.)
 
 ### ROM budget (Aug 29) — what was done and the options kept for later
 

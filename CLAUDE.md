@@ -42,7 +42,8 @@ Machines: `seanb` (original) and `Sean` (Aug-28 clone, `C:\Users\Sean\Downloads\
   zenith per course, because backdrop 0 is no longer the zenith) and
   `"ambient"` ("#rrggbb" multiplier, applied at bake to
   CGRAM 1-15/48-51, the sand fade, the cloud pair 29-30 and OBJ palettes
-  0-3 + 5; NOT to the HUD, lamps or the sky colour). Absent = defaults =
+  0-3 + 5; NOT to the HUD, lamps or the sky colour), and `"gravity"`
+  (1-255, default 36; the painter's Physics group). Absent = defaults =
   byte-identical to the pre-palette bake. Committed; user iterates via
   the web tools and drops files in. The bake prints a per-course/
   per-profile byte-budget report and WARNINGs for shade pairs that
@@ -434,7 +435,14 @@ move waypoint 0/1 in the painter to move the grid.
   calm). All are geometric clones of course 1 - layouts are the open
   authoring work. Per-course water colour = a recoloured copy of the
   shared pattern (same indices, new PLTE) dropped in the course folder.
-  06_twilight_sky (night: near-black zenith, dim blue ambient, black sand).
+  06_twilight_sky (navy zenith over a sodium-amber horizon, amber ambient,
+  black sand), 07_get_yourself_to_mars (rust sky, red sand, yellow-green
+  water via its own pattern, the rough default profile, and the FIRST
+  per-course GAMEPLAY value: `"gravity": 18` - half of the 36 default;
+  courseGrav replaces the GRAV define, airborne only. Autopilot drops
+  gates there (longer airtime = no steering) - NPC/gate balance on
+  low-gravity courses is untested by a human). Menu names may be up to 20
+  chars (MENU_NAME_MAX; menuBuf is 24).
   The ROM is a **512K LoROM** since Aug 29 (hdr.asm .ROMBANKS 16 /
   ROMSIZE $09) and courses cost ~11K each thanks to the tile pool (see
   the loader bullet + PLAN.md "ROM budget"). The menu lists them with an Up/Down cursor

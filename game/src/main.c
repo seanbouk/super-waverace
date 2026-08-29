@@ -100,7 +100,9 @@ u8 skiDist8, thrF8, thrR8;
 
 #define TURN_SPEED 2
 #define THRUST 144 // applied at >>6: top speed = THRUST*32 (8.8 world/loop)
-#define GRAV 36       // 8.8 texels/loop^2 — floaty hangtime at race pace
+// GRAV is per course now: courseGrav (course.json "gravity", default 36 -
+// 8.8 texels/loop^2, floaty hangtime at race pace). Only acts airborne;
+// the in-water buoyancy spring below does not see it.
 #define DIP 128       // rest waterline: 0.5 texel below surface
 #define MAX_VV_UP 480   // launch clamp: proper air off the big rollers
 #define MAX_VV_DOWN 768 // falls can be faster than launches
@@ -781,7 +783,7 @@ static void raceInit(void)
 
 static u16 menuPrev;
 static u8 menuDirty;
-static char menuBuf[16];
+static char menuBuf[24]; // "> " + up to 20 chars (MENU_NAME_MAX) + NUL
 static u16 menuRows[WAVE_COURSES][UI_COLS]; // composed list rows (RAM)
 
 // the course list: cursor column + name (console font; names come from
@@ -1117,7 +1119,7 @@ int main(void)
         }
         else
         {
-            skiVv -= GRAV; // airborne: ballistic, thrust spins the fan in vain
+            skiVv -= courseGrav; // airborne: ballistic, thrust spins the fan in vain
         }
         if (skiVv > MAX_VV_UP)
             skiVv = MAX_VV_UP;

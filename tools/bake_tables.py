@@ -1488,6 +1488,8 @@ WAVE_KEYS = ("amp", "wavelength", "maxX", "phases", "framesPerPhase",
              "crestGlow", "glowGamma")
 MAX_PHASES = 32
 MAX_COURSES = 8
+MENU_NAME_MAX = 20    # menu row: cursor + space at col 9, name to col 30
+GRAVITY_DEFAULT = 36  # 8.8 texels/loop^2 while airborne (main.c's old GRAV)
 
 
 def find_courses():
@@ -1506,7 +1508,9 @@ def find_courses():
 
 def course_menu_name(folder):
     name = folder.split("_", 1)[1] if "_" in folder else folder
-    name = name.replace("_", " ").upper()[:12]
+    name = name.replace("_", " ").upper()
+    assert len(name) <= MENU_NAME_MAX, \
+        "course name '{0}' is longer than {1} chars".format(name, MENU_NAME_MAX)
     for ch in name:  # the menu uses the console font: printable ASCII
         assert 32 <= ord(ch) < 127, "course name has non-ASCII: " + name
     return name
@@ -1664,6 +1668,8 @@ def bake_course(cdir, sky_switch, sky_ref):
     with open(os.path.join(cdir, "course.json")) as f:
         cj = json.load(f)
     over, fade, amb, sky = load_style(cj, where)
+    c["gravity"] = int(cj.get("gravity", GRAVITY_DEFAULT))
+    assert 1 <= c["gravity"] <= 255, where + ": gravity must be 1..255"
     pat, palette = load_pattern(cdir)
     for idx, rgb in COURSE_COLORS.items():
         palette[idx] = rgb
@@ -2048,6 +2054,8 @@ extern u16 wrWords;     /* decoded d words (= phases * 224) */
 /* per-course geometry: counts, start grid (world units, ski positions;
    heading in binary degrees), buoys, racing line - filled by courseGeom */
 extern u8 courseProf; /* the course's wave profile: pass to waveProfLoad */
+extern u16 courseGrav; /* airborne gravity, 8.8 texels/loop^2 (course.json
+                          "gravity", default 36 = the old GRAV) */
 extern u8 buoyCount, pathCount;
 extern u16 startX, startY;
 extern u8 startTheta;
@@ -2124,7 +2132,7 @@ void courseNameTo(u8 c, char *out);
         f.write("u8 waveSky[WAVE_MAX_PHASES];\n")
         f.write("u8 waveSkiRow[WAVE_MAX_PHASES];\ns8 waveSurfH[WAVE_MAX_PHASES];\n")
         f.write("u16 wvSteps;\nu16 wvMask;\ndmaMemory wrSrc;\nu16 wrWords;\n\n")
-        f.write("u8 courseProf;\nu8 buoyCount, pathCount;\n")
+        f.write("u8 courseProf;\nu8 buoyCount, pathCount;\nu16 courseGrav;\n")
         f.write("u16 startX, startY;\nu8 startTheta;\n")
         f.write("u16 npcGridX[3], npcGridY[3];\n")
         f.write("u16 buoyX[WAVE_MAX_BUOYS + 1];\nu16 buoyY[WAVE_MAX_BUOYS + 1];\n")
@@ -2166,6 +2174,7 @@ void courseNameTo(u8 c, char *out);
             course = bc["course"]
             f.write("    case {0}:\n".format(ci))
             f.write("        courseProf = {0};\n".format(pi))
+            f.write("        courseGrav = {0};\n".format(bc["gravity"]))
             f.write("        buoyCount = {0};\n        pathCount = {1};\n"
                     .format(len(course[2]), len(course[3])))
             assert len(course[2]) <= MAX_BUOYS, folder + ": too many buoys"
