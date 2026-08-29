@@ -34,7 +34,13 @@ Machines: `seanb` (original) and `Sean` (Aug-28 clone, `C:\Users\Sean\Downloads\
   painter's Palette & light group edits them; `sky` = the zenith, CGRAM 0
   + the band anchors 32-47 - the band ALWAYS pales toward the horizon from
   it because the mode-7 safe strip continues the last anchor via a uniform
-  COLDATA add) and `"ambient"` ("#rrggbb" multiplier, applied at bake to
+  COLDATA add; `sky_horizon` = the band's bottom colour for a chromatic
+  sky: then backdrop 0 = horizon - that add (14/31 today) so the strip
+  still lands on the horizon, which is why every horizon channel must be
+  >= 112/255 - the bake warns otherwise. Band tiles use indices 1-15 only
+  and the HUD/menu blank tile 0 is SOLID colour 15 = CGRAM 31 = the
+  zenith per course, because backdrop 0 is no longer the zenith) and
+  `"ambient"` ("#rrggbb" multiplier, applied at bake to
   CGRAM 1-15/48-51, the sand fade, the cloud pair 29-30 and OBJ palettes
   0-3 + 5; NOT to the HUD, lamps or the sky colour). Absent = defaults =
   byte-identical to the pre-palette bake. Committed; user iterates via
@@ -346,9 +352,11 @@ Mesen.exe --testrunner --timeout=30 <rom> <script.lua>   # arg order-free
   $7F7000, TILES from the cross-course pool (the course's 512-byte u16
   pool-id table -> $7FC000 via copyTo7F, then tilesTo7F assembles the
   16K set in $7F8000; DMA it to the tile plane BEFORE the map decode
-  reuses that buffer - order is load-bearing), map (copy-from-16-back
-  codec - plain RLE is BIGGER than raw because the water texture tiles
-  with a 16-entry period) through the $7F8000 buffer, both to the VRAM
+  reuses that buffer - order is load-bearing), map (SPARSE codec: the
+  256-byte default block = the water pattern's tile ids per (row&15,
+  col&15), copied to $7FC200, then skip/literal tokens - plain RLE loses
+  to the 16-period water texture; the old copy-from-16-back codec was 2x
+  bigger) through the $7F8000 buffer, both to the VRAM
   planes via dmaCopyVram7 (verified byte-identical to the bake with a
   Lua VRAM dump - scratchpad pattern: read 2i+1 = tile plane, 2i = map),
   and

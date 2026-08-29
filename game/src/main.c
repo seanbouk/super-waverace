@@ -575,6 +575,11 @@ static void courseLoad(u8 c)
     copyTo7F();
     tilesTo7F();
     dmaCopyVram7(mapBuf.mem.p, 0x0000, 16384, 0x80, 0x1900);
+    cpSrc.mem.c.addr = csMapDef.mem.c.addr; // codec default block -> $7FC200
+    cpSrc.mem.c.bank = csMapDef.mem.c.bank;
+    cpDst = 0xC200;
+    cpLen = 256;
+    copyTo7F();
     cpSrc.mem.c.addr = csMap.mem.c.addr; // map -> decode buffer -> VRAM
     cpSrc.mem.c.bank = csMap.mem.c.bank;
     cpDst = 0x8000;
@@ -591,10 +596,12 @@ static void courseLoad(u8 c)
     // 0-3 riders (+ spray in 0), 5 buoys. 4 (lamps) and the HUD stay lit
     dmaCopyCGram(csObj.mem.p, 128, 128);
     dmaCopyCGram(csBuoy.mem.p, 208, 32);
-    // the sky is per course too: band anchors, backdrop 0 (same zenith
-    // colour - the mode-7 strip's COLDATA add continues the band from it)
-    // and the ambient-lit BG3 cloud pair
-    dmaCopyCGram(csSky.mem.p, 32, 32);
+    // the sky is per course too: CGRAM 31 (HUD backdrop = zenith, via the
+    // solid blank tile) + the band anchors 33-47 (zenith -> horizon),
+    // backdrop 0 = horizon minus the strip's COLDATA add (so the mode-7
+    // safe strip lands on the horizon colour), and the ambient-lit BG3
+    // cloud pair
+    dmaCopyCGram(csSky.mem.p, 31, 34);
     dmaCopyCGram(csCloud.mem.p, 29, 4);
     setPaletteColor(0, csSky0);
     setScreenOn();

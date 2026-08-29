@@ -35,6 +35,14 @@ void uiInit(void)
     consoleSetTextMapPtr(0x4000);
     consoleInitDefaultText(1); // palette row 1 = CGRAM 16-31 (see colour map)
     bgSetGfxPtr(0, 0x4000);    // re-point: the console init re-set the base
+    // Tile 0 (the space) becomes SOLID index 15 = CGRAM 31, the per-course
+    // "HUD backdrop" (= the sky zenith, set by courseLoad). Backdrop 0 is
+    // no longer the zenith: it is horizon - strip add, so the mode-7 safe
+    // strip continues a chromatic sky band exactly; every blank BG1 cell
+    // (HUD band, menu) must therefore paint its own background.
+    for (i = 0; i < 16; i++)
+        uiMap[i] = 0xFFFF; // all four bitplanes set = colour 15
+    dmaCopyVram((u8 *)uiMap, 0x5000, 32);
 
     // mode-1 sky band: gradient tiles (chars WAVE_SKY_CHAR0+, VRAM above
     // the font) on palette row 2 (CGRAM 32-47), one char per map row from
@@ -42,7 +50,7 @@ void uiInit(void)
     // the row DMAs, then the text init below repaints it.
     dmaCopyVram((u8 *)&sky_gfx, 0x4000 + WAVE_SKY_CHAR0 * 16,
                 WAVE_SKY_ROWS * 32);
-    dmaCopyCGram((u8 *)&sky_pal2, 32, 32);
+    dmaCopyCGram((u8 *)&sky_pal2, 31, 34); // 31 HUD backdrop + band anchors
     // WAVE_SKY_ROWS includes the extra bottom row for the BG scroll
     // off-by-one (screen line N samples map line N+1); the bake authors
     // the tiles map-line indexed so every visible line lands exactly

@@ -73,8 +73,10 @@
         Roles are fixed CGRAM slots &mdash; a course changes only the RGB
         behind each. <b>ambient</b> multiplies every in-world colour at
         bake (course, water, sand fade, riders, buoys, spray, clouds); HUD
-        and start lamps are exempt. <b>sky</b> is the zenith: the band
-        always pales toward the horizon from it (sunset = a warm zenith).
+        and start lamps are exempt. <b>sky</b> is the zenith and
+        <b>sky (horizon)</b> the band's bottom colour; every channel of the
+        horizon must be &ge; 112 (the mode-7 strip's fixed white add) or the
+        bake warns about a seam.
         Very dark ambients collapse light / dark pairs (the bake warns).
       </div>
       <button id="palReset">Reset palette to defaults</button>
@@ -154,6 +156,7 @@ const ROLES = [
   ["sand_far",    "sand @ horizon",  "#f8f4e4"],
   ["sand_deep",   "sand @ ski",      "#d4b878"],
   ["sky",         "sky (zenith)",    "#103c96"],
+  ["sky_horizon", "sky (horizon)",   "#80a8f8"],  // default = zenith + the strip add
 ];
 let palette = {};            // role -> "#rrggbb" (always complete)
 let ambient = "#ffffff";     // RGB multiplier, white = neutral

@@ -1201,12 +1201,19 @@ _c7_loop:
     rtl
 
 ;----------------------------------------------------------------------------
-; mapTo7F - decode the mode-7 map codec into WRAM bank $7F: token bit7 set
-; = copy (n & $7F) bytes from dst-16 (the water texture's tile period -
-; plain RLE loses here, copy-16 wins), else n literal bytes follow.
-; Decoded size fixed at 16384. in: cpSrc (ROM address), cpDst ($7F offset,
-; >= $10 so dst-16 stays in bank). Load-time only. The branchy body stays
-; 8-bit A throughout (the WLA immediate-sizing gotcha); X/Y stay 16-bit.
+; mapTo7F - decode the SPARSE mode-7 map codec into WRAM bank $7F. A map is
+; "the 16x16 water pattern everywhere" plus authored cells: pass 1 fills all
+; 16384 cells from the 256-byte default block at $7FC200 (map row r uses
+; default row (r & 15), repeated 8 times across); pass 2 walks the token
+; stream: bit7 set = SKIP (n & $7F) cells (they keep the default), else n
+; literal ids follow. in: cpSrc (ROM stream), cpDst ($7F offset = $8000);
+; copyTo7F the default block to $7FC200 first. Load-time only. The token
+; loop is 8-bit A throughout; the two 16-bit blocks are straight-line and
+; every immediate textually follows its own sep/rep (the WLA gotcha).
+.DEFINE MC_ROW $10
+.DEFINE MC_REP $12
+.DEFINE MC_CNT $13
+.DEFINE MC_SKP $14
 mapTo7F:
     php
     phb
@@ -1220,42 +1227,75 @@ mapTo7F:
     clc
     adc #16384
     sta.b WL_END
+    stz.b MC_ROW         ; 16-bit zero: the high bytes must stay 0 (the
+    stz.b MC_SKP         ; loops below write only the low bytes)
+    lda.l cpDst
+    tax
+    ; ---- pass 1: default fill (DBR = $7F) ----
+    sep #$20
+    lda #$7F
+    pha
+    plb
+_mf_row:
+    lda #8
+    sta.b MC_REP
+_mf_rep:
+    ldy.b MC_ROW         ; default row offset (r & 15) * 16
+    lda #16
+    sta.b MC_CNT
+_mf_c:
+    lda.w $C200,y
+    sta.w $0000,x
+    iny
+    inx
+    dec.b MC_CNT
+    bne _mf_c
+    dec.b MC_REP
+    bne _mf_rep
+    lda.b MC_ROW
+    clc
+    adc #16              ; next default row: 240 + 16 wraps to 0 in 8 bits
+    sta.b MC_ROW
+    cpx.b WL_END
+    bne _mf_row
+    ; ---- pass 2: token stream (DBR = ROM bank) ----
+    lda.l cpSrc + 2
+    pha
+    plb
+    rep #$20
     lda.l cpSrc
     tay
     lda.l cpDst
     tax
     sep #$20
-    lda.l cpSrc + 2
-    pha
-    plb
-_mt_tok:
-    lda.w $0000,y        ; token - branch BEFORE iny (iny sets N from Y,
-    bmi _mt_copy         ; which is always negative up here: source >= $8000)
+_ms_tok:
+    lda.w $0000,y        ; token - branch BEFORE iny (iny sets N from Y)
+    bmi _ms_skip
     iny
-    sta.b WL_PRV         ; literal count (1-127)
-_mt_lit:
+    sta.b MC_CNT         ; literal count 1-127
+_ms_lit:
     lda.w $0000,y
     iny
     sta.l $7F0000,x
     inx
-    dec.b WL_PRV
-    bne _mt_lit
-    bra _mt_next
-_mt_copy:
+    dec.b MC_CNT
+    bne _ms_lit
+    bra _ms_next
+_ms_skip:
     iny
     and #$7F
-    sta.b WL_PRV
-_mt_cp:
-    lda.l $7F0000 - 16,x ; dst-16 (X >= cpDst+16 whenever copies happen)
-    sta.l $7F0000,x
-    inx
-    dec.b WL_PRV
-    bne _mt_cp
-_mt_next:
+    sta.b MC_SKP         ; low byte; high byte is the zero from above
+    rep #$20
+    txa
+    clc
+    adc.b MC_SKP
+    tax
+    sep #$20
+_ms_next:
     rep #$20
     cpx.b WL_END
     sep #$20
-    bne _mt_tok
+    bne _ms_tok
     rep #$30
     ply
     plx

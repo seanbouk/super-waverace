@@ -220,23 +220,47 @@ def phase_tables(phi, sky_ref, switch):
     return tab_tm, tab_g, n_sky
 
 
-def sky_palette(switch, sky_ref, sky_rgb):
-    """The 16 band anchors for one zenith colour: 5-bit base plus the
-    INTEGER white adds COLDATA uses, so the solid mode-7 strip below (which
-    adds the last anchor's value to backdrop 0 = the same base) continues
-    bit-exactly. Per course: a sunset is a warm zenith paling to peach."""
-    base5 = [c >> 3 for c in sky_rgb]
+def sky_palette(switch, sky_ref, zenith, horizon, where="sky"):
+    """The sky band's colours for one course: 17 CGRAM entries starting at
+    31 = [31: HUD backdrop (zenith), 32: unused, 33..47: anchors 1..15] plus
+    backdrop entry 0. The band tiles dither indices 1..15 from the zenith
+    (top) to the horizon colour (bottom). Seam rule: the mode-7 safe strip
+    below the band is backdrop 0 + a UNIFORM COLDATA add (a15, the field's
+    value at the switch line - per profile, shared by all courses), so
+    backdrop 0 = horizon - a15 per channel and the strip lands on the
+    horizon colour exactly. That needs horizon >= a15 in every 5-bit
+    channel (a15 = 14 today -> >= 112/255): a clamped channel leaves a
+    visible seam, which is warned. horizon=None -> zenith + a15 (the
+    classic azure: the pre-horizon look, backdrop = zenith)."""
+    z5 = [c >> 3 for c in zenith]
 
-    def anchor_add(k):
-        line = UI_LINES + (switch - UI_LINES) * k / 15.0
+    def anchor_add(t):  # white-add units at band fraction t (0 top .. 1 switch)
+        line = UI_LINES + (switch - UI_LINES) * t
         return min(31, round(sky_add_at(line, sky_ref)))
 
-    pal = bytearray()
-    for k in range(16):
-        a = anchor_add(k)
-        r, g, b = (min(31, c + a) for c in base5)
-        pal += struct.pack("<H", (b << 10) | (g << 5) | r)
-    return bytes(pal)
+    a15 = anchor_add(1.0)
+    if horizon is None:
+        h5 = [min(31, c + a15) for c in z5]
+    else:
+        h5 = [c >> 3 for c in horizon]
+    bd5 = []
+    for c in h5:
+        if c < a15:
+            print("WARNING: {0}: sky_horizon channel {1} < strip add {2} - "
+                  "the safe strip above the horizon will not match the band "
+                  "(raise that channel to >= {3})".format(where, c, a15, a15 * 8))
+        bd5.append(max(0, c - a15))
+    anchors = []
+    for k in range(1, 16):
+        f = anchor_add((k - 1) / 14.0) / float(a15) if a15 else 1.0
+        anchors.append(tuple(max(0, min(31, round(z + (h - z) * f)))
+                             for z, h in zip(z5, h5)))
+
+    def w(c5):
+        return struct.pack("<H", (c5[2] << 10) | (c5[1] << 5) | c5[0])
+    pal = w(z5) + w(bd5) + b"".join(w(a) for a in anchors)  # 31, 32, 33..47
+    sky0 = (bd5[2] << 10) | (bd5[1] << 5) | bd5[0]
+    return bytes(pal), sky0
 
 
 def build_sky_band(switch, sky_ref):
@@ -255,17 +279,19 @@ def build_sky_band(switch, sky_ref):
     # The top must DITHER out of it, never sit flat: that needs anchor 1
     # to differ from anchor 0, which the linear field guarantees. The
     # tiles are colour-agnostic (index dithers); the PALETTE is per course.
-    pal = sky_palette(switch, sky_ref, SKY_RGB)  # boot default
+    pal, _ = sky_palette(switch, sky_ref, SKY_RGB, None)  # boot default
     pats = ((0, 0, 0, 0), (1, 0, 0, 0), (1, 0, 1, 0), (1, 1, 1, 0))
     grid = [[0] * 8 for _ in range(n_rows * 8)]
     for g in range(n_rows * 8):
         # map line UI_LINES+g draws on SCREEN line UI_LINES+g-1
         s = min(switch - 1, max(UI_LINES, UI_LINES + g - 1))
-        p = 15.0 * (s - UI_LINES) / max(1, switch - UI_LINES - 1)
-        k = min(15, int(p))
+        p = 14.0 * (s - UI_LINES) / max(1, switch - UI_LINES - 1)
+        k = min(14, int(p))
         d = pats[min(3, int((p - k) * 4))]
         for x in range(8):
-            c = k + d[(x + g) & 3] # rotate the pattern per line: Bayer-ish
+            # indices 1..15 ONLY: 0 is the backdrop, which is horizon - add
+            # (not the zenith) for courses with a chromatic sky
+            c = 1 + k + d[(x + g) & 3] # rotate the pattern per line: Bayer-ish
             grid[g][x] = min(15, c)
     return encode_4bpp(grid, 1, n_rows), bytes(pal), n_rows
 
@@ -971,7 +997,8 @@ PALETTE_ROLES = {
     "check_dark": CHECK_DARK, "check_white": CHECK_WHITE,
 }
 FADE_ROLES = ("sand_far", "sand_deep")
-SKY_ROLES = ("sky",)  # the zenith colour: backdrop 0 + the band's 16 anchors
+SKY_ROLES = ("sky", "sky_horizon")  # zenith (top) / horizon (band bottom
+                                    # = the mode-7 strip; default zenith+add)
 # shade pairs that must survive the ambient multiply + 5-bit quantisation
 # (a dark ambient can fold light and dark into one CGRAM value and flatten
 # the art); indices are CGRAM entries
@@ -998,14 +1025,14 @@ def load_style(cj, where):
     lamps are exempt (readability / self-lit), and so is the sky band."""
     over = {}
     fade = {"sand_far": SAND_FAR_DEFAULT, "sand_deep": SAND_DEEP_DEFAULT}
-    sky = SKY_RGB
+    sky = {"sky": SKY_RGB, "sky_horizon": None}
     for name, v in (cj.get("palette") or {}).items():
         if name in PALETTE_ROLES:
             over[PALETTE_ROLES[name]] = parse_rgb(v, where + " palette." + name)
         elif name in FADE_ROLES:
             fade[name] = parse_rgb(v, where + " palette." + name)
         elif name in SKY_ROLES:
-            sky = parse_rgb(v, where + " palette." + name)
+            sky[name] = parse_rgb(v, where + " palette." + name)
         else:
             raise AssertionError(where + ": unknown palette role '" + name
                                  + "' (roles: " + ", ".join(
@@ -1555,6 +1582,51 @@ def encode_map(m):
     return bytes(out)
 
 
+def encode_map_sparse(m):
+    """Option B codec. 74% of a course's cells are the untouched water
+    pattern, which repeats every 16 cells: store a 256-byte DEFAULT block
+    (per (row & 15, col & 15): the most common tile id there) and a token
+    stream over the 16384 cells in row order - bit7 set = SKIP n (1-127)
+    cells (they keep the default), else n (1-127) literal ids follow. Short
+    default gaps (< 3 cells) inside authored areas stay literal: a skip
+    token plus the literal restart costs more than it saves. Measured on
+    the island: ~5.4K vs 9.8K for the old copy-from-16-back codec.
+    Returns (default block, stream)."""
+    from collections import Counter
+    dflt = bytearray(256)
+    for r in range(16):
+        for c in range(16):
+            cnt = Counter(m[ty * 128 + tx] for ty in range(r, 128, 16)
+                          for tx in range(c, 128, 16))
+            dflt[r * 16 + c] = cnt.most_common(1)[0][0]
+    match = [m[i] == dflt[((i >> 3) & 0xF0) | (i & 15)] for i in range(16384)]
+    out = bytearray()
+    i = 0
+    while i < 16384:
+        if match[i]:
+            n = 1
+            while i + n < 16384 and match[i + n] and n < 127:
+                n += 1
+            out.append(0x80 | n)
+            i += n
+        else:
+            j = i
+            while j < 16384 and j - i < 127:
+                if match[j]:
+                    k = j
+                    while k < 16384 and match[k]:
+                        k += 1
+                    if k - j >= 3:
+                        break
+                    j = min(k, i + 127)
+                    continue
+                j += 1
+            out.append(j - i)
+            out += m[i:j]
+            i = j
+    return bytes(dflt), bytes(out)
+
+
 def bake_profile(pp, sky_switch, sky_ref):
     """All per-profile tables (raycasts under set_profile)."""
     set_profile(pp)
@@ -1625,8 +1697,8 @@ def bake_course(cdir, sky_switch, sky_ref):
                                 tint(fade["sand_deep"], amb))
     # sky: the zenith colour is authored directly (NOT ambient-multiplied -
     # the sky is the light source); the clouds ARE lit by the ambient
-    c["sky_pal"] = sky_palette(sky_switch, sky_ref, sky)
-    c["sky0"] = rgb15(sky)
+    c["sky_pal"], c["sky0"] = sky_palette(sky_switch, sky_ref, sky["sky"],
+                                          sky["sky_horizon"], where)
     c["cloud_pal"] = pal_bytes([tint((255, 255, 255), amb),
                                 tint(CLOUD_SHADE, amb)])
     course = load_course(os.path.join(cdir, "course.json"))
@@ -1671,7 +1743,7 @@ def bake_course(cdir, sky_switch, sky_ref):
                     row[tx * 8 + px] = pc7[base + py * 8 + px]
     c["preview"] = ([bytes(px & 0x7F for px in row) for row in canvas], palette)
     c["pc7"] = pc7
-    c["mp7_rle"] = encode_map(mp7)
+    c["mdef"], c["mp7_rle"] = encode_map_sparse(mp7)
     c["pal"] = pal
     packed = bytearray(len(coll) // 4)
     for ci, cv in enumerate(coll):
@@ -1852,6 +1924,7 @@ def main():
         asm.append('.section ".crs{0}d" superfree'.format(ci))
         refs = {}
         refs["tix"] = blob_ref(ci, "tix", bc["tix"])
+        refs["mdef"] = blob_ref(ci, "mdef", bc["mdef"])
         refs["map"] = blob_ref(ci, "map", bc["mp7_rle"])
         # palette: ONLY the entries the course owns - 1-15 (water pattern +
         # course block; 0 is the backdrop, owned by the sky) and 48-51
@@ -2001,9 +2074,13 @@ extern u8 gateWp[WAVE_MAX_BUOYS + 1];
    the 16K tile set from them in the $7F8000 buffer */
 extern dmaMemory csTiles, csMap, csPal1, csPal48, csObj, csBuoy, csColl, csFade;
 extern dmaMemory tpSrc;
-/* csSky = the mode-1 sky band's 16 anchors (CGRAM 32, 32 bytes), csSky0 =
-   backdrop entry 0 (the same zenith colour), csCloud = BG3 cloud white +
-   shade under the ambient (CGRAM 29, 4 bytes) */
+/* csMapDef = the map codec's 256-byte default block (the water pattern's
+   16x16 tile ids): copyTo7F it to $7FC200 before mapTo7F */
+extern dmaMemory csMapDef;
+/* csSky = 17 entries from CGRAM 31: [HUD backdrop = zenith, (unused),
+   band anchors 1..15 zenith -> horizon] (34 bytes); csSky0 = backdrop
+   entry 0 = horizon - strip add (the safe strip lands on the horizon);
+   csCloud = BG3 cloud white + shade under the ambient (CGRAM 29, 4 bytes) */
 extern dmaMemory csSky, csCloud;
 extern u16 csSky0;
 #define WAVE_BUOY_PAL {6}
@@ -2057,8 +2134,8 @@ void courseNameTo(u8 c, char *out);
         f.write("u8 gateLeft[WAVE_MAX_BUOYS + 1];\n")
         f.write("s8 gateNx[WAVE_MAX_BUOYS + 1];\ns8 gateNy[WAVE_MAX_BUOYS + 1];\n")
         f.write("u8 gateWp[WAVE_MAX_BUOYS + 1];\n")
-        f.write("dmaMemory csTiles, csMap, csPal1, csPal48, csObj, csBuoy, "
-                "csColl, csFade, csSky, csCloud, tpSrc;\nu16 csSky0;\n")
+        f.write("dmaMemory csTiles, csMap, csMapDef, csPal1, csPal48, csObj, "
+                "csBuoy, csColl, csFade, csSky, csCloud, tpSrc;\nu16 csSky0;\n")
         f.write("u8 wvRotStart, wvRotCount, wvRotFrames;\nu16 rotCols[8];\n\n")
 
         f.write("void waveProfLoad(u8 pf)\n{\n    switch (pf)\n    {\n")
@@ -2119,6 +2196,7 @@ void courseNameTo(u8 c, char *out);
             f.write("        tpSrc.mem.p = (u8 *)&tile_pool;\n")
             f.write("        csTiles.mem.p = (u8 *)&{0};\n".format(r["tix"]))
             f.write("        csMap.mem.p = (u8 *)&{0};\n".format(r["map"]))
+            f.write("        csMapDef.mem.p = (u8 *)&{0};\n".format(r["mdef"]))
             f.write("        csPal1.mem.p = (u8 *)&{0};\n".format(r["pal1"]))
             f.write("        csPal48.mem.p = (u8 *)&{0};\n".format(r["pal48"]))
             f.write("        csObj.mem.p = (u8 *)&{0};\n".format(r["obj"]))
@@ -2165,6 +2243,7 @@ void courseNameTo(u8 c, char *out);
         own = 0
         shared = []
         for lbl, data in (("tix", bc["tix"]), ("map", bc["mp7_rle"]),
+                          ("mdef", bc["mdef"]),
                           ("coll", bc["coll"]), ("fade", bc["fade"]),
                           ("obj", bc["obj_pal"]), ("sky", bc["sky_pal"])):
             if bc["refs"][lbl].startswith("crs{0}_".format(ci)):
@@ -2173,7 +2252,7 @@ void courseNameTo(u8 c, char *out);
                 shared.append(lbl)
         own += 38 + len(bc["buoy_pal"]) + len(bc["cloud_pal"]) + 2
         total_crs += own
-        print("course {0}: {1} bytes (512 tile index, {2} map rle, 4096 coll{3})"
+        print("course {0}: {1} bytes (512 tile index, {2} map sparse+256, 4096 coll{3})"
               .format(ci, own, len(bc["mp7_rle"]),
                       "; shares " + "/".join(shared) if shared else ""))
     print("BUDGET: baked shared gfx ~{0}K + tile pool {1}K, profiles {2}K, "

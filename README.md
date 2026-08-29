@@ -197,11 +197,11 @@ The line in the sand — update this table whenever an allocation changes.
 
 | Entries | Owner | Notes |
 |---------|-------|-------|
-| 0 | Backdrop | Sky zenith: the safe strip above the horizon, shaded by COLDATA. Per course (`sky` role) |
+| 0 | Backdrop | Sky horizon minus the strip's COLDATA add: the safe strip above the horizon lands on `sky_horizon`. Per course |
 | 1–7 | Water | `1..N` rotating deep stripes (ping-pong colours), `N+1` peaks, `N+2` lattice. N ≤ 5 fits here |
 | 8–15 | Course | 8 sand, 9 sand shade (unused), 10 foam (pale blue), 11 wet sand/rope, 12 float magenta, 13 shallow blue, 14 calm wake, 15 shallow sand (unused) |
-| 16–31 | UI text | Font palette for the mode-1 text band (palette row 1); 29–30 = BG3 cloud white/shade (2bpp group 7), per course (ambient-lit) |
-| 32–47 | Sky band | Palette row 2: the mode-1 sky gradient anchors = zenith + white adds. Per course (`sky` role; nothing else may live here) |
+| 16–31 | UI text | Font palette for the mode-1 text band (palette row 1); 29–30 = BG3 cloud white/shade (2bpp group 7), 31 = the solid blank tile's colour = HUD/menu backdrop = sky zenith. Per course |
+| 32–47 | Sky band | Palette row 2: 33–47 = the band's 15 anchors, zenith → horizon (32 unused). Per course (`sky`/`sky_horizon`; nothing else may live here) |
 | 48–49 | Start line | Checker black / true white (glow-exempt) |
 | 50 | Shore teal | Sandy seafoam teal: the shallows tile's land edge, dithering into the bluer teal (glow-exempt) |
 | 51–63 | BG reserve | Unallocated |
@@ -216,8 +216,9 @@ The line in the sand — update this table whenever an allocation changes.
 Entries 1–15 and 48–51 are also per course. A course's `course.json` may carry a
 `palette` (role → `#rrggbb`: sand, sand_shade, foam, wet_sand, float, calm, teal,
 teal_sand, check_dark, check_white, the sand fade's `sand_far`/`sand_deep`, and
-`sky` — the zenith colour, from which the band always pales toward the horizon,
-so a sunset is simply a warm zenith) and an `ambient` RGB multiplier (`#ffffff` =
+`sky` / `sky_horizon` — the band's top and bottom colours; the horizon defaults to
+zenith + the strip's white add, and any authored horizon needs every channel ≥ 112
+so the mode-7 strip above the waterline still matches) and an `ambient` RGB multiplier (`#ffffff` =
 neutral) that the bake applies to every in-world colour — course, water, sand
 fade, riders, buoys, spray, clouds — at zero runtime cost. The HUD ramps and the
 start lamps are exempt; the sky is authored directly rather than multiplied.

@@ -268,12 +268,14 @@ Done:
   loaded VRAM tile + map planes are byte-identical to the bake and to the
   pre-pool build. Result: 6 courses = 66K + 16K pool (was ~30K each).
 
+- **Map codec: pattern + sparse overrides** (Option B, done Aug 29): a
+  256-byte default block (per (row & 15, col & 15): the commonest tile id)
+  plus skip/literal tokens over the 16384 cells; mapTo7F fills from the
+  default (staged at $7FC200) then applies the stream. Island map 9782 ->
+  4998 bytes; a clone course is now ~6K. Verified: decoded VRAM map plane
+  byte-identical to the bake and to the old codec's output.
+
 Kept for later, in the order they pay off:
-- **B. Map codec: pattern + sparse overrides.** Default every cell to the
-  water pattern tile for (x mod 16, y mod 16) and store only skip/literal
-  runs of authored cells. Measured on the island: ~5.4K vs 9.8K (4264
-  authored cells, 364 runs). Halves the biggest remaining per-course blob.
-  Decoder = a small asm loop like mapTo7F.
 - **C. Collision derived from the map** (class-per-tile table, 64 bytes
   instead of 4K; classify 16384 cells at load). REJECTED for now by the
   user: collision is going to need authoring control beyond "what the
