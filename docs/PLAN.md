@@ -299,6 +299,37 @@ Projection at 8 courses / 8 profiles with today's format: ~120K courses
 
 ---
 
+## Game flow / menus (Sep 2026) - agreed design
+
+Decisions: the title screen IS the attract mode (chaser-driven race on
+SUNNY ISLAND behind overlays); screens are EITHER mode 7 with overlays in
+the top band (lines 0-88) OR full-screen mode 1 - no third option (sprite
+text over the sea and moving the mode switch were considered and
+rejected); menu controls everywhere: d-pad, START/A confirm, B back;
+riders are palette-only; championship = all courses in order, 9/6/3/1
+points, standings after each race, final standings at the end; time trial
+= rider + track select (track select gets a baked minimap from the zone
+grid), endless solo laps, best-lap HUD, no ghosts (no SRAM); intro
+"flyby" = the normal camera cruising the racing line (the camera is
+global BY DESIGN - no swooping); mosaic ($2106) between states; the BG3
+title strip is 2bpp = 3 colours + transparent for the eventual graphic.
+
+Phases:
+1. DONE (Sep 1) - runtime attract flag (AUTOPILOT builds unchanged),
+   TITLE/MENU overlays over the attract race (BG3 title strip + band
+   text), textScreen placeholders (CHAMPIONSHIP for now, 2P VS. until
+   post-jam), PAUSE (freeze loop, waveHdma re-kick per frame, resume
+   or quit-to-title), mosaicSweep transitions. Verified in Mesen GUI
+   mode with scripted input across the whole loop.
+2. Time trial - rider select (tall sprites, 4 palettes), track select
+   with minimaps, TT race variant (no NPCs, BEST lap cell, endless),
+   results/exit flow.
+3. Championship - course sequence, intro card (name + racing-line
+   cruise), points + standings screens.
+Post-jam: 2P VS. (split screen - see the cost sketch below).
+
+---
+
 ## Performance pass (Aug 2026) + post-jam options
 
 The three planned C->asm ports plus a rowDepth binary search, each verified

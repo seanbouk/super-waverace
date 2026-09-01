@@ -1,7 +1,7 @@
 #include "ui.h"
 #include "wavedata.h"
 
-extern char sky_gfx, sky_pal2; // baked mode-1 sky band (wavetables.asm)
+extern char sky_gfx, sky_pal2, title_gfx; // sky band + BG3 title strip
 extern char cloud_gfx, cloud_map; // BG3 cloud overlay strip
 extern char hud_gfx, hud_pal;     // gradient HUD font + its CGRAM ramps
 
@@ -50,6 +50,11 @@ void uiInit(void)
     // the row DMAs, then the text init below repaints it.
     dmaCopyVram((u8 *)&sky_gfx, 0x4000 + WAVE_SKY_CHAR0 * 16,
                 WAVE_SKY_ROWS * 32);
+    // BG3 title strip: 2bpp chars in the spare words after the sky rows
+    // (the window after the HUD font is exactly full); titleBg3 maps them
+    dmaCopyVram((u8 *)&title_gfx,
+                0x4000 + WAVE_SKY_CHAR0 * 16 + WAVE_SKY_ROWS * 16,
+                WAVE_TITLE_CHARS * 16);
     dmaCopyCGram((u8 *)&sky_pal2, 31, 34); // 31 HUD backdrop + band anchors
     // WAVE_SKY_ROWS includes the extra bottom row for the BG scroll
     // off-by-one (screen line N samples map line N+1); the bake authors

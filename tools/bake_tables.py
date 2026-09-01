@@ -393,6 +393,11 @@ HUD_FONT = {  # 5x7, one int per row, bit 4 = leftmost pixel
     'S': (0x0F, 0x10, 0x10, 0x0E, 0x01, 0x01, 0x1E),
     'T': (0x1F, 0x04, 0x04, 0x04, 0x04, 0x04, 0x04),
     'W': (0x11, 0x11, 0x11, 0x15, 0x15, 0x1B, 0x11),
+    # only the TITLE strip renderer uses these three so far (they are not
+    # in HUD_GLYPHS - the 4bpp font's VRAM window is full)
+    'C': (0x0E, 0x11, 0x10, 0x10, 0x10, 0x11, 0x0E),
+    'U': (0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x0E),
+    'V': (0x11, 0x11, 0x11, 0x11, 0x11, 0x0A, 0x04),
     # power pips: 7-bit-wide soft rectangles - circles and diamonds both
     # read as zeros at this size
     '*': (0x3E, 0x7F, 0x7F, 0x7F, 0x7F, 0x3E, 0x00),  # filled
@@ -1990,6 +1995,26 @@ def main():
     asm.append(db_lines(cloud_gfx))
     asm.append("cloud_map:")
     asm.append(db_lines(cloud_map))
+    # BG3 title strip: "SUPER WAVERACER" as 2bpp chars in the spare words
+    # between the sky rows and the OBJ sheet (a BG1 4bpp region physically,
+    # but BG3's 10-bit char ids reach it from the same 0x4000 base - the
+    # 2bpp window after the HUD font is exactly full). Rendered from the
+    # HUD glyph shapes; colour 1 = the cloud white (CGRAM 29). Placeholder
+    # until the user draws a real title graphic (2bpp: 3 colours + clear).
+    TITLE_TEXT = "SUPER WAVERACER"
+    tgrid = [[0] * (8 * len(TITLE_TEXT)) for _ in range(8)]
+    for gi, ch in enumerate(TITLE_TEXT):
+        if ch != ' ':
+            rows = HUD_FONT[ch]
+            for r in range(7):
+                for x in range(7):
+                    if rows[r] & (0x40 >> x):
+                        tgrid[r][gi * 8 + x + 1] = 1
+    title_char0 = (0x1C00 + sky_rows * 16) // 8
+    assert 0x1C00 + sky_rows * 16 + len(TITLE_TEXT) * 8 <= 0x2000, \
+        "title chars overflow into the OBJ sheet"
+    asm.append("title_gfx:")
+    asm.append(db_lines(encode_2bpp(tgrid, len(TITLE_TEXT), 1)))
     hud_gfx, hud_pal = build_hud_font()
     asm.append("hud_gfx:")
     asm.append(db_lines(hud_gfx))
@@ -2036,6 +2061,9 @@ def main():
 #define WAVE_CLOUD_TROWS {{CLTR}}
 #define WAVE_CLOUD_CHARS {{CLCH}}
 #define WAVE_CLOUD_SHADE 0x{{CLSH}}
+/* BG3 title strip: 2bpp chars parked after the sky rows (see uiInit) */
+#define WAVE_TITLE_CHAR0 {{TIC0}}
+#define WAVE_TITLE_CHARS {{TICN}}
 #define WAVE_UI_LINES {2}
 #define WAVE_BASE_ROLL 64
 #define WAVE_SKI_PPT_Q4 {3}
@@ -2120,6 +2148,8 @@ void courseNameTo(u8 c, char *out);
            .replace("{{CLSH}}", "{0:04X}".format(
                ((CLOUD_SHADE[2] >> 3) << 10) | ((CLOUD_SHADE[1] >> 3) << 5)
                | (CLOUD_SHADE[0] >> 3)))
+           .replace("{{TIC0}}", str(title_char0))
+           .replace("{{TICN}}", str(len(TITLE_TEXT)))
            .format(MAX_PHASES, len(baked_courses), UI_LINES,
                    round((P["camH"] / (P["skiDist"] ** 2 + P["camH"] ** 2))
                          * ((SCANLINES - 1) / math.radians(P["fovV"])) * 2 * 16),

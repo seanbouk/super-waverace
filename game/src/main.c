@@ -38,6 +38,7 @@ extern char ski_tiles, ski_pal; // OBJ palettes 0-3 + 5 are per course
                                 // (csObj/csBuoy, loaded by courseLoad)
 extern char tall_tiles; // OBJ name table 2: the stacked tall racers
 extern char lamp_pal;   // start-tree lamps: own OBJ palette (4) - the ski
+extern char cloud_map, title_gfx; // BG3 cloud-strip map + the title strip
                         // palette's slots are all rider roles now
 extern void buildCamTables(void);
 extern void collProbe(void); // camera.asm: reads the collision byte-map
@@ -117,6 +118,9 @@ u8 skiDist8, thrF8, thrR8;
 #define REG_BG3HOFS (*(vuint8 *)0x2111)
 #define REG_BG1HOFS (*(vuint8 *)0x210D)
 #define REG_BG1VOFS (*(vuint8 *)0x210E)
+#ifndef REG_MOSAIC
+#define REG_MOSAIC (*(vuint8 *)0x2106)
+#endif
 #ifndef REG_COLDATA
 #define REG_COLDATA (*(vuint8 *)0x2132)
 #endif
@@ -230,6 +234,18 @@ char pwBuf[6]; // power pip string, built on change
 #define LIGHT_SPR (SPRAY_SPR + 2 * SPRAY_ROWS)
 u8 raceDone, startHeld; // exit-to-menu flow (START on the results)
 u8 menuT;               // menu/results timers (autopilot auto-advance)
+// ---- game flow: the title screen IS the attract mode (a chaser-driven
+// race on SUNNY ISLAND behind the overlays); the main menu rides the same
+// race. Confirm = START or A, back = B, everywhere.
+#define RM_RACE 0  // normal racing HUD
+#define RM_TITLE 1 // title strip + flashing PRESS START (attract)
+#define RM_MENU 2  // main menu overlay (attract)
+u8 raceMode;
+u8 attract;  // the waypoint chaser drives (runtime; AUTOPILOT builds force it)
+u8 menuSel;  // 0 championship / 1 time trials / 2 2P vs.
+u8 menuGo;   // menu confirmed: leave the attract race and dispatch
+u8 ovlInit, ovlFlash;
+u16 ovlPrev; // last RAW pad, for overlay + pause edge detection
 u8 ltState, ltT, ltRed; // 0 showing, 2 rising, 3 done
 s16 ltY;
 // per-NPC projection results, buffered so the OAM pairs can be assigned
@@ -636,6 +652,7 @@ static void raceInit(void)
 {
     REG_NMITIMEN = 0xB1; // NMI + V=V,H=H timer IRQ + auto-joypad (the
                          // course select parks the timer IRQ)
+    REG_MOSAIC = 0;      // a transition may have left the sweep at 15
     oamSet(0, SKI_X, 140, 3, 0, 0, 64, 0);
     oamSetEx(0, OBJ_LARGE, OBJ_SHOW);
     OAM_TALL(0);
@@ -833,6 +850,7 @@ static void courseSelect(void)
     REG_BG1VOFS = 0;
     REG_BG1VOFS = 0;
     REG_COLDATA = 0xE0; // fixed-colour add: all channels to zero
+    REG_MOSAIC = 0;     // a transition may have left the sweep at 15
     REG_TM = 0x15;      // BG1 + BG3 + OBJ (NEVER BG2 in mode 1: EXTBG jank)
     uiClear();
     uiFlush();
@@ -887,10 +905,99 @@ static void courseSelect(void)
 }
 
 //---------------------------------------------------------------------------------
+// game-flow helpers: mosaic transitions, the BG3 title strip, placeholder
+// full-screen pages, and the attract-menu overlay (the RM_ states)
+static void mosaicSweep(u8 dir, u8 live)
+{
+    u8 s, v;
+    for (s = 0; s < 16; s++)
+    {
+        v = dir ? (u8)(15 - s) : s;
+        WaitForVBlank();
+        REG_MOSAIC = (u8)((v << 4) | 0x07); // BG1+2+3: sea, EXTBG, clouds
+        if (live) // in-race: the ISR's OAM DMA clobbered ch7's registers
+            waveHdma(phase, camBufOff);
+    }
+    if (dir)
+        REG_MOSAIC = 0;
+}
+
+static u16 ttlBuf[UI_COLS];
+
+// show: the title strip replaces the second cloud-strip map row (the BG3
+// scroll is frozen while an overlay is up, so it sits still); hide: put
+// the baked cloud rows back. Force blank inside - call between states.
+static void titleBg3(u8 show)
+{
+    u16 i;
+    setScreenOff();
+    if (show)
+    {
+        for (i = 0; i < UI_COLS; i++)
+            ttlBuf[i] = 0x2000 | 0x1C00 | WAVE_CLOUD_CHAR0; // blank char
+        for (i = 0; i < WAVE_TITLE_CHARS; i++)
+            ttlBuf[8 + i] = 0x2000 | 0x1C00 | (WAVE_TITLE_CHAR0 + i);
+        dmaCopyVram((u8 *)ttlBuf, 0x4400 + (WAVE_CLOUD_ROW0 + 1) * 32, 64);
+    }
+    else
+        dmaCopyVram((u8 *)&cloud_map, 0x4400 + WAVE_CLOUD_ROW0 * 32,
+                    WAVE_CLOUD_TROWS * 64);
+    setScreenOn();
+}
+
+// full-screen mode-1 placeholder page (courseSelect's screen recipe):
+// used by 2P VS. (post-jam) and CHAMPIONSHIP until its phase lands
+static void textScreen(char *name)
+{
+    u8 armed = 0;
+    REG_NMITIMEN = 0x81; // NMI + auto-joypad; timer IRQ parked
+    REG_HDMAEN = 0;
+    setScreenOff();
+    for (bi = 0; bi < LIGHT_SPR + 6; bi++)
+        oamSetVisible(bi << 2, OBJ_HIDE);
+    REG_BG1HOFS = 0; // write-twice pairs (shared prev-latch)
+    REG_BG1HOFS = 0;
+    REG_BG1VOFS = 0;
+    REG_BG1VOFS = 0;
+    REG_COLDATA = 0xE0;
+    REG_TM = 0x15;
+    uiClear();
+    uiFlush();
+    uiMenuClearRows();
+    uiMenuRow(15, 9, name);
+    uiMenuRow(17, 9, "COMING SOON");
+    uiMenuRow(19, 9, "B TO GO BACK");
+    setScreenOn();
+    mosaicSweep(1, 0); // reveal
+    while (1)
+    {
+        WaitForVBlank();
+        pad0 = padsCurrent(0);
+        if (!(pad0 & (KEY_B | KEY_START | KEY_A)))
+            armed = 1; // the press that opened this page must not close it
+        else if (armed)
+            break;
+    }
+    mosaicSweep(0, 0); // pixelate away; the next state snaps mosaic clear
+}
+
+static void ovlMenuDraw(void)
+{
+    uiPrint(9, 1, menuSel == 0 ? ">CHAMPIONSHIP" : " CHAMPIONSHIP");
+    uiPrint(9, 2, menuSel == 1 ? ">TIME TRIALS" : " TIME TRIALS");
+    uiPrint(9, 3, menuSel == 2 ? ">2P VS." : " 2P VS.");
+}
+
+//---------------------------------------------------------------------------------
 int main(void)
 {
     camTabsInitHeaders();
     courseSel = 0; // BSS; the menu cursor survives between races after this
+    menuSel = 0;   // ditto every game-flow variable
+    menuGo = 0;
+    raceMode = RM_RACE;
+    attract = 0;
+    ovlPrev = 0;
 
     setMode7(0);
     // EXTBG spike: BG2 duplicates the mode 7 image with pixel bit 7 as a
@@ -935,11 +1042,53 @@ int main(void)
     REG_NMITIMEN = 0xB1; // NMI + V=V,H=H timer IRQ + auto-joypad
     irqOn();             // camera.asm: cli
 
-    while (1) // game states: SELECT -> (raceInit) -> RACE/RESULTS -> repeat
+    while (1) // game flow: TITLE/MENU (attract race behind) -> mode -> back
     {
+#if AUTOPILOT
+    // harness build: the pre-flow hands-free loop (tickshot/menuinput and
+    // friends assume boot -> course select -> race with the chaser driving)
     courseSelect();
     courseLoad(courseSel);
+    attract = 1;
+    raceMode = RM_RACE;
     raceInit();
+#else
+    if (menuGo && menuSel == 1)
+    {
+        // TIME TRIALS (phase 2 adds rider/track select + the TT HUD; for
+        // now it is the classic course select + a normal race)
+        menuGo = 0;
+        mosaicSweep(0, 1);
+        titleBg3(0);
+        attract = 0;
+        raceMode = RM_RACE;
+        courseSelect();
+        courseLoad(courseSel);
+        raceInit();
+    }
+    else
+    {
+        if (menuGo) // championship (its phase pending) / 2P vs. (post-jam)
+        {
+            menuGo = 0;
+            mosaicSweep(0, 1);
+            titleBg3(0);
+            textScreen(menuSel == 0 ? "CHAMPIONSHIP" : "2P VS.");
+            raceMode = RM_MENU; // come back with the menu open
+        }
+        // the attract loop: SUNNY ISLAND forever, chaser driving, the
+        // title or menu overlay in the band. Each finished race lands
+        // back here (results auto-advance) and starts the next.
+        attract = 1;
+        if (raceMode == RM_RACE)
+            raceMode = RM_TITLE; // first boot / back from a race
+        courseLoad(0);
+        titleBg3(1);
+        ovlInit = 0;
+        ovlFlash = 2; // neither 0 nor 1: force the first flash draw
+        raceInit();
+    }
+#endif
 
     while (!raceDone)
     {
@@ -948,7 +1097,100 @@ int main(void)
         loopFrames = snes_vblank_count - loopVbl;
         loopVbl = snes_vblank_count;
         pad0 = padsCurrent(0);
-#if AUTOPILOT
+
+        // ---- overlays: title / main menu over the attract race, pause
+        // over a real one. These read the RAW pad; the chaser below only
+        // ORs its own bits in for the attract driver ----
+        if (raceMode != RM_RACE)
+        {
+            if (!ovlInit)
+            {
+                ovlInit = 1;
+                uiClear();
+                if (raceMode == RM_MENU)
+                    ovlMenuDraw();
+            }
+            if (raceMode == RM_TITLE)
+            {
+                if (((u8)(snes_vblank_count >> 5) & 1) != ovlFlash)
+                {
+                    ovlFlash = (u8)(snes_vblank_count >> 5) & 1;
+                    uiPrint(10, 2, ovlFlash ? "PRESS START" : "           ");
+                }
+                if ((pad0 & (KEY_START | KEY_A))
+                    && !(ovlPrev & (KEY_START | KEY_A)))
+                {
+                    raceMode = RM_MENU;
+                    uiClear();
+                    ovlMenuDraw();
+                }
+            }
+            else // RM_MENU
+            {
+                if ((pad0 & KEY_UP) && !(ovlPrev & KEY_UP) && menuSel)
+                {
+                    menuSel--;
+                    ovlMenuDraw();
+                }
+                if ((pad0 & KEY_DOWN) && !(ovlPrev & KEY_DOWN)
+                    && menuSel < 2)
+                {
+                    menuSel++;
+                    ovlMenuDraw();
+                }
+                if ((pad0 & KEY_B) && !(ovlPrev & KEY_B))
+                {
+                    raceMode = RM_TITLE;
+                    ovlFlash = 2;
+                    uiClear();
+                }
+                if ((pad0 & (KEY_START | KEY_A))
+                    && !(ovlPrev & (KEY_START | KEY_A)))
+                {
+                    menuGo = 1;
+                    raceDone = 1;
+                }
+            }
+        }
+        else if (!attract && raceState == 1 && (pad0 & KEY_START)
+                 && !(ovlPrev & KEY_START))
+        {
+            // ---- pause: physics/clock/wave phase all freeze because
+            // this loop does. HDMA replays the last tables, but the
+            // ISR's OAM DMA clobbers ch7's registers every frame, so
+            // waveHdma is re-kicked per frame like the main loop's tail
+            uiClear(); // the pause menu owns the band; HUD redraws after
+            uiPrint(13, 1, "PAUSED");
+            uiPrint(6, 3, "START RESUME     B QUIT");
+            ovlPrev = pad0;
+            while (1)
+            {
+                WaitForVBlank();
+                uiFlush();
+                waveHdma(phase, camBufOff);
+                pad0 = padsCurrent(0);
+                if ((pad0 & KEY_START) && !(ovlPrev & KEY_START))
+                    break;
+                if ((pad0 & KEY_B) && !(ovlPrev & KEY_B))
+                {
+                    raceDone = 1; // quit to the title
+                    break;
+                }
+                ovlPrev = pad0;
+            }
+            uiClear();     // wipe the pause text...
+            hudInit = 0;   // ...and force the HUD to redraw everything
+            pwDrawn = 255;
+            hRank = 255;
+            hLapD = 255;
+            hSpd = 255;
+            hMinD = 255;
+            hSecU = 255;
+        }
+        ovlPrev = pad0;
+
+        if (attract)
+        {
 #if WAVE_MAX_PATH > 0
         // waypoint chaser — also the seed of the NPC racer brain.
         // apc = r*sin(heading - bearing): negative means the target is to
@@ -982,9 +1224,9 @@ int main(void)
         if ((apd > 0 && apu < apd) || (vAlong < 600 && vAlong > -600))
             pad0 |= KEY_B;
 #else
-        pad0 |= KEY_B;
+            pad0 |= KEY_B;
 #endif
-#endif
+        }
 
         // ---- race flow: countdown holds the engines, GO releases them,
         // the finish cuts them again (masks the autopilot too) ----
@@ -1016,11 +1258,12 @@ int main(void)
                 {
                     if ((pad0 & KEY_START) && !startHeld)
                         raceDone = 1;
-#if AUTOPILOT
-                    menuT++;
-                    if (menuT > 90)
-                        raceDone = 1;
-#endif
+                    if (attract)
+                    {
+                        menuT++;
+                        if (menuT > 90)
+                            raceDone = 1; // demo loop: restart the race
+                    }
                 }
             }
             else
@@ -1774,7 +2017,10 @@ int main(void)
 #else
             // ---- race HUD: gradient text (colour ramps live per pixel
             // row in the baked font), row 0 + columns 0/31 left clear for
-            // CRT overscan, everything redrawn only on change ----
+            // CRT overscan, everything redrawn only on change. The
+            // title/menu overlays own the band during attract ----
+            if (raceMode == RM_RACE)
+            {
             if (!hudInit)
             {
                 hudInit = 1;
@@ -1869,6 +2115,7 @@ int main(void)
                 uiHudBig(25, pwBuf);
             }
 #endif
+            } // raceMode == RM_RACE
 #endif
         }
 
@@ -1880,7 +2127,10 @@ int main(void)
         // perfect loop. Written in vblank, both bytes back-to-back (the
         // shared BGOFS prev-latch makes a split pair inherit garbage
         // from the HDMA's $210D stream)
-        REG_BG3HOFS = (u8)(camTheta16 >> 6);
+        if (raceMode == RM_RACE)
+            REG_BG3HOFS = (u8)(camTheta16 >> 6);
+        else
+            REG_BG3HOFS = 0; // the BG3 title must not drift with the camera
         REG_BG3HOFS = 0;
         uiFlush();
         waveHdma(phase, camBufOff);

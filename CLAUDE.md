@@ -421,9 +421,28 @@ move waypoint 0/1 in the painter to move the grid.
 
 ## State / not yet done
 
-- Game flow: boot -> course select (full-screen mode 1, console font, timer
-  IRQ parked + HDMA off + $210D/COLDATA reset - see courseSelect) -> race ->
-  results (START returns to select). raceInit owns EVERY race variable;
+- Game flow (reworked Sep 1, phase 1 of the menu plan - see PLAN.md "Game
+  flow"): boot -> TITLE = ATTRACT (a chaser-driven race on SUNNY ISLAND
+  behind overlays: the BG3 title strip replaces a cloud map row - 2bpp, 3
+  colours + clear, the eventual user graphic has the same budget - and
+  console-font text in the HUD band; BG3 scroll frozen so the title sits
+  still) -> START/A -> main menu (CHAMPIONSHIP / TIME TRIALS / 2P VS.,
+  same attract race behind; B back, START/A confirm - that convention
+  everywhere) -> Time Trials = the classic course select -> race; the
+  other two are textScreen() placeholders for now. START in a race =
+  PAUSE (the loop simply stops - physics/clock/phase freeze, HDMA replays
+  the last tables, but waveHdma must be re-kicked per frame because the
+  ISR's OAM DMA clobbers ch7); START resumes (full HUD redraw via the
+  hudInit/h* cache reset), B quits to the title. Screens are EITHER mode 7
+  with band overlays OR full mode 1 - no third option, by decision.
+  mosaicSweep() ($2106, BG1+2+3) pixelates between states; sprites are
+  not mosaic'd (hidden or tolerated). AUTOPILOT builds skip the flow
+  (straight to course select, attract forced) so every harness still
+  works; `attract` is the runtime chaser flag now. The old course select
+  (full-screen mode 1, console font, timer IRQ parked + HDMA off +
+  $210D/COLDATA reset - see courseSelect) survives as the Time Trials
+  track picker until phase 2. Race end/results: START returns to the
+  title. raceInit owns EVERY race variable;
   replay verified bit-identical (race 2 trace == race 1, flowshot pattern in
   git history). Menu text lives in BG1 map rows below the sky band - rows
   the race's mode switch never shows, so menu and race share the map with
