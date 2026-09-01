@@ -410,7 +410,12 @@ def build_hud_font():
     index still advances every SCANLINE, so the ramps keep per-line
     resolution through the doubled art. Returns (tiles, CGRAM 64-111)."""
     n = len(HUD_GLYPHS)
-    grid = [[0] * 8 for _ in range(n * 8 * 3)]
+    # background = index 15, NOT 0: colour 0 is transparent and shows the
+    # BACKDROP, which is horizon - strip add since the chromatic sky - a
+    # muddy off-colour behind the HUD text on sunset/dawn/twilight courses.
+    # Index 15 of each ramp row (CGRAM 79/95/111) is set to the course's
+    # ZENITH at load, matching the solid blank tile (CGRAM 31).
+    grid = [[15] * 8 for _ in range(n * 8 * 3)]
     for gi, ch in enumerate(HUD_GLYPHS):
         rows = HUD_FONT[ch]
         for r in range(7):
@@ -425,7 +430,7 @@ def build_hud_font():
     for ra, rb in HUD_RAMPS:
         row = [(0, 0, 0)] + [tuple(ra[i] + (rb[i] - ra[i]) * t // 7
                                    for i in range(3)) for t in range(8)]
-        row += [(0, 0, 0)] * 7
+        row += [(0, 0, 0)] * 6 + [SKY_RGB]  # 15 = glyph background (zenith)
         for r, g, b in row:
             pal += struct.pack("<H", ((b >> 3) << 10) | ((g >> 3) << 5)
                                | (r >> 3))
@@ -1701,6 +1706,7 @@ def bake_course(cdir, sky_switch, sky_ref):
     # the sky is the light source); the clouds ARE lit by the ambient
     c["sky_pal"], c["sky0"] = sky_palette(sky_switch, sky_ref, sky["sky"],
                                           sky["sky_horizon"], where)
+    c["zen"] = rgb15(sky["sky"])  # HUD glyph background (CGRAM 79/95/111)
     c["cloud_pal"] = pal_bytes([tint((255, 255, 255), amb),
                                 tint(CLOUD_SHADE, amb)])
     course = load_course(os.path.join(cdir, "course.json"))
@@ -2085,6 +2091,8 @@ extern dmaMemory csMapDef;
    csCloud = BG3 cloud white + shade under the ambient (CGRAM 29, 4 bytes) */
 extern dmaMemory csSky, csCloud;
 extern u16 csSky0;
+extern u16 csZen; /* the zenith as rgb15: the HUD glyph-background entries
+                     (CGRAM 79/95/111 = index 15 of the three ramp rows) */
 #define WAVE_BUOY_PAL {6}
 extern u8 wvRotStart, wvRotCount, wvRotFrames;
 extern u16 rotCols[8];
@@ -2137,7 +2145,7 @@ void courseNameTo(u8 c, char *out);
         f.write("s8 gateNx[WAVE_MAX_BUOYS + 1];\ns8 gateNy[WAVE_MAX_BUOYS + 1];\n")
         f.write("u8 gateWp[WAVE_MAX_BUOYS + 1];\n")
         f.write("dmaMemory csTiles, csMap, csMapDef, csPal1, csPal48, csObj, "
-                "csBuoy, csColl, csFade, csSky, csCloud, tpSrc;\nu16 csSky0;\n")
+                "csBuoy, csColl, csFade, csSky, csCloud, tpSrc;\nu16 csSky0, csZen;\n")
         f.write("u8 wvRotStart, wvRotCount, wvRotFrames;\nu16 rotCols[8];\n\n")
 
         f.write("void waveProfLoad(u8 pf)\n{\n    switch (pf)\n    {\n")
@@ -2208,6 +2216,7 @@ void courseNameTo(u8 c, char *out);
             f.write("        csSky.mem.p = (u8 *)&{0};\n".format(r["sky"]))
             f.write("        csCloud.mem.p = (u8 *)&{0};\n".format(r["cloud"]))
             f.write("        csSky0 = 0x{0:04X};\n".format(bc["sky0"]))
+            f.write("        csZen = 0x{0:04X};\n".format(bc["zen"]))
             f.write("        wvRotStart = {0};\n".format(bc["rot"]["rotStart"]))
             f.write("        wvRotCount = {0};\n".format(bc["rot"]["rotCount"]))
             f.write("        wvRotFrames = {0};\n".format(bc["rot"]["rotFrames"]))

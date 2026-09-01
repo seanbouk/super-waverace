@@ -604,6 +604,12 @@ static void courseLoad(u8 c)
     dmaCopyCGram(csSky.mem.p, 31, 34);
     dmaCopyCGram(csCloud.mem.p, 29, 4);
     setPaletteColor(0, csSky0);
+    // HUD glyph backgrounds (font index 15 of ramp rows 4-6) = the zenith,
+    // same as the solid blank tile: colour 0 would show the backdrop,
+    // which is horizon - strip add, not the sky top
+    setPaletteColor(79, csZen);
+    setPaletteColor(95, csZen);
+    setPaletteColor(111, csZen);
     setScreenOn();
 }
 

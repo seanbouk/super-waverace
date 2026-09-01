@@ -39,7 +39,10 @@ Machines: `seanb` (original) and `Sean` (Aug-28 clone, `C:\Users\Sean\Downloads\
   still lands on the horizon, which is why every horizon channel must be
   >= 112/255 - the bake warns otherwise. Band tiles use indices 1-15 only
   and the HUD/menu blank tile 0 is SOLID colour 15 = CGRAM 31 = the
-  zenith per course, because backdrop 0 is no longer the zenith) and
+  zenith per course, because backdrop 0 is no longer the zenith; the HUD
+  FONT's background pixels are index 15 too - CGRAM 79/95/111 = csZen,
+  the zenith - because colour 0 in a glyph cell showed the backdrop as a
+  muddy box behind the race HUD text on every chromatic-sky course) and
   `"ambient"` ("#rrggbb" multiplier, applied at bake to
   CGRAM 1-15/48-51, the sand fade, the cloud pair 29-30 and OBJ palettes
   0-3 + 5; NOT to the HUD, lamps or the sky colour). Absent = defaults =
