@@ -781,48 +781,60 @@ def lamp_cell(body, shade):
     return g
 
 
-def load_title():
-    """The title logo: assets/title.png (indexed PNG, <= 256x32, up to 15
-    opaque colours + transparent) -> (32x256 index grid, 16-colour OBJ
-    palette). It is drawn as 8 32x32 SPRITES on OBJ palette 6, packed into
-    blank corners of the two OBJ sheets (blit_title asserts each slot is
-    still blank). Absent -> a doubled HUD-glyph text placeholder."""
-    path = os.path.join(ASSETS, "title.png")
+def load_title_word(name, canvas_w, white_is_clear):
+    """One title word: assets/<name> (indexed PNG, up to canvas_w x 32,
+    up to 15 opaque colours + transparent) -> (32 x canvas_w index grid,
+    16-colour OBJ palette). white_is_clear: the word was authored on a
+    white background instead of alpha (title-super.png)."""
+    path = os.path.join(ASSETS, name)
     pal16 = [(0, 0, 0)] * 16
-    grid = [[0] * 256 for _ in range(32)]
-    if os.path.exists(path):
-        pat, plte, trns = decode_png(path)
-        h, w = len(pat), len(pat[0])
-        assert w <= 256 and h <= 32, "title.png must be <= 256x32"
-        used = sorted({c for row in pat for c in row
-                       if (trns[c] if c < len(trns) else 255) != 0})
-        assert len(used) <= 15, "title.png: more than 15 opaque colours"
-        remap = {c: i + 1 for i, c in enumerate(used)}
-        for i, c in enumerate(used):
-            pal16[i + 1] = plte[c]
-        ox, oy = (256 - w) // 2, (32 - h) // 2
-        for y in range(h):
-            for x in range(w):
-                c = pat[y][x]
-                if (trns[c] if c < len(trns) else 255) != 0:
-                    grid[oy + y][ox + x] = remap[c]
-        print("title: assets/title.png {0}x{1}, {2} colours".format(
-            w, h, len(used)))
-    else:
+    grid = [[0] * canvas_w for _ in range(32)]
+    if not os.path.exists(path):
+        return grid, pal16, False
+    pat, plte, trns = decode_png(path)
+    h, w = len(pat), len(pat[0])
+    assert w <= canvas_w and h <= 32, \
+        "{0} must be <= {1}x32 (is {2}x{3})".format(name, canvas_w, w, h)
+
+    def clear(c):
+        if white_is_clear and plte[c] == (255, 255, 255):
+            return True
+        return (trns[c] if c < len(trns) else 255) == 0
+
+    used = sorted({c for row in pat for c in row if not clear(c)})
+    assert len(used) <= 15, name + ": more than 15 opaque colours"
+    remap = {c: i + 1 for i, c in enumerate(used)}
+    for i, c in enumerate(used):
+        pal16[i + 1] = plte[c]
+    oy = (32 - h) // 2
+    for y in range(h):
+        for x in range(w):  # left-aligned: the C side positions the word
+            if not clear(pat[y][x]):
+                grid[oy + y][x] = remap[pat[y][x]]
+    print("title word {0}: {1}x{2}, {3} colours".format(name, w, h, len(used)))
+    return grid, pal16, True
+
+
+def load_title():
+    """The two-word title: WAVERACER (real alpha, OBJ palette 6, 4 blocks)
+    and Super (white = transparent, OBJ palette 7, 3 blocks), each up to
+    15 opaque colours. Slid in from opposite edges at runtime; Super draws
+    OVER Waveracer (lower OAM ids). Missing art -> a text placeholder in
+    the Waveracer slot."""
+    wr, wr_pal, ok = load_title_word("title-waveracer.png", 128, False)
+    sp, sp_pal, _ = load_title_word("title-super.png", 96, True)
+    if not ok:  # placeholder: single-scale glyph text, fits 128 wide
         text = "SUPER WAVERACER"
-        pal16[1] = (250, 250, 250)
-        ox, oy = (256 - len(text) * 16) // 2, (32 - 14) // 2
+        wr_pal[1] = (250, 250, 250)
+        ox = (128 - len(text) * 8) // 2
         for gi, ch in enumerate(text):
             if ch != ' ':
                 rows = HUD_FONT[ch]
                 for r in range(7):
                     for x in range(7):
                         if rows[r] & (0x40 >> x):
-                            for dy in range(2):
-                                for dx in range(2):
-                                    grid[oy + 2 * r + dy][
-                                        ox + gi * 16 + 2 * x + 2 + dx] = 1
-    return grid, pal16
+                            wr[12 + r][ox + gi * 8 + x + 1] = 1
+    return wr, wr_pal, sp, sp_pal
 
 
 def blit_title(sheet, title, block, sx, sy):
@@ -836,7 +848,7 @@ def blit_title(sheet, title, block, sx, sy):
             sheet[sy + y][sx + x] = title[y][block * 32 + x]
 
 
-def build_ski_sheet(title):
+def build_ski_sheet(title_wr, title_sp):
     """128x128 sheet = OBJ name table 1: buoys at 5 sizes, the wake
     conveyor cells (row 96+) and the start-tree lamps (row 112+). The
     racers moved to the tall sheet (name table 2 at VRAM 0x7000); their
@@ -872,14 +884,15 @@ def build_ski_sheet(title):
     blitg(lamp_cell(7, 5), 0, 112, 16)
     blitg(lamp_cell(10, 11), 16, 112, 16)
     blitg(lamp_cell(12, 13), 32, 112, 16)
-    # title logo blocks 0-5: the old 32x32 racer corners (names 0/4) and
-    # the free stripe below the buoys (names 128/132/136/140)
-    blit_title(sheet, title, 0, 0, 0)
-    blit_title(sheet, title, 1, 32, 0)
-    blit_title(sheet, title, 2, 0, 64)
-    blit_title(sheet, title, 3, 32, 64)
-    blit_title(sheet, title, 4, 64, 64)
-    blit_title(sheet, title, 5, 96, 64)
+    # WAVERACER blocks 0-3: the old 32x32 racer corners (names 0/4) and
+    # the free stripe below the buoys (names 128/132); Super blocks 0-1
+    # continue that stripe (names 136/140). Its third block is in table 2.
+    blit_title(sheet, title_wr, 0, 0, 0)
+    blit_title(sheet, title_wr, 1, 32, 0)
+    blit_title(sheet, title_wr, 2, 0, 64)
+    blit_title(sheet, title_wr, 3, 32, 64)
+    blit_title(sheet, title_sp, 0, 64, 64)
+    blit_title(sheet, title_sp, 1, 96, 64)
     tiles = encode_4bpp(sheet, 16, 16)
     return tiles, pal_bytes(SKI_PALETTE), sheet
 
@@ -902,7 +915,7 @@ def obj_palettes(amb, where):
     return bytes(block), pal_bytes(buoy)
 
 
-def build_tall_sheet(title):
+def build_tall_sheet(title_sp):
     """128x96 = OBJ name table 2 (VRAM 0x7000, runtime gfx = 256 + name):
     the tall racers, each drawn as TWO stacked sprites sharing one
     projection. Slots (art bottom-anchored, so the waterline sits at the
@@ -927,9 +940,8 @@ def build_tall_sheet(title):
     blit_tall(ski_scaled(16), 0, 64, 16, 32)   # top 128, bottom 160
     blit_tall(ski_scaled(12), 16, 64, 16, 32)  # top 130, bottom 162
     blit_tall(ski_scaled(8), 32, 64, 16, 16)   # single 132
-    # title logo blocks 6-7 beside the small racers (table-2 names 136/140)
-    blit_title(sheet, title, 6, 64, 64)
-    blit_title(sheet, title, 7, 96, 64)
+    # Super's third block beside the small racers (table-2 name 136)
+    blit_title(sheet, title_sp, 2, 64, 64)
     return encode_4bpp(sheet, 16, 12), sheet
 
 
@@ -2034,9 +2046,9 @@ def main():
     asm.append("")
 
     # jet ski sprite sheet (4bpp OBJ tiles) + palette
-    title_grid, title_pal16 = load_title()
-    ski_tiles, ski_pal, ski_sheet = build_ski_sheet(title_grid)
-    tall_tiles, tall_sheet = build_tall_sheet(title_grid)
+    title_wr, wr_pal16, title_sp, sp_pal16 = load_title()
+    ski_tiles, ski_pal, ski_sheet = build_ski_sheet(title_wr, title_sp)
+    tall_tiles, tall_sheet = build_tall_sheet(title_sp)
     write_png(os.path.join(OUT_DIR, "ski.png"),
               [bytes(r) for r in ski_sheet + tall_sheet],
               SKI_PALETTE + [(0, 0, 0)] * 240)
@@ -2052,7 +2064,9 @@ def main():
     asm.append("lamp_pal:")
     asm.append(db_lines(pal_bytes(LAMP_PALETTE)))
     asm.append("title_pal:")
-    asm.append(db_lines(pal_bytes(title_pal16)))
+    asm.append(db_lines(pal_bytes(wr_pal16)))
+    asm.append("title_pal2:")
+    asm.append(db_lines(pal_bytes(sp_pal16)))
     asm.append("sky_gfx:")
     asm.append(db_lines(sky_gfx))
     asm.append("sky_pal2:")

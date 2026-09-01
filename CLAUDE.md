@@ -429,13 +429,17 @@ move waypoint 0/1 in the painter to move the grid.
 
 - Game flow (reworked Sep 1, phase 1 of the menu plan - see PLAN.md "Game
   flow"): boot -> TITLE = ATTRACT (a chaser-driven race on SUNNY ISLAND
-  behind overlays: the title logo is 8 32x32 SPRITES on OBJ palette 6
-  (CGRAM 224-239) - the asset contract is assets/title.png, indexed PNG,
-  up to 256x32 px and 15 opaque colours + transparent, centred by the
-  bake; absent = a rendered text placeholder. The bake packs the 8 blocks
-  into bake-ASSERTED blank corners of both OBJ sheets (table 1 names
-  0/4/128/132/136/140, table 2 names 136/140 - the attract draw sets
-  OAM_TALL on those two); clouds are blanked entirely during attract - and
+  behind overlays: the title logo is TWO WORDS of 32x32 sprites that
+  slide in from opposite edges (eased) and settle overlapped -
+  assets/title-waveracer.png (up to 128x32, real alpha, OBJ palette 6 =
+  CGRAM 224, 4 blocks: table-1 names 0/4/128/132, from the right to
+  x=64) under assets/title-super.png (up to 96x32, WHITE = transparent,
+  OBJ palette 7 = CGRAM 240, 3 blocks: table-1 136/140 + table-2 136
+  with OAM_TALL, from the left to x=56, drawn 8px higher and OVER via
+  lower OAM ids). Each word: up to 15 opaque colours (waveracer is AT
+  the limit). Slots are bake-ASSERTED blank; titleBlock hides blocks
+  outside 9-bit OAM x. Absent art = a text placeholder in the waveracer
+  slot; clouds are blanked entirely during attract - and
   console-font text in the HUD band; BG3 scroll frozen so the title sits
   still) -> START/A -> main menu (CHAMPIONSHIP / TIME TRIALS / 2P VS.,
   same attract race behind; B back, START/A confirm - that convention

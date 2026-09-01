@@ -39,7 +39,8 @@ extern char ski_tiles, ski_pal; // OBJ palettes 0-3 + 5 are per course
 extern char tall_tiles; // OBJ name table 2: the stacked tall racers
 extern char lamp_pal;   // start-tree lamps: own OBJ palette (4) - the ski
 extern char cloud_map;  // BG3 cloud-strip map (titleBg3 restores it)
-extern char title_pal;  // the title logo's OBJ palette 6 (CGRAM 224)
+extern char title_pal;  // WAVERACER's OBJ palette 6 (CGRAM 224)
+extern char title_pal2; // Super's OBJ palette 7 (CGRAM 240)
                         // palette's slots are all rider roles now
 extern void buildCamTables(void);
 extern void collProbe(void); // camera.asm: reads the collision byte-map
@@ -233,8 +234,12 @@ char pwBuf[6]; // power pip string, built on change
 // gun down one at a time, greens light together at GO, then the whole
 // tree floats up and hides row by row as it reaches the HUD band.
 #define LIGHT_SPR (SPRAY_SPR + 2 * SPRAY_ROWS)
-#define TITLE_SPR (LIGHT_SPR + 6) // 8 logo sprites (attract only)
-#define TITLE_Y 44                // logo band: lines 44-75, inside the sky
+#define TITLE_SPR (LIGHT_SPR + 6) // 7 logo sprites (attract only)
+#define TITLE_Y 44     // WAVERACER band: lines 44-75, inside the sky
+#define TITLE_SUP_UP 8 // Super sits this much higher (its canvas top)
+#define TITLE_WR_X 64  // WAVERACER's resting left edge ((256 - 127) / 2)
+#define TITLE_SUP_X (TITLE_WR_X - 8) // Super rests 8px left of it
+s16 ttlWx, ttlSx; // the words' sliding left edges (title animation)
 u8 raceDone, startHeld; // exit-to-menu flow (START on the results)
 u8 menuT;               // menu/results timers (autopilot auto-advance)
 // ---- game flow: the title screen IS the attract mode (a chaser-driven
@@ -988,6 +993,36 @@ static void textScreen(char *name)
     mosaicSweep(0, 0); // pixelate away; the next state snaps mosaic clear
 }
 
+// one 32x32 logo block; s16 x so the slide can start offscreen either
+// side (OAM x is 9-bit signed - beyond that the block is simply hidden)
+static void titleBlock(u16 oid, s16 x, u16 y, u16 gfx, u16 pal, u8 tall)
+{
+    if (x <= -32 || x > 255)
+    {
+        oamSetVisible(oid, OBJ_HIDE);
+        return;
+    }
+    oamSet(oid, (u16)x, y, 3, 0, 0, gfx, pal);
+    if (tall)
+        OAM_TALL(oid);
+    oamSetEx(oid, OBJ_LARGE, OBJ_SHOW);
+}
+
+// Super (3 blocks, palette 7) draws OVER Waveracer (4 blocks, palette 6):
+// sprite-vs-sprite priority is OAM order, so Super owns the lower ids
+static void titleDraw(void)
+{
+    titleBlock((TITLE_SPR + 0) << 2, ttlSx, TITLE_Y - TITLE_SUP_UP, 136, 7, 0);
+    titleBlock((TITLE_SPR + 1) << 2, (s16)(ttlSx + 32), TITLE_Y - TITLE_SUP_UP,
+               140, 7, 0);
+    titleBlock((TITLE_SPR + 2) << 2, (s16)(ttlSx + 64), TITLE_Y - TITLE_SUP_UP,
+               136, 7, 1);
+    titleBlock((TITLE_SPR + 3) << 2, ttlWx, TITLE_Y, 0, 6, 0);
+    titleBlock((TITLE_SPR + 4) << 2, (s16)(ttlWx + 32), TITLE_Y, 4, 6, 0);
+    titleBlock((TITLE_SPR + 5) << 2, (s16)(ttlWx + 64), TITLE_Y, 128, 6, 0);
+    titleBlock((TITLE_SPR + 6) << 2, (s16)(ttlWx + 96), TITLE_Y, 132, 6, 0);
+}
+
 static void ovlMenuDraw(void)
 {
     uiPrint(9, 1, menuSel == 0 ? ">CHAMPIONSHIP" : " CHAMPIONSHIP");
@@ -1019,7 +1054,8 @@ int main(void)
                   OBJ_SIZE16_L32);
     // (OBJ palettes 0-3 riders + 5 buoys come from courseLoad, per course)
     dmaCopyCGram((u8 *)&lamp_pal, 192, 32); // start-tree lamps: palette 4
-    dmaCopyCGram((u8 *)&title_pal, 224, 32); // title logo: OBJ palette 6
+    dmaCopyCGram((u8 *)&title_pal, 224, 32);  // WAVERACER: OBJ palette 6
+    dmaCopyCGram((u8 *)&title_pal2, 240, 32); // Super:     OBJ palette 7
     // stacked tall racers: name table 2 right after the sheet
     dmaCopyVram((u8 *)&tall_tiles, 0x7000, WAVE_TALL_SHEET);
     setPaletteColor(0, RGB8(16, 60, 150)); // boot zenith; courseLoad owns it
@@ -1101,23 +1137,13 @@ int main(void)
         raceInit();
         raceState = 1; // attract: no countdown, no light tree - and no
         ltState = 3;   // finish either (see the lap check): it just runs
-        // the title logo: 8 32x32 sprites on OBJ palette 6 (up to 15
-        // colours + transparent, assets/title.png via the bake), lines
-        // 44-75 - sky band, where no other sprite ever goes. Blocks sit
-        // in bake-asserted blank corners of both OBJ sheets: names
-        // 0/4/128/132/136/140 in table 1, 136/140 in table 2 (OAM_TALL)
-        oamSet((TITLE_SPR + 0) << 2, 0, TITLE_Y, 3, 0, 0, 0, 6);
-        oamSet((TITLE_SPR + 1) << 2, 32, TITLE_Y, 3, 0, 0, 4, 6);
-        oamSet((TITLE_SPR + 2) << 2, 64, TITLE_Y, 3, 0, 0, 128, 6);
-        oamSet((TITLE_SPR + 3) << 2, 96, TITLE_Y, 3, 0, 0, 132, 6);
-        oamSet((TITLE_SPR + 4) << 2, 128, TITLE_Y, 3, 0, 0, 136, 6);
-        oamSet((TITLE_SPR + 5) << 2, 160, TITLE_Y, 3, 0, 0, 140, 6);
-        oamSet((TITLE_SPR + 6) << 2, 192, TITLE_Y, 3, 0, 0, 136, 6);
-        OAM_TALL((TITLE_SPR + 6) << 2);
-        oamSet((TITLE_SPR + 7) << 2, 224, TITLE_Y, 3, 0, 0, 140, 6);
-        OAM_TALL((TITLE_SPR + 7) << 2);
-        for (bi = TITLE_SPR; bi < TITLE_SPR + 8; bi++)
-            oamSetEx((u16)(bi << 2), OBJ_LARGE, OBJ_SHOW);
+        // the title logo slides in: WAVERACER (4 blocks, palette 6) from
+        // the right to centre, Super (3 blocks, palette 7, drawn over it)
+        // from the left to 8px left of WAVERACER's edge. The overlay loop
+        // eases both toward their marks and draws them (titleDraw)
+        ttlWx = 400;  // virtual left edges, offscreen both sides
+        ttlSx = -120;
+        titleDraw();
     }
 #endif
 
@@ -1140,6 +1166,21 @@ int main(void)
                 uiClear();
                 if (raceMode == RM_MENU)
                     ovlMenuDraw();
+            }
+            // title slide-in, eased (fast entry, soft landing)
+            if (ttlWx > TITLE_WR_X)
+            {
+                ttlWx -= ((ttlWx - TITLE_WR_X) >> 3) + 2;
+                if (ttlWx < TITLE_WR_X)
+                    ttlWx = TITLE_WR_X;
+                titleDraw();
+            }
+            if (ttlSx < TITLE_SUP_X)
+            {
+                ttlSx += ((TITLE_SUP_X - ttlSx) >> 3) + 2;
+                if (ttlSx > TITLE_SUP_X)
+                    ttlSx = TITLE_SUP_X;
+                titleDraw();
             }
             if (raceMode == RM_TITLE)
             {
