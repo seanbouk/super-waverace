@@ -441,8 +441,12 @@ move waypoint 0/1 in the painter to move the grid.
   PAUSE (attract races skip the countdown AND the finish - raceState
   forced to 1, ltState 3, the lap-3 check gated on !attract - and
   overtaken NPCs respawn 4 waypoints ahead with progress pinned above the
-  player's, so the demo overtakes recycled traffic forever; the chaser's
-  steering deadband is doubled in attract so the horizon does not saw).
+  player's, so the demo overtakes recycled traffic forever; the chaser
+  FEATHERS small corrections - apFine steers at quarter rate - because a
+  single full-rate loop tick is 2 binary degrees and pans the far texture
+  several pixels in one step, which read as "ground jumps" tied to the
+  bang-bang steering; real corners keep full authority. Measured: 172
+  feathered vs 42 full-rate ticks over 1200 attract frames).
   PAUSE (the loop simply stops - physics/clock/phase freeze, HDMA replays
   the last tables, but waveHdma must be re-kicked per frame because the
   ISR's OAM DMA clobbers ch7); START resumes (full HUD redraw via the

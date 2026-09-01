@@ -245,6 +245,7 @@ u8 attract;  // the waypoint chaser drives (runtime; AUTOPILOT builds force it)
 u8 menuSel;  // 0 championship / 1 time trials / 2 2P vs.
 u8 menuGo;   // menu confirmed: leave the attract race and dispatch
 u8 ovlInit, ovlFlash;
+u8 apFine;   // chaser: this correction is small - steer at quarter rate
 u16 ovlPrev; // last RAW pad, for overlay + pause edge detection
 u8 ltState, ltT, ltRed; // 0 showing, 2 rising, 3 done
 s16 ltY;
@@ -694,6 +695,7 @@ static void raceInit(void)
     camCosNeg = npcCos < 0 ? 1 : 0;
     camPX = (u16)(startX - ((WAVE_SKI_DIST * npcSin) >> 7)) & 4095;
     camPY = (u16)(startY - ((WAVE_SKI_DIST * npcCos) >> 7)) & 4095;
+    apFine = 0;  // BSS
     skiLean = 0; // BSS is not zero-initialised: garbage here reached
     skiFlip = 0; // oamSet as flip bits until the first steer input
     skiDist8 = WAVE_SKI_DIST; // 200 - must stay < 256 for the multiplier
@@ -1227,10 +1229,22 @@ int main(void)
         }
         else
         {
-            if (apc < -(raceMode != RM_RACE ? apd >> 2 : apd >> 3))
-                pad0 |= KEY_RIGHT;
-            if (apc > (raceMode != RM_RACE ? apd >> 2 : apd >> 3))
-                pad0 |= KEY_LEFT;
+            wpdx = apc < 0 ? -apc : apc;
+            if (wpdx > (apd >> 3))
+            {
+                if (apc < 0)
+                    pad0 |= KEY_RIGHT;
+                else
+                    pad0 |= KEY_LEFT;
+                // small corrections steer at QUARTER authority (apFine,
+                // consumed by the steering block): one full-rate loop tick
+                // is 2 binary degrees, which pans the far texture several
+                // pixels in a single step - the attract "ground jump". A
+                // human feathers; the chaser must too. Real corners
+                // (error beyond half the forward component) keep full rate
+                if (wpdx < (apd >> 1))
+                    apFine = 1;
+            }
         }
         // full throttle on the straights; coast into corners sharper than
         // ~45 deg — but never stall (turn authority needs speed)
@@ -1313,6 +1327,11 @@ int main(void)
         turnRate = vAlong < 0 ? -vAlong : vAlong;
         if (turnRate > 512)
             turnRate = 512; // 512 in 8.8 heading units = the old full rate
+        if (apFine) // the chaser's feathered correction (never set by a pad)
+        {
+            apFine = 0;
+            turnRate >>= 2;
+        }
         skiLean = 0;
         if (pad0 & KEY_LEFT)
         {
