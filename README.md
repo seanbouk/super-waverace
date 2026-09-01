@@ -211,7 +211,8 @@ The line in the sand — update this table whenever an allocation changes.
 | 144–191 | NPC racers | OBJ palettes 1–3: full rider recolours (skin + two clothing pairs + jetski pair; tiles shared). Per course (ambient-lit) |
 | 192–207 | Start lamps | OBJ palette 4: the start-tree lamps — self-lit, exempt from the ambient |
 | 208–223 | Buoys | OBJ palette 5: red / warm-yellow pairs + outline/white at the rider slot numbers. Per course (ambient-lit) |
-| 224–255 | Sprites reserve | OBJ palettes 6–7 — do not touch from BG code |
+| 224–239 | Title logo | OBJ palette 6: the title screen logo (`assets/title.png`, up to 15 colours) |
+| 240–255 | Sprites reserve | OBJ palette 7 — do not touch from BG code |
 
 Entries 1–15 and 48–51 are also per course. A course's `course.json` may carry a
 `palette` (role → `#rrggbb`: sand, sand_shade, foam, wet_sand, float, calm, teal,

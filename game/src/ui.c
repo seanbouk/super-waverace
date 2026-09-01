@@ -1,7 +1,7 @@
 #include "ui.h"
 #include "wavedata.h"
 
-extern char sky_gfx, sky_pal2, title_gfx; // sky band + BG3 title strip
+extern char sky_gfx, sky_pal2; // baked mode-1 sky band (wavetables.asm)
 extern char cloud_gfx, cloud_map; // BG3 cloud overlay strip
 extern char hud_gfx, hud_pal;     // gradient HUD font + its CGRAM ramps
 
@@ -50,11 +50,6 @@ void uiInit(void)
     // the row DMAs, then the text init below repaints it.
     dmaCopyVram((u8 *)&sky_gfx, 0x4000 + WAVE_SKY_CHAR0 * 16,
                 WAVE_SKY_ROWS * 32);
-    // BG3 title strip: 2bpp chars in the spare words after the sky rows
-    // (the window after the HUD font is exactly full); titleBg3 maps them
-    dmaCopyVram((u8 *)&title_gfx,
-                0x4000 + WAVE_SKY_CHAR0 * 16 + WAVE_SKY_ROWS * 16,
-                WAVE_TITLE_CHARS * 16);
     dmaCopyCGram((u8 *)&sky_pal2, 31, 34); // 31 HUD backdrop + band anchors
     // WAVE_SKY_ROWS includes the extra bottom row for the BG scroll
     // off-by-one (screen line N samples map line N+1); the bake authors
@@ -88,12 +83,6 @@ void uiInit(void)
                 WAVE_CLOUD_TROWS * 64); // ...then drop the strip in
     setPaletteColor(29, RGB8(250, 250, 250)); // cloud white
     setPaletteColor(30, WAVE_CLOUD_SHADE);    // cloud underside shade
-    // BG3 palette group 6 = the TITLE strip's own colours (3 + clear:
-    // group 7's last slot became the HUD backdrop). Placeholder ramp
-    // until the user's 24px title asset brings its own three.
-    setPaletteColor(25, RGB8(250, 250, 250));
-    setPaletteColor(26, RGB8(140, 170, 230));
-    setPaletteColor(27, RGB8(24, 40, 90));
 
     // HUD gradient font: 3 blocks of glyphs (single height / double-height
     // tops / bottoms) between the UI map and the cloud chars

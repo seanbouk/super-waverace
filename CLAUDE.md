@@ -429,10 +429,13 @@ move waypoint 0/1 in the painter to move the grid.
 
 - Game flow (reworked Sep 1, phase 1 of the menu plan - see PLAN.md "Game
   flow"): boot -> TITLE = ATTRACT (a chaser-driven race on SUNNY ISLAND
-  behind overlays: the BG3 title strip replaces a cloud map row - 2bpp, 3
-  colours + clear - BG3 palette group 6, CGRAM 25-27, 24px tall = 3 tile
-  rows is the agreed asset contract; clouds are blanked entirely during
-  attract - and
+  behind overlays: the title logo is 8 32x32 SPRITES on OBJ palette 6
+  (CGRAM 224-239) - the asset contract is assets/title.png, indexed PNG,
+  up to 256x32 px and 15 opaque colours + transparent, centred by the
+  bake; absent = a rendered text placeholder. The bake packs the 8 blocks
+  into bake-ASSERTED blank corners of both OBJ sheets (table 1 names
+  0/4/128/132/136/140, table 2 names 136/140 - the attract draw sets
+  OAM_TALL on those two); clouds are blanked entirely during attract - and
   console-font text in the HUD band; BG3 scroll frozen so the title sits
   still) -> START/A -> main menu (CHAMPIONSHIP / TIME TRIALS / 2P VS.,
   same attract race behind; B back, START/A confirm - that convention

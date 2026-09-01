@@ -38,7 +38,8 @@ extern char ski_tiles, ski_pal; // OBJ palettes 0-3 + 5 are per course
                                 // (csObj/csBuoy, loaded by courseLoad)
 extern char tall_tiles; // OBJ name table 2: the stacked tall racers
 extern char lamp_pal;   // start-tree lamps: own OBJ palette (4) - the ski
-extern char cloud_map, title_gfx; // BG3 cloud-strip map + the title strip
+extern char cloud_map;  // BG3 cloud-strip map (titleBg3 restores it)
+extern char title_pal;  // the title logo's OBJ palette 6 (CGRAM 224)
                         // palette's slots are all rider roles now
 extern void buildCamTables(void);
 extern void collProbe(void); // camera.asm: reads the collision byte-map
@@ -232,6 +233,8 @@ char pwBuf[6]; // power pip string, built on change
 // gun down one at a time, greens light together at GO, then the whole
 // tree floats up and hides row by row as it reaches the HUD band.
 #define LIGHT_SPR (SPRAY_SPR + 2 * SPRAY_ROWS)
+#define TITLE_SPR (LIGHT_SPR + 6) // 8 logo sprites (attract only)
+#define TITLE_Y 44                // logo band: lines 44-75, inside the sky
 u8 raceDone, startHeld; // exit-to-menu flow (START on the results)
 u8 menuT;               // menu/results timers (autopilot auto-advance)
 // ---- game flow: the title screen IS the attract mode (a chaser-driven
@@ -660,7 +663,7 @@ static void raceInit(void)
     oamSet(4, SKI_X, 108, 3, 0, 0, 0, 0); // player top: id 1, right
     oamSetEx(4, OBJ_LARGE, OBJ_SHOW);     // behind the bottom half
     OAM_TALL(4);
-    for (bi = 2; bi < LIGHT_SPR + 6; bi++)
+    for (bi = 2; bi < TITLE_SPR + 8; bi++)
         oamSetVisible(bi << 2, OBJ_HIDE); // NB: ids are byte offsets (x4)
 
     tick = 0;
@@ -845,7 +848,7 @@ static void courseSelect(void)
     REG_NMITIMEN = 0x81; // NMI + auto-joypad; no timer IRQ during the menu
     REG_HDMAEN = 0;      // all eight streams off: TM/scroll/COLDATA are ours
     setScreenOff();
-    for (bi = 0; bi < LIGHT_SPR + 6; bi++)
+    for (bi = 0; bi < TITLE_SPR + 8; bi++)
         oamSetVisible(bi << 2, OBJ_HIDE); // everything, player included
     REG_BG1HOFS = 0; // write-twice pairs, back-to-back (shared prev-latch)
     REG_BG1HOFS = 0;
@@ -936,18 +939,12 @@ static void titleBg3(u8 show)
     if (show)
     {
         u16 r;
-        // clouds are OFF in attract: blank the whole strip, then the
-        // title in the second row. Title chars use BG3 palette group 6
-        // (CGRAM 25-27: three real colours + transparent, set in uiInit)
-        // - group 7's slot 3 is the HUD backdrop now
+        // clouds are OFF in attract (the logo sprites own that sky space)
         for (i = 0; i < UI_COLS; i++)
             ttlBuf[i] = 0x2000 | 0x1C00 | WAVE_CLOUD_CHAR0; // blank char
         for (r = 0; r < WAVE_CLOUD_TROWS; r++)
             dmaCopyVram((u8 *)ttlBuf, 0x4400 + (WAVE_CLOUD_ROW0 + r) * 32,
                         64);
-        for (i = 0; i < WAVE_TITLE_CHARS; i++)
-            ttlBuf[8 + i] = 0x2000 | 0x1800 | (WAVE_TITLE_CHAR0 + i);
-        dmaCopyVram((u8 *)ttlBuf, 0x4400 + (WAVE_CLOUD_ROW0 + 1) * 32, 64);
     }
     else
         dmaCopyVram((u8 *)&cloud_map, 0x4400 + WAVE_CLOUD_ROW0 * 32,
@@ -963,7 +960,7 @@ static void textScreen(char *name)
     REG_NMITIMEN = 0x81; // NMI + auto-joypad; timer IRQ parked
     REG_HDMAEN = 0;
     setScreenOff();
-    for (bi = 0; bi < LIGHT_SPR + 6; bi++)
+    for (bi = 0; bi < TITLE_SPR + 8; bi++)
         oamSetVisible(bi << 2, OBJ_HIDE);
     REG_BG1HOFS = 0; // write-twice pairs (shared prev-latch)
     REG_BG1HOFS = 0;
@@ -1022,6 +1019,7 @@ int main(void)
                   OBJ_SIZE16_L32);
     // (OBJ palettes 0-3 riders + 5 buoys come from courseLoad, per course)
     dmaCopyCGram((u8 *)&lamp_pal, 192, 32); // start-tree lamps: palette 4
+    dmaCopyCGram((u8 *)&title_pal, 224, 32); // title logo: OBJ palette 6
     // stacked tall racers: name table 2 right after the sheet
     dmaCopyVram((u8 *)&tall_tiles, 0x7000, WAVE_TALL_SHEET);
     setPaletteColor(0, RGB8(16, 60, 150)); // boot zenith; courseLoad owns it
@@ -1103,6 +1101,23 @@ int main(void)
         raceInit();
         raceState = 1; // attract: no countdown, no light tree - and no
         ltState = 3;   // finish either (see the lap check): it just runs
+        // the title logo: 8 32x32 sprites on OBJ palette 6 (up to 15
+        // colours + transparent, assets/title.png via the bake), lines
+        // 44-75 - sky band, where no other sprite ever goes. Blocks sit
+        // in bake-asserted blank corners of both OBJ sheets: names
+        // 0/4/128/132/136/140 in table 1, 136/140 in table 2 (OAM_TALL)
+        oamSet((TITLE_SPR + 0) << 2, 0, TITLE_Y, 3, 0, 0, 0, 6);
+        oamSet((TITLE_SPR + 1) << 2, 32, TITLE_Y, 3, 0, 0, 4, 6);
+        oamSet((TITLE_SPR + 2) << 2, 64, TITLE_Y, 3, 0, 0, 128, 6);
+        oamSet((TITLE_SPR + 3) << 2, 96, TITLE_Y, 3, 0, 0, 132, 6);
+        oamSet((TITLE_SPR + 4) << 2, 128, TITLE_Y, 3, 0, 0, 136, 6);
+        oamSet((TITLE_SPR + 5) << 2, 160, TITLE_Y, 3, 0, 0, 140, 6);
+        oamSet((TITLE_SPR + 6) << 2, 192, TITLE_Y, 3, 0, 0, 136, 6);
+        OAM_TALL((TITLE_SPR + 6) << 2);
+        oamSet((TITLE_SPR + 7) << 2, 224, TITLE_Y, 3, 0, 0, 140, 6);
+        OAM_TALL((TITLE_SPR + 7) << 2);
+        for (bi = TITLE_SPR; bi < TITLE_SPR + 8; bi++)
+            oamSetEx((u16)(bi << 2), OBJ_LARGE, OBJ_SHOW);
     }
 #endif
 
