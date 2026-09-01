@@ -933,10 +933,18 @@ static void titleBg3(u8 show)
     setScreenOff();
     if (show)
     {
+        u16 r;
+        // clouds are OFF in attract: blank the whole strip, then the
+        // title in the second row. Title chars use BG3 palette group 6
+        // (CGRAM 25-27: three real colours + transparent, set in uiInit)
+        // - group 7's slot 3 is the HUD backdrop now
         for (i = 0; i < UI_COLS; i++)
             ttlBuf[i] = 0x2000 | 0x1C00 | WAVE_CLOUD_CHAR0; // blank char
+        for (r = 0; r < WAVE_CLOUD_TROWS; r++)
+            dmaCopyVram((u8 *)ttlBuf, 0x4400 + (WAVE_CLOUD_ROW0 + r) * 32,
+                        64);
         for (i = 0; i < WAVE_TITLE_CHARS; i++)
-            ttlBuf[8 + i] = 0x2000 | 0x1C00 | (WAVE_TITLE_CHAR0 + i);
+            ttlBuf[8 + i] = 0x2000 | 0x1800 | (WAVE_TITLE_CHAR0 + i);
         dmaCopyVram((u8 *)ttlBuf, 0x4400 + (WAVE_CLOUD_ROW0 + 1) * 32, 64);
     }
     else
@@ -1059,6 +1067,8 @@ int main(void)
         // now it is the classic course select + a normal race)
         menuGo = 0;
         mosaicSweep(0, 1);
+        REG_HDMAEN = 0; // BEFORE any loader: waveRawLoad borrows the PPU
+                        // multiplier and ch0 keeps repainting CGRAM
         titleBg3(0);
         attract = 0;
         raceMode = RM_RACE;
@@ -1072,6 +1082,7 @@ int main(void)
         {
             menuGo = 0;
             mosaicSweep(0, 1);
+            REG_HDMAEN = 0;
             titleBg3(0);
             textScreen(menuSel == 0 ? "CHAMPIONSHIP" : "2P VS.");
             raceMode = RM_MENU; // come back with the menu open
@@ -1082,11 +1093,14 @@ int main(void)
         attract = 1;
         if (raceMode == RM_RACE)
             raceMode = RM_TITLE; // first boot / back from a race
+        REG_HDMAEN = 0; // a quit race's channels may still be streaming
         courseLoad(0);
         titleBg3(1);
         ovlInit = 0;
         ovlFlash = 2; // neither 0 nor 1: force the first flash draw
         raceInit();
+        raceState = 1; // attract: no countdown, no light tree - and no
+        ltState = 3;   // finish either (see the lap check): it just runs
     }
 #endif
 
@@ -1213,9 +1227,9 @@ int main(void)
         }
         else
         {
-            if (apc < -(apd >> 3))
+            if (apc < -(raceMode != RM_RACE ? apd >> 2 : apd >> 3))
                 pad0 |= KEY_RIGHT;
-            if (apc > (apd >> 3))
+            if (apc > (raceMode != RM_RACE ? apd >> 2 : apd >> 3))
                 pad0 |= KEY_LEFT;
         }
         // full throttle on the straights; coast into corners sharper than
@@ -1473,7 +1487,7 @@ int main(void)
                 lastLapSec = (u8)(lapFr / 60); // division: once per lap
                 lastLapTenth = (u8)((lapFr % 60) / 6);
                 lapFr = 0;
-                if (raceState == 1 && lapCount >= RACE_LAPS)
+                if (!attract && raceState == 1 && lapCount >= RACE_LAPS)
                 {
                     raceState = 2; // chequered flag
                     finPos = racePos;
@@ -1612,6 +1626,24 @@ int main(void)
                     if (npcWp[bi] >= pathCount)
                         npcWp[bi] = 0;
                     npcProg[bi]++;
+                }
+                // attract: recycled traffic. A racer overtaken by more
+                // than 3 waypoints respawns 4 segments ahead (beyond the
+                // sprite draw distance, so no pop) with its progress
+                // pinned ahead of the player: the rubber-band tiers then
+                // slow it down and the demo overtakes it again, forever
+                if (attract && (s16)(pProg - npcProg[bi]) > 3)
+                {
+                    apu = nextWp + 4;
+                    if (apu >= pathCount)
+                        apu -= pathCount;
+                    npcX[bi] = pathX[apu];
+                    npcY[bi] = pathY[apu];
+                    npcWp[bi] = (u8)(apu + 1 >= pathCount ? 0 : apu + 1);
+                    npcProg[bi] = pProg + 4;
+                    npcFX[bi] = 0;
+                    npcFY[bi] = 0;
+                    npcTheta[bi] = startTheta; // the brain corrects it
                 }
                 // schedule rubber-banding: is it ahead of the player?
                 rubDiff = (s16)npcProg[bi] - (s16)pProg;

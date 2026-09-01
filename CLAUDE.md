@@ -349,6 +349,12 @@ Mesen.exe --testrunner --timeout=30 <rom> <script.lua>   # arg order-free
   dmaMemory addr+bank member-by-member. Related: **returning `char *`
   from a function loses the bank too** - courseNameTo copies into a
   caller buffer instead. Both found via Mesen exec/memory callbacks.
+- **courseLoad NEEDS HDMA OFF, not just force blank** (waveRawLoad
+  borrows the PPU multiplier and the sand-fade channel keeps repainting
+  CGRAM even in force blank): every game-flow path that loads a course or
+  touches VRAM between states does REG_HDMAEN = 0 first - the quit-a-race
+  -> attract path shipped without it once and produced garbage wave
+  tables + leaked palette entries ("glitchy jank" on the title).
 - **The course/profile loaders (courseLoad in main.c)** swap everything
   per course under force blank: courseGeom + waveProfLoad (generated),
   waveRawLoad (delta-d decode + a synthesis), packed collision ->
@@ -424,12 +430,19 @@ move waypoint 0/1 in the painter to move the grid.
 - Game flow (reworked Sep 1, phase 1 of the menu plan - see PLAN.md "Game
   flow"): boot -> TITLE = ATTRACT (a chaser-driven race on SUNNY ISLAND
   behind overlays: the BG3 title strip replaces a cloud map row - 2bpp, 3
-  colours + clear, the eventual user graphic has the same budget - and
+  colours + clear - BG3 palette group 6, CGRAM 25-27, 24px tall = 3 tile
+  rows is the agreed asset contract; clouds are blanked entirely during
+  attract - and
   console-font text in the HUD band; BG3 scroll frozen so the title sits
   still) -> START/A -> main menu (CHAMPIONSHIP / TIME TRIALS / 2P VS.,
   same attract race behind; B back, START/A confirm - that convention
   everywhere) -> Time Trials = the classic course select -> race; the
   other two are textScreen() placeholders for now. START in a race =
+  PAUSE (attract races skip the countdown AND the finish - raceState
+  forced to 1, ltState 3, the lap-3 check gated on !attract - and
+  overtaken NPCs respawn 4 waypoints ahead with progress pinned above the
+  player's, so the demo overtakes recycled traffic forever; the chaser's
+  steering deadband is doubled in attract so the horizon does not saw).
   PAUSE (the loop simply stops - physics/clock/phase freeze, HDMA replays
   the last tables, but waveHdma must be re-kicked per frame because the
   ISR's OAM DMA clobbers ch7); START resumes (full HUD redraw via the
