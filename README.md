@@ -5,26 +5,37 @@ fake a sinusoidal ocean on hardware that can only rotate and scale a flat plane.
 
 ## Status
 
-🌊 Playable: a full 3-lap race against three rubber-banded NPC racers — start
-grid, a sprite start-light tree (three reds stage, greens together at the gun,
-then the tree floats up and away), live positions, lap times, chequered start
-line and a FINISH banner — on the rolling sea, around an island course with shorelines,
-rope float-lines and L/R buoys, collision with slide-along, and speed-driven
-wake spray under the hull. Buoys are judged: passing each one on its correct
-side builds a 0–5 power chain (HUD bar) that scales thrust and top speed from
-67% to 133%; a wrong-side pass resets it to 0 — you earn your speed. Dithered
+🌊 Playable, with a full game flow. The title screen is the attract mode
+(a chaser-driven race on SUNNY ISLAND under the sliding sprite logo);
+START opens a menu of **CHAMPIONSHIP** (all six courses in order, points
+9/6/3/1, a "… IS CHAMPION" page at the end), **TIME TRIALS** (solo, endless
+laps, best-lap HUD) and **ARCADE** (one 3-lap race). Each picks a rider —
+Magnus, Callista, Milo, Dafydd, palette-only — then a course from a list
+with a baked minimap. Championship races open with a flyover: the camera
+cruises the racing line at constant speed under the race number and
+course name, one lap or START. Races are 3 laps against three rubber-banded
+NPCs — start grid, a sprite start-light tree, live positions, lap times,
+chequered start line judged by a true crossing, FINISH banner — on the
+rolling sea, around an island course with shorelines, rope float-lines and
+L/R buoys (not solid: everyone drives through them). Buoys are judged:
+passing each one on its correct side builds a 0–5 power chain (HUD bar)
+that scales thrust and top speed from 67% to 133%; a wrong-side pass resets
+it to 0 — you earn your speed. When you cross the line a live results
+table floats in the sky over the finish-line scene: finishers with a flag
+(and their points), the rest in live order, updating as the CPU riders
+glide over the line and park ahead of you; PRESS START after 5s. Dithered
 clouds drift through the sky with a heading-linked parallax; the racers are
-double-height arcade sprites authored in Photoshop, with four full rider
-palettes. The game boots to a course-select screen (START to race, START on
-the results to return) — the front door for the multi-course work in
-progress. Verified on real hardware up to the Aug-21 build (race, power,
-gradient HUD, start tree, clouds — the spawn drop passes behind the clouds,
-which is a feature); pending a CRT pass: the tall racers / second OBJ table,
-the scanline-IRQ mode switch + sand distance fade, and the new rider art.
-See `docs/PLAN.md` "Race mode" for what's
-left (multi-course) and for important performance findings. Target:
+double-height arcade sprites authored in Photoshop with four full rider
+palettes; START pauses (B quits to the title). Six courses build today, all
+geometric clones of the first with their own skies, water colours, ambient
+light and wave profiles — real layouts are the remaining authoring work.
+Verified on real hardware up to the Aug-21 build (race, power, gradient HUD,
+start tree, clouds); pending a CRT pass: the tall racers / second OBJ table,
+the scanline-IRQ mode switch (now two-stage) + sand distance fade, the
+rider art, and the BG3 sky text. See `docs/PLAN.md` for the design notes,
+performance findings and history. Target:
 [SNES DEV Game Jam 2026](https://itch.io/jam/snes-dev-game-jam-2026) — LoROM,
-≤512KB, no enhancement chips, no SRAM, NTSC+PAL. See `docs/PLAN.md` for history.
+≤512KB, no enhancement chips, no SRAM, NTSC+PAL.
 
 ![Rolling sea](docs/rolling-sea.png) ![Rolling sea, later phase](docs/rolling-sea-2.png)
 
@@ -35,7 +46,8 @@ buoyancy spring: sitting still it bobs with the swell; at speed it skims crest t
 crest, catching air where thrust and steering stop working. Pass **left of L
 buoys and right of R buoys** to build the 0–5 power chain (the PW bar): each
 correct pass raises your thrust and top speed, one wrong-side pass drops you
-back to 0.
+back to 0. Menus everywhere: d-pad, **START/A** confirm, **B** back;
+**START** in a race pauses.
 
 ## How the effects work
 
@@ -173,7 +185,10 @@ registers double as BG1's scroll in mode 1, so the sky tiles render unscrolled
 for free. Clouds ride BG3 (2bpp) over the gradient: a strip of dithered
 cumulus whose horizontal scroll is simply the camera heading ×4 — the 256px
 map wraps exactly four times per full turn, a perfect parallax loop for one
-register write per frame. (They were BG2 for a day, which real hardware
+register write per frame (made by the scanline IRQ at the band's edge, so
+the band's own BG3 rows — the intro card's text — stay put). The same
+layer carries the in-race results table and the intro card in a baked 2bpp
+sky font: white with a 1px zenith-coloured edge, floating over any sky. (They were BG2 for a day, which real hardware
 punished: EXTBG — on all frame for the sea's priority layer — mangles BG2's
 fetches outside mode 7, an effect no emulator models.) The PVSnesLib
 console uploads its map to a hardcoded VRAM address inside the Mode 7 region, so
@@ -190,6 +205,41 @@ tiles (Mode 7 has no tile flipping); when course art pushes the composed map ove
 budget, the bake's quantiser merges the most-similar tiles — water first (course
 tiles never merge with water and cost 8× to merge at all). `game/sea.png` previews
 the exact post-quantise data the SNES ships.
+
+## Display modes: what is on screen where
+
+Every screen is one of two recipes — the **race screen** (mode 7 sea under a
+mode 1 band, switched mid-frame) or a **full-screen mode 1 page** — by
+decision: no third layout exists. The race screen, top to bottom:
+
+| Lines | PPU mode | Layers on (TM) | What they carry |
+|---|---|---|---|
+| 0–31 | 1 | BG1 + BG3 + OBJ (`0x15`) | **HUD band.** BG1 (4bpp, map rows 0–3): the gradient HUD font (race), or console-font menu text (title PRESS START, main menu, PAUSED). Its blank tile is *solid* colour 15 = the course zenith, so the band is one flat colour on every sky. BG3 (2bpp): blank, except the championship intro card's three lines in the sky font — the band's BG3 scroll is held at 0 by the frame-top NMI. OBJ: the title logo (two words of 32×32 sprites), the start-light tree as it floats away. |
+| 32–87 | 1 | BG1 + BG3 + OBJ (`0x15`) | **Sky.** BG1: the baked 16-colour gradient tiles (palette row 2, map rows 4–11), paled toward the horizon by a per-line COLDATA add. BG3: the cloud strip (map rows 5–8, priority bit so it draws over the gradient), scrolled by the heading ×4 px — written by the stage-0 scanline IRQ at line 31, so it never reaches the band; or, from the player's finish, the live results table on those same rows plus PRESS START on row 10, at scroll 0. |
+| 88 → the wave horizon | 1 | OBJ only (`0x10`) | **Safe strip.** Backdrop only, the same COLDATA ramp continuing the gradient, so the switch line is invisible however high the swell. |
+| horizon → 224 | 7 (EXTBG) | BG1 + BG2 + OBJ (`0x13`) | **The sea.** BG1 is the Mode 7 plane, its matrix and scroll rewritten per scanline by HDMA (the rolling waves). BG2 is EXTBG's copy of it: course pixels baked with bit 7 render through BG2-high, above the glow's colour math. OBJ: racers, buoys, spray, with window 1 masking the hull's submerged rows per line (HDMA) so the ski sits *in* the water. Colour math adds the fixed colour to BG1 + backdrop (crest glow); HDMA repaints the sand entry down the frame (distance fade). |
+
+The mode switch is a scanline timer IRQ that fires **twice** per frame
+(`camera.asm` `irqSwitch`): stage 0 at line 31 writes the cloud rows' BG3
+scroll — in the active part of line 32, a blank BG3 row, clear of the
+hblank HDMA burst that could split the write-twice pair — and stage 1 at
+line 87 waits for hblank and writes BGMODE 7. The NMI callback restores
+mode 1 (+ BG3 priority, `0x09`) and BG3 scroll 0 at the top of every
+frame. All eight HDMA channels are spoken for: ch0 CGRAM (sand fade), ch1
+TM (the band/sky/strip/sea split above), ch2 COLDATA (glow + sky ramp),
+ch3–6 the Mode 7 matrix/centre/scroll pairs, ch7 the OBJ window edges.
+
+**Full-screen mode 1 pages** — rider select, course select, the champion
+page (and the old placeholder page) — park the timer IRQ, switch HDMA off
+and run mode `0x09` all frame with BG1 + BG3 + OBJ, `$210D` and COLDATA
+reset. BG1 shows the same map: rows 0–3 (the band) and 4–11 (the sky
+tiles) exactly as the race does, and console-font text only in rows 12
+and below — rows the race's mode switch never shows, so menus and races
+share the map with no cleanup. BG3 keeps the clouds (the course select
+drifts them idly); OBJ carries the tall rider sprites (rider select, the
+champion page) or is hidden. Never BG2 during mode-1 lines: with EXTBG on,
+real hardware fills it with garbage that no emulator reproduces. `$2106`
+mosaic on BG1+2+3 sweeps between every pair of states.
 
 ## Colour map (CGRAM)
 

@@ -66,10 +66,14 @@ Machines: `seanb` (original) and `Sean` (Aug-28 clone, `C:\Users\Sean\Downloads\
    LoROM; `Mesen.exe --testrunner --timeout=60 game/superwaverace.sfc
    tools/mesen/tickshot.lua` (with the env vars from its header) proves
    the harness works. The conversation history does not travel: this
-   file + docs/PLAN.md "Multi-course" ARE the state. Phases 1-4 done,
-   phase 5 (content) is in progress: FIVE courses build, all geometric
-   clones of course 1 with distinct palettes/skies/wave profiles (see the
-   State section) - real layouts are the remaining authoring work.
+   file + docs/PLAN.md "Multi-course" + "Game flow" ARE the state.
+   Multi-course phases 1-4 done, phase 5 (content) is in progress: SIX
+   courses build, all geometric clones of course 1 with distinct
+   palettes/skies/wave profiles (see the State section) - real layouts
+   are the remaining authoring work. The game-flow plan is COMPLETE
+   through phase 3 (title/attract, menu, rider + course select, time
+   trials, arcade, championship with flyover intros and the in-race
+   results table); 2P split screen is post-jam.
 
 Lessons from the Aug-28 machine (`Sean`), all of which bit:
 - `winget install Git.Git`, `Python.Python.3.12`, `ezwinports.make` all need
@@ -577,11 +581,12 @@ move waypoint 0/1 in the painter to move the grid.
   mosaicSweep() ($2106, BG1+2+3) pixelates between states; sprites are
   not mosaic'd (hidden or tolerated). AUTOPILOT builds skip the flow
   (straight to course select, attract forced) so every harness still
-  works; `attract` is the runtime chaser flag now. The old course select
-  (full-screen mode 1, console font, timer IRQ parked + HDMA off +
-  $210D/COLDATA reset - see courseSelect) survives as the Time Trials
-  track picker until phase 2. Race end/results: START returns to the
-  title. raceInit owns EVERY race variable;
+  works; `attract` is the runtime chaser flag now. courseSelect (full-
+  screen mode 1, console font + the 48x48 minimap, timer IRQ parked +
+  HDMA off + $210D/COLDATA reset) is ARCADE's and TIME TRIALS' track
+  picker; the championship runs every course in folder order instead.
+  Race end: see THE FINISH below (the sky results table, START to leave;
+  ARCADE then returns to the title). raceInit owns EVERY race variable;
   replay verified bit-identical (race 2 trace == race 1, flowshot pattern in
   git history). Menu text lives in BG1 map rows below the sky band - rows
   the race's mode switch never shows, so menu and race share the map with
@@ -668,11 +673,13 @@ move waypoint 0/1 in the painter to move the grid.
   a measured 4% of the loop (652 -> 624); guarded it's 645 (~1%, the gate
   math). NPC balance vs the power ladder not yet revisited.
   No sound (jam judges music — PVSnesLib has an .it tracker driver, unused);
-  sand is collidable but there's no "run aground" state; no title screen.
+  sand is collidable but there's no "run aground" state.
 - PAL: accepted trade = runs slower (30Hz loop becomes 25Hz); must still boot.
 - Real-hardware verified: EXTBG rendering, full HDMA stack, general play,
   BG3 clouds, power/HUD/start-tree (Aug-21 build). PENDING a CRT pass:
   the tall racers / OBJ name table 2, the scanline-IRQ mode switch + sand
   distance-fade CGRAM HDMA, the Photoshop rider art + 5-pair palettes,
-  and the teal shore rework.
+  the teal shore rework, and everything from Sep 2: the two-stage IRQ's
+  mid-frame BG3HOFS write (active line 32), BG3 enabled in the band's TM,
+  the 2bpp sky font (results table + intro card).
 - CPU: ~45% of the 2-frame loop free; ROM ~58% free; CGRAM map in README.
