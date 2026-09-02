@@ -19,6 +19,11 @@ fixed frame window (tickrate.lua) are the only trustworthy before/after numbers.
   skiVv + one extra u16; env TICKADDR/YADDR/SURFADDR/VVADDR/GRAVADDR/OUTDIR/TAG)
   and its summary (airborne %, max height, launch speed, longest flight). Use
   it before trusting any feel change - see CLAUDE.md "Mars experiment".
+- `flownav.lua` / `ttnav.lua` / `mininav.lua` — GUI-mode scripted-input
+  walks of the game flow (title>menu>pages>race>pause>quit / the Time
+  Trials path incl. rider select / the course-select minimap cursor walk).
+  Frame-timed presses + screenshots; RETIME THE PRESS TABLES when screens
+  or timings change. Run like menuinput.lua; kill Mesen when done.
 - `menuinput.lua` — GUI MODE ONLY (no --testrunner): scripted pad input via
   emu.setInput for the course-select menu (Down, then Start) + screenshots.
   Needs Snes.Port1.Type = SnesController in Mesen's settings; kill Mesen when done.
