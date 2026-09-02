@@ -93,6 +93,14 @@ Lessons from the Aug-28 machine (`Sean`), all of which bit:
   the harnesses work - just budget the timeout and ignore exit codes.
 - Mesen.exe is a GUI process: from PowerShell use `Start-Process -Wait`
   or the call returns instantly with no exit code. From Git Bash it waits.
+- **`make buildWithSummary` exits Error 1 when there is NOTHING to build**
+  (all objects current). Looks like a build failure, is not - touch a
+  source if you need a real relink. Bit twice.
+- **PVSnesLib oamSet writes only the low 8 bits of X**, and
+  oamSetEx(OBJ_SHOW) CLEARS the OAM high-table x8 sign bit: a sprite at
+  small negative X wraps to the right edge. OAM_X8(oid) (main.c, the
+  OAM_TALL pattern) restores it - required for anything entering from
+  the left.
 - **A hand-written settings.json leaves `Snes.Port1.Type` = "None"**: no
   controller is plugged into the emulated console, so NO input works in
   Mesen (the first-run dialog normally sets this + a keyboard preset).
@@ -444,8 +452,11 @@ move waypoint 0/1 in the painter to move the grid.
   still) -> START/A -> main menu (CHAMPIONSHIP / TIME TRIALS / 2P VS.,
   same attract race behind; B back, START/A confirm - that convention
   everywhere) -> ARCADE (single race vs NPCs) and TIME TRIALS (solo,
-  endless, TOP = best lap in the RANK cell; raceTT gates the NPC blocks,
-  the finish, and the HUD variant) both run rider select (4 riders,
+  endless, no lap counter, BEST = best lap M'SS"T in the RANK cell (the
+  B glyph took unused G's slot - the HUD font's VRAM window is exactly
+  full); raceTT gates the NPC blocks, the finish, and the HUD variant.
+  drawSki's pal arg IS the OBJ palette number: npcPalTab holds final
+  palettes, and re-adding the old "1 +" once dressed an NPC in the lamps) both run rider select (4 riders,
   palette-only: playerPal drives the player sprites, npcPalTab the NPCs;
   P2 joins here post-jam) -> course select -> race. CHAMPIONSHIP is a
   textScreen() placeholder until its phase. Rider-select/menu text may

@@ -348,6 +348,10 @@ Phases:
    (yellow/red) and a white start marker; 36 4bpp chars parked after the
    sky rows, tiles+palette re-DMA'd per cursor move (courseGeom repoints
    csMini mid-frame, the vblank kicks 1152+32 bytes). PHASE 2 COMPLETE.
+   Amendments (Sep 2): NPC palette off-by-one fixed (drawSki takes the
+   palette number directly), TT cell relabelled BEST (B glyph in unused
+   G's font slot) with the full M'SS"T width, TT lap counter dropped.
+   GUI-mode nav harnesses: tools/mesen/flownav|ttnav|mininav.lua.
 3. Championship - course sequence, intro card (name + racing-line
    cruise), points + standings screens.
 Post-jam: 2P VS. (split screen - see the cost sketch below).
