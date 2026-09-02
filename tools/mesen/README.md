@@ -24,6 +24,15 @@ fixed frame window (tickrate.lua) are the only trustworthy before/after numbers.
   Trials path incl. rider select / the course-select minimap cursor walk).
   Frame-timed presses + screenshots; RETIME THE PRESS TABLES when screens
   or timings change. Run like menuinput.lua; kill Mesen when done.
+- `champnav.lua` — GUI-mode walk into CHAMPIONSHIP with a `CHAMP_AUTO 1`
+  build (main.c): the chaser then drives all six races and every page
+  auto-advances. Logs each flow-state change (raceMode/champOn/champRace/
+  champStage/raceState + both points tables) and a PROG line every 600
+  frames (tick/position/speed/lap/stuck - tells a wedged chaser from a
+  hang) to OUTDIR/log.txt, screenshots ~100 frames after each change and
+  every 1800 frames, writes DONE when the final standings hand back to
+  the title (~50K frames; set Mesen's EmulationSpeed to 0 = unthrottled
+  for the run). WRAM addresses in its header MOVE between builds.
 - `menuinput.lua` — GUI MODE ONLY (no --testrunner): scripted pad input via
   emu.setInput for the course-select menu (Down, then Start) + screenshots.
   Needs Snes.Port1.Type = SnesController in Mesen's settings; kill Mesen when done.

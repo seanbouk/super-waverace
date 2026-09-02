@@ -44,6 +44,7 @@ void uiHdma(void);
 void uiClear(void);
 void uiMenuRow(u16 row, u16 x, char *s);
 void uiMenuCompose(u16 *dst, u16 x, char *s); // RAM only: call any time
+void uiMenuAppend(u16 *dst, u16 x, char *s);  // ditto, without clearing
 void uiMenuRowDma(u16 *src, u16 row);         // vblank / force blank only
 void uiMenuClearRows(void);
 

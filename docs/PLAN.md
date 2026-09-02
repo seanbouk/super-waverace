@@ -352,8 +352,20 @@ Phases:
    palette number directly), TT cell relabelled BEST (B glyph in unused
    G's font slot) with the full M'SS"T width, TT lap counter dropped.
    GUI-mode nav harnesses: tools/mesen/flownav|ttnav|mininav.lua.
-3. Championship - course sequence, intro card (name + racing-line
-   cruise), points + standings screens.
+3. DONE (Sep 2) - Championship: rider select, then every course in
+   folder order. Intro card = the attract machinery on the course
+   (chaser cruising the racing line) under a band overlay (race number,
+   course name, PRESS START; auto-advances ~8s), then a second raceInit
+   for the real race. Points 9/6/3/1 from the full four-rider order
+   snapshotted on the player's finish tick (CPU racers behind are ranked
+   where they stand). Standings page after every race (riders as tall
+   sprites in standings order, leader raised, 4-line table with the P1
+   tag); the last one is titled "<NAME> IS CHAMPION". Riders got names:
+   MAGNUS, CALLISTA, MILO, DAFYDD (palette order). Pause+B abandons the
+   championship. Verified hands-free in Mesen GUI mode with a CHAMP_AUTO
+   build + tools/mesen/champnav.lua (WRAM state log + screenshots per
+   state change). Balance deliberately untouched (the fade schedule
+   makes single races player-favoured; a 6-race total amplifies that).
 Post-jam: 2P VS. (split screen - see the cost sketch below).
 
 ---

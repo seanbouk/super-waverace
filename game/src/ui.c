@@ -199,6 +199,14 @@ void uiMenuCompose(u16 *dst, u16 x, char *s)
         dst[x++] = UI_ATTR | (u16)(*s++ - 32);
 }
 
+// ... add a second (third...) string to a composed row - the standings
+// page puts four columns of text on one map row ...
+void uiMenuAppend(u16 *dst, u16 x, char *s)
+{
+    while (*s)
+        dst[x++] = UI_ATTR | (u16)(*s++ - 32);
+}
+
 // ... and push a composed row to VRAM: vblank or force blank ONLY. Kept
 // separate because composing under tcc costs ~45 scanlines per row: the
 // menu cursor redraw used to compose+DMA after WaitForVBlank and its DMAs
