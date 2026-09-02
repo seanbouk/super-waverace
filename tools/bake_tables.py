@@ -212,7 +212,10 @@ def phase_tables(phi, sky_ref, switch):
     # scrolling cloud overlay - BG3, NOT BG2: EXTBG is on all frame for
     # the sea, and on real hardware it mangles BG2 outside mode 7), then
     # backdrop-only safe strip, then the sea
-    tab_tm = bytes(repeat_blocks(UI_LINES, 0x11)
+    # (the band has BG3 too since Sep 2: its BG3 map rows are blank, and
+    # the intro card writes sky-font text there - band console glyphs
+    # would show the backdrop through their cells on chromatic skies)
+    tab_tm = bytes(repeat_blocks(UI_LINES, 0x15)
                    + repeat_blocks(switch - UI_LINES, 0x15)
                    + repeat_blocks(n_sky - switch, SKY_TM)
                    + bytearray((0x81, SEA_TM, 0x00)))

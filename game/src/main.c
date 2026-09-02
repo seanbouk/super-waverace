@@ -1363,13 +1363,17 @@ static void skyRestore(void)
                 WAVE_CLOUD_TROWS * 64);
     uiSkyCompose(skyRows[4], 0, "");
     uiSkyRowDma(skyRows[4], SKY_GO_ROW);
+    uiSkyRowDma(skyRows[4], 1); // the intro card's band rows
+    uiSkyRowDma(skyRows[4], 2);
+    uiSkyRowDma(skyRows[4], 3);
     setScreenOn();
 }
 
-// the intro card's text, in the SKY FONT over the cloud rows (the band's
-// console glyphs show the backdrop through their cells - a wrong-colour
-// box on every chromatic-sky course): race number row 5, course name
-// row 6, the overlay loop flashes PRESS START on row 8 (skyRows[3])
+// the intro card's text, in the SKY FONT on BG3 rows 1-3 of the HUD band
+// (the band's TM includes BG3 for this; its console glyphs would show
+// the backdrop through their cells - a wrong-colour box on every
+// chromatic-sky course). The clouds stay. Race number row 1, course
+// name row 2, the overlay loop flashes PRESS START on row 3 (skyRows[2])
 static void introDraw(void)
 {
     sbClear();
@@ -1384,8 +1388,6 @@ static void introDraw(void)
         sbLen++;
     uiSkyCompose(skyRows[1], (u16)((32 - sbLen) >> 1), menuBuf);
     uiSkyCompose(skyRows[2], 0, "");
-    uiSkyCompose(skyRows[3], 0, "");
-    uiSkyCompose(skyRows[4], 0, "");
     skyDirty = 1;
 }
 
@@ -1773,7 +1775,7 @@ int main(void)
                 if (((u8)(snes_vblank_count >> 5) & 1) != ovlFlash)
                 {
                     ovlFlash = (u8)(snes_vblank_count >> 5) & 1;
-                    uiSkyCompose(skyRows[3], 10, ovlFlash ? "PRESS START" : "");
+                    uiSkyCompose(skyRows[2], 10, ovlFlash ? "PRESS START" : "");
                     skyDirty = 1;
                 }
                 // lapCount seeds 255, 0 at the rolling start, 1 after
@@ -3030,12 +3032,18 @@ int main(void)
         else
             REG_BG3HOFS = 0; // the BG3 title / results table sit still
         REG_BG3HOFS = 0;
-        if (skyDirty) // the results table rows (composed mid-frame)
-        {
+        if (skyDirty) // sky text rows (composed mid-frame): the intro
+        {             // card in the band, or the results table + prompt
             skyDirty = 0;
-            for (bi = 0; bi < WAVE_CLOUD_TROWS; bi++)
-                uiSkyRowDma(skyRows[bi], (u16)(WAVE_CLOUD_ROW0 + bi));
-            uiSkyRowDma(skyRows[4], SKY_GO_ROW);
+            if (raceMode == RM_INTRO)
+                for (bi = 0; bi < 3; bi++)
+                    uiSkyRowDma(skyRows[bi], (u16)(1 + bi));
+            else
+            {
+                for (bi = 0; bi < WAVE_CLOUD_TROWS; bi++)
+                    uiSkyRowDma(skyRows[bi], (u16)(WAVE_CLOUD_ROW0 + bi));
+                uiSkyRowDma(skyRows[4], SKY_GO_ROW);
+            }
         }
         uiFlush();
         waveHdma(phase, camBufOff);

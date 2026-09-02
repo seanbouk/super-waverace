@@ -470,10 +470,14 @@ move waypoint 0/1 in the painter to move the grid.
   3, Sep 2): rider select -> for every course in folder order: INTRO
   FLYOVER (courseLoad + raceInit with attract=1 = the chaser steering
   the racing line, raceMode RM_INTRO = "RACE n OF 6" / course name /
-  flashing PRESS START in the SKY FONT on BG3 rows 5/6/8 (skyUp = 1;
-  introDraw composes skyRows, the vblank tail DMAs them) - NOT band
-  console text: those glyphs' colour-0 cells show the BACKDROP, a
-  wrong-colour box on every chromatic-sky course. NO RACERS: player sprites, spray
+  flashing PRESS START in the SKY FONT on BG3 rows 1-3 = the HUD band
+  (the baked band TM is 0x15 = BG3 on since Sep 2, its BG3 map rows
+  blank; skyUp = 1, introDraw composes skyRows[0..2], the vblank tail
+  DMAs them to rows 1-3 in RM_INTRO and to the cloud rows otherwise;
+  skyRestore blanks rows 1-3 too) - NOT band console text: those
+  glyphs' colour-0 cells show the BACKDROP, a wrong-colour box on every
+  chromatic-sky course. The clouds stay during the flyover (static:
+  BG3HOFS is 0 whenever text rides BG3, or it would scroll too). NO RACERS: player sprites, spray
   and both NPC blocks are RM_INTRO-gated; CONSTANT SPEED: skiVX/VY are
   SET each tick = INTRO_PASSES x skiThrustF(INTRO_THRUST) along the
   heading, thrust/drag skipped (~2500 8.8, half pace); it ends after ONE

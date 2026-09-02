@@ -386,7 +386,10 @@ Phases:
    review (Sep 2): sky font shade 1px right + 1px down (zenith colour);
    the intro card's text moved onto the sky font (band console glyphs
    showed backdrop boxes on chromatic skies); FIXED the reverse "camera
-   shake" - the phase step's signed x unsigned product (see CLAUDE.md). Balance deliberately untouched (the fade schedule
+   shake" - the phase step's signed x unsigned product (see CLAUDE.md).
+   Fifth (Sep 2): the intro text went back to the top of the screen with
+   the clouds kept - BG3 rows 1-3 in the band (band TM now includes
+   BG3); the mid-sky rows stay for the results table. Balance deliberately untouched (the fade schedule
    makes single races player-favoured; a 6-race total amplifies that).
 Post-jam: 2P VS. (split screen - see the cost sketch below).
 
