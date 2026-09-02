@@ -235,10 +235,11 @@ char pwBuf[6]; // power pip string, built on change
 // tree floats up and hides row by row as it reaches the HUD band.
 #define LIGHT_SPR (SPRAY_SPR + 2 * SPRAY_ROWS)
 #define TITLE_SPR (LIGHT_SPR + 6) // 7 logo sprites (attract only)
-#define TITLE_Y 44     // WAVERACER band: lines 44-75, inside the sky
-#define TITLE_SUP_UP 8 // Super sits this much higher (its canvas top)
-#define TITLE_WR_X 64  // WAVERACER's resting left edge ((256 - 127) / 2)
-#define TITLE_SUP_X (TITLE_WR_X - 8) // Super rests 8px left of it
+#define TITLE_Y 54      // WAVERACER band: lines 54-85, inside the sky
+#define TITLE_SUP_UP 18 // Super sits this much higher (same absolute Y as
+                        // before WAVERACER moved down 10)
+#define TITLE_WR_X 64   // WAVERACER's resting left edge ((256 - 127) / 2)
+#define TITLE_SUP_X (TITLE_WR_X - 18) // Super rests 18px left of it
 s16 ttlWx, ttlSx; // the words' sliding left edges (title animation)
 u8 raceDone, startHeld; // exit-to-menu flow (START on the results)
 u8 menuT;               // menu/results timers (autopilot auto-advance)
