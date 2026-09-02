@@ -13,10 +13,14 @@ local A = {
   -- progress probes (a "PROG" line every 600 frames tells a wedged
   -- chaser from a hung CPU): tick, skiWX/WY, vAlong, lapCount, pProg
   tick = 0x7E3C75, skiWX = 0x7E3CA7, skiWY = 0x7E3CA9, vAlong = 0x7E3C7B,
-  lapCount = 0x7E3CBB, pProg = 0x7E3D1D, apStuck = 0x7E3EE3,
+  lapCount = 0x7E3CBB, pProg = 0x7E3D1D, apStuck = 0x7E3EF5,
   -- finish bookkeeping: a "FIN" line whenever finCount changes, with
   -- every rider's progress (NPC laps count waypoint 0 like the player's)
   finCount = 0x7E3D94, npcProg = 0x7E3D1F, npcLap = 0x7E3D8A,
+  -- "POS" lines every 60 frames after the player's finish: where the
+  -- field comes to rest relative to the player (finishers must end AHEAD
+  -- of the camera to be seen)
+  npcX = 0x7E3CCA, npcY = 0x7E3CD0, npcSpd = 0x7E3CE2,
 }
 local prevFin = -1
 local frames = 0
@@ -82,6 +86,16 @@ local function onFrame()
       rd(A.npcLap), rd(A.npcLap + 1), rd(A.npcLap + 2)))
     fh:close()
     if fc > 0 then shots[frames + 60] = "fin" .. fc end
+  end
+  if rd(A.raceState) == 2 and frames % 60 == 0 then
+    local r16 = function(a) return emu.read16(a, emu.memType.snesMemory) end
+    local fh = io.open(out .. "log.txt", "a")
+    fh:write(string.format("f%06d POS ski=%d,%d npc0=%d,%d,%d npc1=%d,%d,%d npc2=%d,%d,%d\n",
+      frames, r16(A.skiWX), r16(A.skiWY),
+      r16(A.npcX), r16(A.npcY), r16(A.npcSpd),
+      r16(A.npcX + 2), r16(A.npcY + 2), r16(A.npcSpd + 2),
+      r16(A.npcX + 4), r16(A.npcY + 4), r16(A.npcSpd + 4)))
+    fh:close()
   end
   if frames % 600 == 0 then
     local fh = io.open(out .. "log.txt", "a")

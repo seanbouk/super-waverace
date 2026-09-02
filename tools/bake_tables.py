@@ -429,19 +429,20 @@ HUD_RAMPS = (((252, 216, 32), (56, 200, 88)),   # row 4 titles: yellow -> green
 
 def build_sky_font():
     """2bpp glyphs for the BG3 sky text: fill = index 1 (CGRAM 29, cloud
-    white), a 1px down-right shade = index 2 (CGRAM 30) - so the text
-    floats over any sky gradient without a box (BG1 console text would
-    show the backdrop in its cells). 5-bit rows sit at cols 1-5, shade to
-    col 6 - but never onto row 7, so lines on adjacent map rows keep a
-    1px gap (with it, the four table rows read as one cramped block)."""
+    white) with a 1px shade to the RIGHT only in index 3 = CGRAM 31, the
+    course's ZENITH (the solid blank tile's colour) - a sky-coloured edge
+    rather than a grey drop shadow, so the text floats over the gradient
+    without a box (BG1 console text would show the backdrop in its
+    cells). 5-bit rows sit at cols 1-5, the shade at cols 2-6, rows 0-6;
+    row 7 stays clear so stacked lines keep a 1px gap."""
     n = len(SKYF_GLYPHS)
     grid = [[0] * 8 for _ in range(n * 8)]
     for gi, ch in enumerate(SKYF_GLYPHS):
-        if ch == '#':  # chequered flag: 2x2 blocks of white / shade
+        if ch == '#':  # chequered flag: 2x2 blocks of white / zenith
             for y in range(6):
                 for x in range(6):
                     grid[gi * 8 + y][x + 1] = \
-                        1 if ((x >> 1) + (y >> 1)) & 1 else 2
+                        1 if ((x >> 1) + (y >> 1)) & 1 else 3
             continue
         rows = HUD_FONT[ch]
         for r in range(7):
@@ -449,10 +450,10 @@ def build_sky_font():
             for x in range(5):
                 if rows[r] & (0x10 >> x):
                     grid[gi * 8 + r][x + 1] = 1
-        for r in range(6):  # shade stays inside rows 0-6: row 7 is the
-            for x in range(5):  # 1px gap that keeps stacked lines apart
-                if rows[r] & (0x10 >> x) and not grid[gi * 8 + r + 1][x + 2]:
-                    grid[gi * 8 + r + 1][x + 2] = 2
+        for r in range(7):  # right edge only, same row
+            for x in range(5):
+                if rows[r] & (0x10 >> x) and not grid[gi * 8 + r][x + 2]:
+                    grid[gi * 8 + r][x + 2] = 3
     return encode_2bpp(grid, 1, n)
 
 

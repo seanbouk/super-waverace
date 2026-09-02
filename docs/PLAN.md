@@ -374,8 +374,15 @@ Phases:
    rows) appears at the player's finish with all four riders - finishers
    flagged with their points, the rest in live order - and updates as
    they cross; PRESS START after 5s ends the race (the unfinished are
-   placed where they stand, points still paid), or it ends 3s after the
-   last finisher. Arcade's results page was dropped for it. Balance deliberately untouched (the fade schedule
+   placed where they stand, points still paid). Arcade's results page
+   was dropped for it. Third review (Sep 2): the sky font's shade is a
+   1px right edge in the zenith colour; the per-race standings page is
+   gone too (the sky table carries race points AND totals; only the
+   final "IS CHAMPION" page remains) and the race waits on the table
+   until START; laps count on a true crossing of the chequered strip
+   (the 200-unit waypoint radius had called them ~10 yards early);
+   finished NPCs glide to rest (~220 units) while the finished player
+   pulls up short, so later finishers settle ahead of the camera. Balance deliberately untouched (the fade schedule
    makes single races player-favoured; a 6-race total amplifies that).
 Post-jam: 2P VS. (split screen - see the cost sketch below).
 

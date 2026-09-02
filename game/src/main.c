@@ -295,7 +295,15 @@ u8 npcLap[NPC_COUNT], npcDone[NPC_COUNT]; // laps (255 seed) / parked
 u8 finList[4], finCount;  // riders in finish order
 u8 ordTab[4], ordPrev[4]; // live table order / last composed order
 u8 skyUp, skyDirty, skyGo; // table shown / rows need DMA / prompt shown
-u16 finAllFr;              // frames since the last rider finished
+// the start/finish line as a TRUE crossing (along-track dot vs the
+// opening heading, armed behind the line): startNx/Ny = sin/cos of
+// startTheta (1.7), lineArm/npcArm = seen behind it, lapBase = progress
+// at the last counted lap (a lap needs ~a full loop of waypoints since)
+s16 startNx, startNy;
+s16 lnDx, lnDy; // line-test deltas: NOT wpdx/wpdy - the NPC waypoint-reach
+                // test reads those AFTER the line test (this bit once)
+u8 lineArm, npcArm[NPC_COUNT];
+u16 lapBase, npcLapBase[NPC_COUNT];
 #define SKY_GO_ROW 10      // PRESS START: the BG3 row just over the horizon
 static u16 skyRows[5][UI_COLS]; // 4 table rows + the prompt row (RAM)
 u8 apFine;   // chaser: this correction is small - steer at quarter rate
@@ -743,6 +751,8 @@ static void raceInit(void)
     npcA = startTheta;
     npcTrig();
     camSinVal = npcSin;
+    startNx = npcSin; // the start line's forward normal (1.7), for the
+    startNy = npcCos; // lap-crossing tests
     camCosVal = npcCos;
     // the mag/sign quads normally come from buildCamTables, but skiWorld
     // and skiSplit consume them BEFORE the first build - seed them here or
@@ -818,12 +828,15 @@ static void raceInit(void)
         npcDist[bi] = 0;
         npcLap[bi] = 255; // -1, like lapCount: the grid crossing -> 0
         npcDone[bi] = 0;
+        npcArm[bi] = 0;
+        npcLapBase[bi] = 0;
     }
+    lineArm = 0;
+    lapBase = 0;
     finCount = 0;
     skyUp = 0;
     skyDirty = 0;
     skyGo = 0;
-    finAllFr = 0;
     for (bi = 0; bi < 4; bi++)
         ordPrev[bi] = 255;
     npcBias[0] = -56; // green aims left of the line, purple right,
@@ -1310,7 +1323,8 @@ static void skyUpdate(void)
     {
         r = ordTab[k];
         ordPrev[k] = r;
-        // "1ST CALLISTA #  9": place col 7, name 11, flag 20, points 22
+        // "1ST CALLISTA #  9 27": place col 7, name 11, flag 20, race
+        // points 22, championship total 25 (the table IS the standings)
         uiSkyCompose(skyRows[k], 7, k == 0 ? "1ST" : k == 1 ? "2ND"
                      : k == 2 ? "3RD" : "4TH");
         sbClear();
@@ -1326,6 +1340,11 @@ static void skyUpdate(void)
                     sbCat(" ");
                 sbNum(racePts[r]);
                 uiSkyAppend(skyRows[k], 22, menuBuf);
+                sbClear();
+                if (champPts[r] < 10)
+                    sbCat(" ");
+                sbNum(champPts[r]);
+                uiSkyAppend(skyRows[k], 25, menuBuf);
             }
         }
     }
@@ -1369,9 +1388,10 @@ static void introDraw(void)
 // leader raised, and a four-line table under them - place, name, this
 // race's points, total, P1 tag (names run to 8 chars, so per-column
 // text under the sprites collided). Ties break on the latest race, then
-// rider order. TEXT ONLY IN ROWS >= 12. mode: PAGE_CHAMP (running
-// standings), PAGE_FINAL (title names the champion). Arcade has no page:
-// the in-race sky table is its result.
+// rider order. TEXT ONLY IN ROWS >= 12. Shown ONCE, after the last race
+// (PAGE_FINAL: the title names the champion) - every other result, arcade
+// included, is the in-race sky table. PAGE_CHAMP (running standings, the
+// race number as the title) is kept for the harness / a future use.
 #define PAGE_CHAMP 1
 #define PAGE_FINAL 2
 static void champPage(u8 mode)
@@ -1608,14 +1628,18 @@ int main(void)
                     champOn = 0; // quit from pause: abandon -> title
                 else
                 {
+                    // the sky table carried this race's points and the
+                    // totals; only the LAST race gets a page (champion)
                     mosaicSweep(0, 1);
                     REG_HDMAEN = 0;
                     skyRestore(); // the results table off BG3
-                    champPage(champRace + 1 >= WAVE_COURSES ? PAGE_FINAL
-                                                            : PAGE_CHAMP);
-                    champRace++;
-                    if (champRace >= WAVE_COURSES)
-                        champOn = 0; // final standings shown -> title
+                    if (champRace + 1 >= WAVE_COURSES)
+                    {
+                        champPage(PAGE_FINAL);
+                        champOn = 0; // -> title
+                    }
+                    else
+                        champRace++; // -> the next intro below
                 }
             }
             if (champOn)
@@ -1935,14 +1959,12 @@ int main(void)
             if (raceState == 2)
             {
                 pad0 &= ~(KEY_B | KEY_Y);
-                // the finish: the sky table tracks the field (riders park
-                // as they cross); after 5s PRESS START is offered - START
-                // ends the race with the unfinished placed where they
-                // stand; 3s after the last rider finishes it ends anyway
+                // the finish: the sky table tracks the field (riders
+                // glide to rest as they cross); after 5s PRESS START is
+                // offered and the race waits for it - START ends it with
+                // the unfinished placed where they stand
                 skyUpdate();
                 finFr += loopFrames;
-                if (finCount >= 4)
-                    finAllFr += loopFrames;
                 if (finFr >= 300 && !skyGo)
                 {
                     skyGo = 1;
@@ -1952,7 +1974,7 @@ int main(void)
                 if (!(pad0 & KEY_START))
                     startHeld = 0;
                 if ((skyGo && (pad0 & KEY_START) && !startHeld)
-                    || finAllFr >= 180 || (CHAMP_AUTO && finFr >= 300))
+                    || (CHAMP_AUTO && finFr >= 300))
                 {
                     raceFinish();
                     raceDone = 1;
@@ -2073,6 +2095,11 @@ int main(void)
                 // water drag
                 skiVX -= skiVX >> 4;
                 skiVY -= skiVY >> 4;
+                if (raceState == 2) // finished: pull up short of the field
+                {                   // so later finishers roll past, in view
+                    skiVX -= skiVX >> 2;
+                    skiVY -= skiVY >> 2;
+                }
             }
         }
         else
@@ -2171,13 +2198,39 @@ int main(void)
         pDist = (u16)(wpdx + wpdy);
         if (pDist < 200)
         {
-            // laps count when CROSSING THE START LINE (waypoint 0), where
-            // the chequered strip is painted - not at the last waypoint.
-            // lapCount seeds at 255 (-1): the grid spawns inside waypoint
-            // 0's radius, so the immediate first crossing is the rolling
-            // start (-> 0, "LAP 1/3") and lap 1 runs the extra grid gap.
-            if (nextWp == 0)
+            nextWp++;
+            if (nextWp >= pathCount)
+                nextWp = 0;
+            pProg++;
+        }
+        // ---- the start/finish line: laps count on a TRUE crossing of
+        // the chequered strip at path[0] - the along-track dot (vs the
+        // opening heading) flips sign, as the gates do - not on entering
+        // waypoint 0's 200-unit radius, which read ~10 yards early. Armed
+        // when seen behind the line within 400 units; a lap needs
+        // (almost) a full loop of waypoints since the last one, so
+        // backing over the line cannot farm laps. lapCount seeds 255
+        // (-1): the grid sits behind the line, so the first crossing is
+        // the rolling start (-> 0, "LAP 1/3").
+        lnDx = (s16)((skiWX - pathX[0]) & 4095);
+        if (lnDx > 2048)
+            lnDx -= 4096;
+        lnDy = (s16)((skiWY - pathY[0]) & 4095);
+        if (lnDy > 2048)
+            lnDy -= 4096;
+        gLat = (lnDx < 0 ? -lnDx : lnDx) + (lnDy < 0 ? -lnDy : lnDy);
+        if (gLat < 400)
+        {
+            gAlong = (lnDx >> 3) * startNx + (lnDy >> 3) * startNy;
+            if (gAlong < 0)
+                lineArm = 1;
+            else if (lineArm)
             {
+                lineArm = 0;
+                if (lapCount == 255
+                    || (u16)(pProg - lapBase) >= (u16)(pathCount - 1))
+                {
+                lapBase = pProg;
                 lapCount++;
                 lastLap = lapTicks;
                 lapTicks = 0;
@@ -2202,12 +2255,11 @@ int main(void)
                     skyUp = 1; // the results table rides the sky from here
                     uiSkyCompose(skyRows[4], 0, "");
                 }
+                }
             }
-            nextWp++;
-            if (nextWp >= pathCount)
-                nextWp = 0;
-            pProg++;
         }
+        else
+            lineArm = 0;
         lapTicks++;
 
 #if WAVE_MAX_BUOYS > 0
@@ -2277,9 +2329,9 @@ int main(void)
             // grid until GO; TT = solo; the flyover has no racers at all
             for (bi = 0; bi < NPC_COUNT; bi++)
             {
-                if (npcDone[bi]) // parked past the line: ahead of anyone
-                {                // still racing, and it moves no more
-                    posAcc++;
+                if (npcDone[bi] && npcSpd[bi] < 64) // finished and glided
+                {                                     // to rest: parked
+                    posAcc++; // ahead of anyone still racing
                     continue;
                 }
                 aimTX = pathX[npcWp[bi]];
@@ -2335,6 +2387,45 @@ int main(void)
                     if (!collVal || collVal == 3)
                         npcY[bi] = (npcY[bi] + stepY) & 4095;
                 }
+                // the start/finish line, as for the player: a TRUE
+                // crossing books the lap (255 -> 0 at the grid); the last
+                // one finishes the rider - it then glides to a stop
+                if (!attract)
+                {
+                    lnDx = (s16)((npcX[bi] - pathX[0]) & 4095);
+                    if (lnDx > 2048)
+                        lnDx -= 4096;
+                    lnDy = (s16)((npcY[bi] - pathY[0]) & 4095);
+                    if (lnDy > 2048)
+                        lnDy -= 4096;
+                    gLat = (lnDx < 0 ? -lnDx : lnDx)
+                           + (lnDy < 0 ? -lnDy : lnDy);
+                    if (gLat < 400)
+                    {
+                        gAlong = (lnDx >> 3) * startNx + (lnDy >> 3) * startNy;
+                        if (gAlong < 0)
+                            npcArm[bi] = 1;
+                        else if (npcArm[bi])
+                        {
+                            npcArm[bi] = 0;
+                            if (npcLap[bi] == 255
+                                || (u16)(npcProg[bi] - npcLapBase[bi])
+                                       >= (u16)(pathCount - 1))
+                            {
+                                npcLapBase[bi] = npcProg[bi];
+                                npcLap[bi]++;
+                                if (npcLap[bi] >= RACE_LAPS
+                                    && npcLap[bi] < 250 && !npcDone[bi])
+                                {
+                                    npcDone[bi] = 1;
+                                    riderFinish(npcPalTab[bi]);
+                                }
+                            }
+                        }
+                    }
+                    else
+                        npcArm[bi] = 0;
+                }
                 if (wpdx < 0)
                     wpdx = -wpdx;
                 if (wpdy < 0)
@@ -2342,18 +2433,6 @@ int main(void)
                 npcDist[bi] = (u16)(wpdx + wpdy);
                 if (npcDist[bi] < 200)
                 {
-                    // waypoint 0 = the line: a lap, like the player's
-                    // (255 -> 0 at the grid). The last one parks the
-                    // rider just over it and books its finish
-                    if (npcWp[bi] == 0 && !attract)
-                    {
-                        npcLap[bi]++;
-                        if (npcLap[bi] >= RACE_LAPS && npcLap[bi] < 250)
-                        {
-                            npcDone[bi] = 1;
-                            riderFinish(npcPalTab[bi]);
-                        }
-                    }
                     npcWp[bi]++;
                     if (npcWp[bi] >= pathCount)
                         npcWp[bi] = 0;
@@ -2391,7 +2470,9 @@ int main(void)
                 // caps keep the race close for players off autopilot pace:
                 // a scheduled leader never runs away, a faded racer never
                 // falls out of sight
-                if (lapCount < npcFade[bi])
+                if (npcDone[bi])
+                    spdTgt = 0; // finished: ease off and glide to rest
+                else if (lapCount < npcFade[bi])
                 {
                     if (!apu)
                         spdTgt = SPD_FAST; // behind schedule: catch up
@@ -2411,7 +2492,10 @@ int main(void)
                     else
                         spdTgt = SPD_HOLD;
                 }
-                npcSpd[bi] += (s16)(spdTgt - npcSpd[bi]) >> 3;
+                if (npcDone[bi]) // a long glide (~220 units, the player
+                    npcSpd[bi] -= npcSpd[bi] >> 4; // pulls up in ~50)
+                else
+                    npcSpd[bi] += (s16)(spdTgt - npcSpd[bi]) >> 3;
             }
         if (raceState)
         {
