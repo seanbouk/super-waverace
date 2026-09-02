@@ -224,6 +224,14 @@ Mesen.exe --testrunner --timeout=30 <rom> <script.lua>   # arg order-free
   "fix" a mirrored-looking course in the renderer or the painter; in-game
   world coords are the mirror of painter coords (x_game = 1023 - x_painter
   texels).
+- **Signed x unsigned products go UNSIGNED under tcc, with a LOGICAL
+  shift.** `((vAlong >> 4) * wvSteps) >> 4` with wvSteps u16 and a
+  NEGATIVE vAlong (reversing) gave ~+4000 instead of -56: the wave phase
+  leapt half a cycle every tick = "the camera shakes when I back up",
+  latent since the per-course wave profiles made wvSteps a variable
+  (Aug 28). Cast the unsigned operand to s16 before multiplying anything
+  that can be negative. Reproduce/verify with tools/mesen/revtrace.lua
+  (GUI mode, release build: holds Y and traces phase/skiY/waterRow).
 - **Velocity-product overflow rule**: speeds are 8.8 and reach ~4600 since
   the speed doubling; any (v * trig) product must pre-shift v by >>5 (then
   >>2 after) — the old >>4/>>3 pattern overflows s16 above ~4096.
@@ -461,8 +469,11 @@ move waypoint 0/1 in the painter to move the grid.
   P2 joins here post-jam) -> course select -> race. CHAMPIONSHIP (phase
   3, Sep 2): rider select -> for every course in folder order: INTRO
   FLYOVER (courseLoad + raceInit with attract=1 = the chaser steering
-  the racing line, raceMode RM_INTRO = band overlay "RACE n OF 6" /
-  course name / flashing PRESS START. NO RACERS: player sprites, spray
+  the racing line, raceMode RM_INTRO = "RACE n OF 6" / course name /
+  flashing PRESS START in the SKY FONT on BG3 rows 5/6/8 (skyUp = 1;
+  introDraw composes skyRows, the vblank tail DMAs them) - NOT band
+  console text: those glyphs' colour-0 cells show the BACKDROP, a
+  wrong-colour box on every chromatic-sky course. NO RACERS: player sprites, spray
   and both NPC blocks are RM_INTRO-gated; CONSTANT SPEED: skiVX/VY are
   SET each tick = INTRO_PASSES x skiThrustF(INTRO_THRUST) along the
   heading, thrust/drag skipped (~2500 8.8, half pace); it ends after ONE
@@ -494,8 +505,8 @@ move waypoint 0/1 in the painter to move the grid.
   into finList with its place's points (9/6/3/1, paid at once in a
   championship). From the PLAYER's finish a live RESULTS TABLE floats
   in the sky: BG3 2bpp text (skyf_gfx, ids 986-1023 = the last free 4bpp
-  window after the minimap chars; white fill, 1px RIGHT edge in index 3
-  = CGRAM 31 = the course ZENITH, rows 0-6 only; uiSkyCompose/Append/
+  window after the minimap chars; white fill, 1px right + 1px down
+  shade in index 3 = CGRAM 31 = the course ZENITH; uiSkyCompose/Append/
   RowDma in ui.c) written over the four cloud rows 5-8: "1ST CALLISTA #
   9 27" = place, name, finished flag, race points, championship total
   (finished riders first, then the rest in live order - liveOrder(): the

@@ -382,7 +382,11 @@ Phases:
    until START; laps count on a true crossing of the chequered strip
    (the 200-unit waypoint radius had called them ~10 yards early);
    finished NPCs glide to rest (~220 units) while the finished player
-   pulls up short, so later finishers settle ahead of the camera. Balance deliberately untouched (the fade schedule
+   pulls up short, so later finishers settle ahead of the camera. Fourth
+   review (Sep 2): sky font shade 1px right + 1px down (zenith colour);
+   the intro card's text moved onto the sky font (band console glyphs
+   showed backdrop boxes on chromatic skies); FIXED the reverse "camera
+   shake" - the phase step's signed x unsigned product (see CLAUDE.md). Balance deliberately untouched (the fade schedule
    makes single races player-favoured; a 6-race total amplifies that).
 Post-jam: 2P VS. (split screen - see the cost sketch below).
 

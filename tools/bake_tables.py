@@ -433,8 +433,8 @@ def build_sky_font():
     course's ZENITH (the solid blank tile's colour) - a sky-coloured edge
     rather than a grey drop shadow, so the text floats over the gradient
     without a box (BG1 console text would show the backdrop in its
-    cells). 5-bit rows sit at cols 1-5, the shade at cols 2-6, rows 0-6;
-    row 7 stays clear so stacked lines keep a 1px gap."""
+    cells). 5-bit rows sit at cols 1-5; the shade is 1px right + 1px
+    down (cols 2-6, rows 1-7)."""
     n = len(SKYF_GLYPHS)
     grid = [[0] * 8 for _ in range(n * 8)]
     for gi, ch in enumerate(SKYF_GLYPHS):
@@ -450,10 +450,16 @@ def build_sky_font():
             for x in range(5):
                 if rows[r] & (0x10 >> x):
                     grid[gi * 8 + r][x + 1] = 1
-        for r in range(7):  # right edge only, same row
-            for x in range(5):
-                if rows[r] & (0x10 >> x) and not grid[gi * 8 + r][x + 2]:
+        for r in range(7):  # 1px right and 1px down (row 7 for the
+            for x in range(5):  # bottom row's shade - zenith, so it
+                if not rows[r] & (0x10 >> x):  # barely shows there)
+                    continue
+                if not grid[gi * 8 + r][x + 2]:
                     grid[gi * 8 + r][x + 2] = 3
+                if not grid[gi * 8 + r + 1][x + 1]:
+                    grid[gi * 8 + r + 1][x + 1] = 3
+                if not grid[gi * 8 + r + 1][x + 2]:
+                    grid[gi * 8 + r + 1][x + 2] = 3
     return encode_2bpp(grid, 1, n)
 
 

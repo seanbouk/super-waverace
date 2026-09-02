@@ -35,6 +35,11 @@ fixed frame window (tickrate.lua) are the only trustworthy before/after numbers.
   for the run). `ARCADE=1` in the env walks the ARCADE route instead
   (rider + course select, one chaser-driven race, the results page).
   WRAM addresses in its header MOVE between builds.
+- `revtrace.lua` — GUI-mode, RELEASE build: ARCADE route, then holds Y
+  (reverse) from HOLD_FROM (env, default 1700) for 420 frames and traces
+  tick/phase/phaseAcc/skiY/skiVv/vAlong/waterRow/camPY per frame to
+  OUTDIR/rev.txt (+ a screenshot every 10 frames). Found the unsigned
+  phase-step bug; keep it for any "the sea judders" report.
 - `menuinput.lua` — GUI MODE ONLY (no --testrunner): scripted pad input via
   emu.setInput for the course-select menu (Down, then Start) + screenshots.
   Needs Snes.Port1.Type = SnesController in Mesen's settings; kill Mesen when done.

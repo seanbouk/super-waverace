@@ -1366,8 +1366,10 @@ static void skyRestore(void)
     setScreenOn();
 }
 
-// the intro card's band text: race number + course name (rows 1-2; the
-// flashing PRESS START on row 3 is the overlay loop's)
+// the intro card's text, in the SKY FONT over the cloud rows (the band's
+// console glyphs show the backdrop through their cells - a wrong-colour
+// box on every chromatic-sky course): race number row 5, course name
+// row 6, the overlay loop flashes PRESS START on row 8 (skyRows[3])
 static void introDraw(void)
 {
     sbClear();
@@ -1375,12 +1377,16 @@ static void introDraw(void)
     sbNum((u8)(champRace + 1));
     sbCat(" OF ");
     sbNum(WAVE_COURSES);
-    uiPrint((u16)((32 - sbLen) >> 1), 1, menuBuf);
+    uiSkyCompose(skyRows[0], (u16)((32 - sbLen) >> 1), menuBuf);
     courseNameTo(champRace, menuBuf);
     sbLen = 0;
     while (menuBuf[sbLen])
         sbLen++;
-    uiPrint((u16)((32 - sbLen) >> 1), 2, menuBuf);
+    uiSkyCompose(skyRows[1], (u16)((32 - sbLen) >> 1), menuBuf);
+    uiSkyCompose(skyRows[2], 0, "");
+    uiSkyCompose(skyRows[3], 0, "");
+    uiSkyCompose(skyRows[4], 0, "");
+    skyDirty = 1;
 }
 
 // championship standings page (full-screen mode 1, the rider-select
@@ -1614,7 +1620,8 @@ int main(void)
             // init is a clean grid start
             mosaicSweep(0, 1);
             REG_HDMAEN = 0;
-            uiClear(); // the card's band text, or the HUD inherits it
+            skyRestore(); // the card's sky text: clouds back
+            uiClear();    // (and the band, or the HUD inherits it)
             attract = 0;
             raceMode = RM_RACE;
             raceInit();
@@ -1656,6 +1663,7 @@ int main(void)
                 ovlInit = 0;
                 ovlFlash = 2;
                 raceInit();
+                skyUp = 1;     // the card's text rides the sky rows
                 raceState = 1; // no countdown, no finish: it just cruises
                 ltState = 3;
                 ttlWait = 0; // park the title slide: nothing to draw
@@ -1765,7 +1773,8 @@ int main(void)
                 if (((u8)(snes_vblank_count >> 5) & 1) != ovlFlash)
                 {
                     ovlFlash = (u8)(snes_vblank_count >> 5) & 1;
-                    uiPrint(10, 3, ovlFlash ? "PRESS START" : "           ");
+                    uiSkyCompose(skyRows[3], 10, ovlFlash ? "PRESS START" : "");
+                    skyDirty = 1;
                 }
                 // lapCount seeds 255, 0 at the rolling start, 1 after
                 // the lap - the flyover shows the whole course once
@@ -2560,8 +2569,13 @@ int main(void)
             vSide -= vSide >> 3;
             skiMerge();
         }
+        // the speed term MUST multiply signed: wvSteps is unsigned, and a
+        // negative vAlong made tcc's product unsigned with a LOGICAL >> 4
+        // (~ +4000 instead of -56) - the phase then leapt half a cycle
+        // every tick in reverse: the "camera shakes when backing up" bug,
+        // latent since the per-course wave profiles made wvSteps a variable
         phaseAcc = (phaseAcc + WAVE_BASE_ROLL
-                    + (((vAlong >> 4) * wvSteps) >> 4))
+                    + (u16)((s16)((vAlong >> 4) * (s16)wvSteps) >> 4))
                    & wvMask;
         phase = phaseAcc >> 8;
 
