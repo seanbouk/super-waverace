@@ -451,7 +451,10 @@ move waypoint 0/1 in the painter to move the grid.
   textScreen() placeholder until its phase. Rider-select/menu text may
   ONLY use map rows >= 12: rows 4-11 are the sky band the race shows.
   The chaser has stuck-recovery (reverse out after ~2s wedged - it could
-  deterministically grind forever on the start-line rope pocket). START in a race =
+  deterministically grind forever on the start-line rope pocket). The
+  course select draws the highlighted course's 48x48 minimap (painter
+  orientation; palette row 7 = CGRAM 112-127; chars after the sky rows;
+  csMini/csMiniPal re-DMA'd per cursor move). START in a race =
   PAUSE (attract races skip the countdown AND the finish - raceState
   forced to 1, ltState 3, the lap-3 check gated on !attract - and
   overtaken NPCs respawn 4 waypoints ahead with progress pinned above the

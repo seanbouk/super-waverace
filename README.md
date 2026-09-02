@@ -206,7 +206,7 @@ The line in the sand — update this table whenever an allocation changes.
 | 50 | Shore teal | Sandy seafoam teal: the shallows tile's land edge, dithering into the bluer teal (glow-exempt) |
 | 51–63 | BG reserve | Unallocated |
 | 64–111 | HUD ramps | Palette rows 4–6: the gradient-font colour ramps (titles / value tops / value bottoms) |
-| 112–127 | BG reserve | Unallocated |
+| 112–127 | Minimap | Palette row 7: the course-select minimap (per-course water/sand/shore + buoy dots) |
 | 128–143 | Rider + spray | OBJ palette 0: the player's role slots (neutrals, skin/clothing/jetski pairs, 13 = spray shade). Per course (ambient-lit) |
 | 144–191 | NPC racers | OBJ palettes 1–3: full rider recolours (skin + two clothing pairs + jetski pair; tiles shared). Per course (ambient-lit) |
 | 192–207 | Start lamps | OBJ palette 4: the start-tree lamps — self-lit, exempt from the ambient |

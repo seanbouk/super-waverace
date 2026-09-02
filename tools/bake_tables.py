@@ -1782,6 +1782,8 @@ def bake_course(cdir, sky_switch, sky_ref):
         palette[idx] = tint(palette[idx], amb)
     lint_pairs(palette, COURSE_PAIRS, "course palette", where)
     c["obj_pal"], c["buoy_pal"] = obj_palettes(amb, where)
+    c["mini"], c["minipal"] = build_minimap(
+        load_course(os.path.join(cdir, "course.json")), palette)
     c["fade"] = sand_fade_table(sky_switch, palette[SAND],
                                 tint(fade["sand_far"], amb),
                                 tint(fade["sand_deep"], amb))
@@ -1851,6 +1853,43 @@ def bake_course(cdir, sky_switch, sky_ref):
         rot_colors.append(((b >> 3) << 10) | ((g >> 3) << 5) | (r >> 3))
     c["rot_colors"] = rot_colors
     return c
+
+
+def build_minimap(course, palette):
+    """48x48 4bpp track-select minimap from the zone grid, in PAINTER
+    orientation (load_course mirrored the data into game coords; the map
+    should look like the world the player sees, which matches the
+    painter). Colours ride palette row 7 (CGRAM 112-127, otherwise
+    unallocated): 1 water / 2 sand / 3 shore, from the course's own
+    (ambient-lit) palette; 4/5 = L/R buoys, 6 = the start line."""
+    zones = [row[::-1] for row in course[0]]  # back to painter X
+    m = [[1] * 48 for _ in range(48)]
+    for y in range(48):
+        zy = y * 128 // 48
+        for x in range(48):
+            if zones[zy][x * 128 // 48] == "s":
+                m[y][x] = 2
+    for y in range(48):
+        for x in range(48):
+            if m[y][x] == 2 and (
+                    m[(y - 1) % 48][x] == 1 or m[(y + 1) % 48][x] == 1
+                    or m[y][(x - 1) % 48] == 1 or m[y][(x + 1) % 48] == 1):
+                m[y][x] = 3
+
+    def dot(px, py, col):  # 2x2, from GAME coords (un-mirror x)
+        mx = (1023 - px) * 48 // 1024
+        my = py * 48 // 1024
+        for dy in (0, 1):
+            for dx in (0, 1):
+                m[min(47, my + dy)][min(47, mx + dx)] = col
+
+    for bx, by, side in course[2]:
+        dot(bx, by, 5 if side == "R" else 4)
+    if course[3]:
+        dot(course[3][0][0], course[3][0][1], 6)
+    pal16 = [(0, 0, 0), palette[3], palette[SAND], palette[FOAM],
+             (244, 196, 40), (191, 60, 60), (250, 250, 250)]         + [(0, 0, 0)] * 9
+    return encode_4bpp(m, 6, 6), pal_bytes(pal16)
 
 
 def sand_fade_table(sky_switch, sand, sand_far, sand_deep):
@@ -1928,7 +1967,8 @@ def main():
     assert UI_LINES + 8 <= sky_switch <= 127, \
         "mode-1 sky band needs UI_LINES+8 <= switch <= 127 (HDMA count)"
     sky_gfx, sky_pal2, sky_rows = build_sky_band(sky_switch, sky_ref)
-    assert SKY_CHAR0 + sky_rows <= 512, "sky tiles overflow into the OBJ sheet"
+    assert SKY_CHAR0 + sky_rows + 36 <= 512, \
+        "sky tiles + minimap overflow into the OBJ sheet"
 
     # ---- bake every profile and course ----
     baked_profs = [bake_profile(pp, sky_switch, sky_ref) for pp in profiles]
@@ -2031,6 +2071,8 @@ def main():
         # sky band anchors (CGRAM 32-47) + the ambient-lit cloud pair (29-30)
         refs["sky"] = blob_ref(ci, "sky", bc["sky_pal"])
         refs["cloud"] = blob_ref(ci, "cloud", bc["cloud_pal"])
+        refs["mini"] = blob_ref(ci, "mini", bc["mini"])
+        refs["minipal"] = blob_ref(ci, "minipal", bc["minipal"])
         refs["coll"] = blob_ref(ci, "coll", bc["coll"])
         asm.append(".ends")
         asm.append("")
@@ -2115,6 +2157,7 @@ def main():
 #define WAVE_SKY_SWITCH {{SKSW}}
 #define WAVE_SKY_ROWS {{SKRW}}
 #define WAVE_SKY_CHAR0 {{SKC0}}
+#define WAVE_MINI_CHAR0 {{MIC0}} /* minimap chars, after the sky rows */
 /* HUD gradient font: SH glyphs, then DH tops, then DH bottoms */
 #define WAVE_HUD_CHAR0 {{HDC0}}
 #define WAVE_HUD_GLYPHS {{HDGL}}
@@ -2173,6 +2216,10 @@ extern dmaMemory tpSrc;
 /* csMapDef = the map codec's 256-byte default block (the water pattern's
    16x16 tile ids): copyTo7F it to $7FC200 before mapTo7F */
 extern dmaMemory csMapDef;
+/* csMini = the 48x48 track-select minimap (36 4bpp chars, 1152 bytes,
+   uploaded to VRAM WAVE_MINI_CHAR0 on each cursor move) + its palette
+   row 7 (CGRAM 112, 32 bytes) */
+extern dmaMemory csMini, csMiniPal;
 /* csSky = 17 entries from CGRAM 31: [HUD backdrop = zenith, (unused),
    band anchors 1..15 zenith -> horizon] (34 bytes); csSky0 = backdrop
    entry 0 = horizon - strip add (the safe strip lands on the horizon);
@@ -2199,6 +2246,7 @@ void courseNameTo(u8 c, char *out);
            .replace("{{SKSW}}", str(sky_switch))
            .replace("{{SKRW}}", str(sky_rows))
            .replace("{{SKC0}}", str(SKY_CHAR0))
+           .replace("{{MIC0}}", str(SKY_CHAR0 + sky_rows))
            .replace("{{HDC0}}", str(HUD_CHAR0))
            .replace("{{HDGL}}", str(len(HUD_GLYPHS)))
            .replace("{{CLC0}}", str(CLOUD_CHAR0))
@@ -2233,7 +2281,7 @@ void courseNameTo(u8 c, char *out);
         f.write("s8 gateNx[WAVE_MAX_BUOYS + 1];\ns8 gateNy[WAVE_MAX_BUOYS + 1];\n")
         f.write("u8 gateWp[WAVE_MAX_BUOYS + 1];\n")
         f.write("dmaMemory csTiles, csMap, csMapDef, csPal1, csPal48, csObj, "
-                "csBuoy, csColl, csFade, csSky, csCloud, tpSrc;\nu16 csSky0, csZen;\n")
+                "csBuoy, csColl, csFade, csSky, csCloud, tpSrc, csMini, csMiniPal;\nu16 csSky0, csZen;\n")
         f.write("u8 wvRotStart, wvRotCount, wvRotFrames;\nu16 rotCols[8];\n\n")
 
         f.write("void waveProfLoad(u8 pf)\n{\n    switch (pf)\n    {\n")
@@ -2303,6 +2351,8 @@ void courseNameTo(u8 c, char *out);
             f.write("        csFade.mem.p = (u8 *)&{0};\n".format(r["fade"]))
             f.write("        csSky.mem.p = (u8 *)&{0};\n".format(r["sky"]))
             f.write("        csCloud.mem.p = (u8 *)&{0};\n".format(r["cloud"]))
+            f.write("        csMini.mem.p = (u8 *)&{0};\n".format(r["mini"]))
+            f.write("        csMiniPal.mem.p = (u8 *)&{0};\n".format(r["minipal"]))
             f.write("        csSky0 = 0x{0:04X};\n".format(bc["sky0"]))
             f.write("        csZen = 0x{0:04X};\n".format(bc["zen"]))
             f.write("        wvRotStart = {0};\n".format(bc["rot"]["rotStart"]))

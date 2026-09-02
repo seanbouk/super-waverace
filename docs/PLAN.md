@@ -340,7 +340,14 @@ Phases:
    (barely moving ~2s while racing -> reverse out ~3s: the chaser could
    deterministically wedge on the start-line rope pocket and grind
    forever - traces pinned at x=1407; real pads never trigger it).
-   Remaining (part b): track select minimaps from the zone grid.
+   Part b (Sep 2): course select shows a 48x48 minimap of the
+   highlighted course (bottom-right, rows 22-27 x cols 24-29) - baked
+   from the zone grid in PAINTER orientation (the world the player sees),
+   with the course's own ambient-lit water/sand/shore colours on the
+   previously-unallocated palette row 7 (CGRAM 112-127), buoy dots
+   (yellow/red) and a white start marker; 36 4bpp chars parked after the
+   sky rows, tiles+palette re-DMA'd per cursor move (courseGeom repoints
+   csMini mid-frame, the vblank kicks 1152+32 bytes). PHASE 2 COMPLETE.
 3. Championship - course sequence, intro card (name + racing-line
    cruise), points + standings screens.
 Post-jam: 2P VS. (split screen - see the cost sketch below).

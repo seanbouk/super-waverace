@@ -831,6 +831,7 @@ static void raceInit(void)
     buildWinTab(200, 210);
 }
 
+static u16 ttlBuf[UI_COLS]; // scratch map row (menus, minimap, BG3 rows)
 static u16 menuPrev;
 static u8 menuDirty;
 static char menuBuf[24]; // "> " + up to 20 chars (MENU_NAME_MAX) + NUL
@@ -888,11 +889,21 @@ static void courseSelect(void)
     menuComposeList();
     menuDmaList(); // force blank: safe
     uiMenuRow(17 + WAVE_COURSES, 10, "PRESS START");
+    // minimap cells: rows 22-27, cols 24-29 - written ONCE (per-row
+    // partial DMAs so no text row is touched); the tiles + palette are
+    // per-course, re-DMA'd on every cursor move below
+    for (oy = 0; oy < 6; oy++)
+    {
+        for (bi = 0; bi < 6; bi++)
+            ttlBuf[bi] = 0x1C00 | (WAVE_MINI_CHAR0 + oy * 6 + bi);
+        dmaCopyVram((u8 *)ttlBuf, (u16)(0x4000 + (22 + oy) * 32 + 24), 12);
+    }
     setScreenOn();
     startHeld = 1; // a confirm held over from the results must not re-fire
     menuT = 0;
-    menuDirty = 0;     // BSS: read below before any set
+    menuDirty = 1;     // BSS; 1 = upload the initial minimap in the loop
     menuPrev = 0xFFFF; // treat every key as held until released once
+    courseGeom(courseSel); // csMini for the initial minimap upload
     while (1)
     {
         WaitForVBlank();
@@ -900,6 +911,10 @@ static void courseSelect(void)
         {
             menuDirty = 0;
             menuDmaList();
+            // the highlighted course's minimap: courseGeom pointed csMini
+            // at it mid-frame; 1152 B + 32 B is well inside the budget
+            dmaCopyVram(csMini.mem.p, 0x4000 + WAVE_MINI_CHAR0 * 16, 1152);
+            dmaCopyCGram(csMiniPal.mem.p, 112, 32);
         }
         REG_BG3HOFS = (u8)(menuT >> 2); // idle cloud drift
         REG_BG3HOFS = 0;
@@ -909,6 +924,7 @@ static void courseSelect(void)
         {
             courseSel--;
             menuComposeList();
+            courseGeom(courseSel); // repoints csMini for the vblank DMA
             menuDirty = 1;
         }
         if ((pad0 & KEY_DOWN) && !(menuPrev & KEY_DOWN)
@@ -916,6 +932,7 @@ static void courseSelect(void)
         {
             courseSel++;
             menuComposeList();
+            courseGeom(courseSel);
             menuDirty = 1;
         }
         menuPrev = pad0;
@@ -950,8 +967,6 @@ static void mosaicSweep(u8 dir, u8 live)
     if (dir)
         REG_MOSAIC = 0;
 }
-
-static u16 ttlBuf[UI_COLS];
 
 // show: the title strip replaces the second cloud-strip map row (the BG3
 // scroll is frozen while an overlay is up, so it sits still); hide: put
