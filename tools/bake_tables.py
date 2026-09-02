@@ -356,7 +356,8 @@ def build_clouds():
 # carries its own palette index (1..8), and three static CGRAM ramps (rows
 # 4/5/6, CGRAM 64-111 - the free BG reserve) do the per-scanline colouring.
 # Order must match hudIdx() in game/src/ui.c.
-HUD_GLYPHS = "0123456789'\"/!ADEFGHIKLMNOPRSTW*."  # * / . = power pips
+HUD_GLYPHS = "0123456789'\"/!ADEFBHIKLMNOPRSTW*."  # * / . = pips; B took
+                                                   # unused G's slot (BEST)
 # BG3 cloud chars start right after the HUD font (0x4800 + glyphs*3 4bpp
 # chars), as 2bpp ids from the 0x4000 BG3 char base
 CLOUD_CHAR0 = (0x800 + len(HUD_GLYPHS) * 3 * 16) // 8
@@ -380,6 +381,7 @@ HUD_FONT = {  # 5x7, one int per row, bit 4 = leftmost pixel
     'D': (0x1E, 0x11, 0x11, 0x11, 0x11, 0x11, 0x1E),
     'E': (0x1F, 0x10, 0x1E, 0x10, 0x10, 0x10, 0x1F),
     'F': (0x1F, 0x10, 0x1E, 0x10, 0x10, 0x10, 0x10),
+    'B': (0x1E, 0x11, 0x11, 0x1E, 0x11, 0x11, 0x1E),
     'G': (0x0E, 0x11, 0x10, 0x17, 0x11, 0x11, 0x0F),
     'H': (0x11, 0x11, 0x1F, 0x11, 0x11, 0x11, 0x11),
     'I': (0x0E, 0x04, 0x04, 0x04, 0x04, 0x04, 0x0E),

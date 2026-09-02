@@ -2139,8 +2139,7 @@ int main(void)
                 pjCol = npjC[bi];
                 rdRow = npjR[bi];
                 drawSki((NPC_SPR + (ns << 1)) << 2,
-                        (NPC_SPR + (ns << 1) + 1) << 2,
-                        (u8)(1 + npcPalTab[bi]));
+                        (NPC_SPR + (ns << 1) + 1) << 2, npcPalTab[bi]);
             }
             else
             {
@@ -2300,10 +2299,12 @@ int main(void)
             {
                 hudInit = 1;
                 uiHudSmall(1, 1, HUD_PAL_TITLE, "TIME");
-                // TOP (not BEST: no B glyph - the HUD font's VRAM
-                // window is exactly full) = the best lap, where RANK sat
-                uiHudSmall(9, 1, HUD_PAL_TITLE, raceTT ? "TOP" : "RANK");
-                uiHudSmall(14, 1, HUD_PAL_TITLE, "LAP");
+                // TT: BEST lap (the B glyph took unused G's slot -
+                // the font's VRAM window is exactly full) and NO lap
+                // counter: laps are endless, the time is the point
+                uiHudSmall(9, 1, HUD_PAL_TITLE, raceTT ? "BEST" : "RANK");
+                if (!raceTT)
+                    uiHudSmall(14, 1, HUD_PAL_TITLE, "LAP");
                 uiHudSmall(18, 1, HUD_PAL_TITLE, "SPEED");
                 uiHudSmall(25, 1, HUD_PAL_TITLE, "POWER");
                 uiHudSmall(20, 3, HUD_PAL_BOT, "KM/H");
@@ -2333,30 +2334,20 @@ int main(void)
             }
             if (raceTT)
             {
-                // TOP cell: SS"T (laps are well under 100s; capped),
-                // redrawn when a better lap lands (hRank is its cache)
+                // BEST cell: M'SS"T, redrawn when a better lap lands
+                // (hRank is its cache; 255 = nothing set yet)
                 if (bestSec != 255 && hRank != bestSec)
                 {
                     hRank = bestSec;
-                    bq = bestSec > 99 ? 99 : bestSec;
-                    pwBuf[0] = (char)('0' + bq / 10);
-                    pwBuf[1] = (char)('0' + bq % 10);
-                    pwBuf[2] = '"';
-                    pwBuf[3] = (char)('0' + bestTenth);
-                    pwBuf[4] = 0;
+                    pwBuf[0] = (char)('0' + bestSec / 60);
+                    pwBuf[1] = 0x27; /* apostrophe */
+                    bq = bestSec % 60;
+                    pwBuf[2] = (char)('0' + bq / 10);
+                    pwBuf[3] = (char)('0' + bq % 10);
+                    pwBuf[4] = '"';
+                    pwBuf[5] = (char)('0' + bestTenth);
+                    pwBuf[6] = 0;
                     uiHudBig(9, pwBuf);
-                }
-                dly = lapCount == 255 ? 1 : (u16)lapCount + 1;
-                if (dly > 99)
-                    dly = 99;
-                if (hLapD != (u8)dly)
-                {
-                    hLapD = (u8)dly;
-                    if (dly > 9)
-                        uiHudBigDigit(14, dly / 10);
-                    else
-                        uiHudBigClear(14, 1);
-                    uiHudBigDigit(15, dly % 10);
                 }
             }
             else
