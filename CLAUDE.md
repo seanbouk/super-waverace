@@ -196,10 +196,20 @@ Mesen.exe --testrunner --timeout=30 <rom> <script.lua>   # arg order-free
   native IRQ vector -> irqStub, a 4-byte jml in BANK 0 (bank 0 had 11
   bytes free - the stub is the only thing that fits there) -> irqSwitch
   (camera.asm): ack $4211 (mandatory or it refires), spin on the $4212
-  hblank flag, write $2105=7. V+H timer set to (WAVE_SKY_SWITCH-1, dot
-  260); the NMI callback (nmiSet -> vblTop) restores mode 0x09 at frame
-  top EVERY frame (the main loop is slower than the frame rate). irqOn
-  (camera.asm) does the cli. Freed HDMA ch0 = CGRAM stream ($2121 mode 3:
+  hblank flag, write $2105=7. The IRQ fires TWICE per frame since Sep 2
+  (irqStage, the handler re-arms VTIMEL; vblTop resets stage 0 + line
+  irqLineSky every frame): stage 0 at irqLineSky = UI_LINES-1 writes the
+  cloud rows' BG3HOFS (cloudHofs, set by the main-loop tail: heading>>6
+  in RM_RACE/RM_INTRO, 0 under the results table) - in the ACTIVE part of
+  line 32 (a blank BG3 row, so invisible), NOT in hblank where the
+  8-channel HDMA burst could split the write-twice pair and poison the
+  shared BGOFS latch; vblTop writes BG3HOFS 0 at frame top so the BAND's
+  BG3 (the intro card text) sits still while the clouds turn. Stage 1 at
+  irqLineSea = WAVE_SKY_SWITCH-1 is the mode switch, H dot 260. The NMI
+  callback (nmiSet -> vblTop) restores mode 0x09 at frame top EVERY frame
+  (the main loop is slower than the frame rate). irqOn (camera.asm) does
+  the cli. Menus park the timer IRQ (NMITIMEN 0x81): their own BG3HOFS
+  writes (course-select drift) land after vblTop's 0 in the same vblank. Freed HDMA ch0 = CGRAM stream ($2121 mode 3:
   CGADD,CGADD,CGDATA,CGDATA = one palette entry per table entry): the
   baked sand_fade table repaints CGRAM 8 down the frame in hold-runs -
   the wave-phase-independent sand distance fade. Measured cost: zero
@@ -476,8 +486,9 @@ move waypoint 0/1 in the painter to move the grid.
   DMAs them to rows 1-3 in RM_INTRO and to the cloud rows otherwise;
   skyRestore blanks rows 1-3 too) - NOT band console text: those
   glyphs' colour-0 cells show the BACKDROP, a wrong-colour box on every
-  chromatic-sky course. The clouds stay during the flyover (static:
-  BG3HOFS is 0 whenever text rides BG3, or it would scroll too). NO RACERS: player sprites, spray
+  chromatic-sky course. The clouds stay during the flyover AND scroll
+  with the heading (the stage-0 IRQ scrolls only the sky rows; the band
+  rows holding the text stay at 0). NO RACERS: player sprites, spray
   and both NPC blocks are RM_INTRO-gated; CONSTANT SPEED: skiVX/VY are
   SET each tick = INTRO_PASSES x skiThrustF(INTRO_THRUST) along the
   heading, thrust/drag skipped (~2500 8.8, half pace); it ends after ONE

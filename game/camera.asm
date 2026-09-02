@@ -1538,12 +1538,23 @@ _wr_anz:
 .ENDS
 
 ;----------------------------------------------------------------------------
-; Scanline IRQ: the mode-1 -> mode-7 switch, moved off HDMA channel 0 so
-; ch0 can stream the sand distance-fade CGRAM writes instead. The V+H
-; timer fires just before hblank on the line ABOVE the switch; we ack
-; ($4211 read is mandatory or the IRQ refires), wait for the hblank flag
-; so the mode never flips mid-line, and write $2105. The NMI callback in
-; main.c restores mode 1 (0x09) at the top of every frame.
+; Scanline IRQ, TWO firings per frame (irqStage, re-armed by rewriting
+; VTIMEL in the handler; the NMI callback in main.c resets stage 0 + the
+; first line every frame):
+;  stage 0, line irqLineSky (= UI_LINES-1, the band's last line): the
+;    cloud rows' BG3 scroll (cloudHofs, set by the main loop) - the band
+;    above keeps the 0 the NMI wrote, so text on BG3 rows 1-3 (the intro
+;    card) sits still while the clouds turn with the heading. The pair is
+;    written in the ACTIVE part of the next line (the first sky row, whose
+;    BG3 cells are blank, so the change is invisible there), NOT in
+;    hblank: the 8-channel HDMA burst could land between the two bytes of
+;    the write-twice pair and poison the shared BGOFS latch.
+;  stage 1, line irqLineSea (= WAVE_SKY_SWITCH-1): the mode-1 -> mode-7
+;    switch, moved off HDMA channel 0 so ch0 can stream the sand
+;    distance-fade CGRAM writes instead. Fires just before hblank on the
+;    line ABOVE the switch; wait for the hblank flag so the mode never
+;    flips mid-line, write $2105. The NMI restores mode 1 (0x09).
+; Every firing reads $4211 (mandatory ack, or the IRQ refires).
 ; The vector stub must live in BANK 0 (the native IRQ vector is a 16-bit
 ; bank-0 address); the handler body is SUPERFREE and reached by jml.
 ; Straight-line single-mode sections (see the WLA immediate-sizing gotcha).
@@ -1558,12 +1569,36 @@ irqSwitch:
     pha                  ; 16-bit push: covers A whatever mode we landed in
     sep #$20
     lda.l $004211        ; TIMEUP: acknowledge the timer IRQ
-_irq_wait:
+    lda.l irqStage
+    bne _irq_sea
+_irq_hb:                 ; stage 0: wait for hblank...
     lda.l $004212        ; HVBJOY
     and #$40             ; hblank flag
-    beq _irq_wait
+    beq _irq_hb
+_irq_act:                ; ...and for it to END (the HDMA burst is done)
+    lda.l $004212
+    and #$40
+    bne _irq_act
+    lda.l cloudHofs      ; BG3HOFS write-twice pair, uninterruptible now
+    sta.l $002111
+    lda #$00
+    sta.l $002111
+    lda.l irqLineSea     ; re-arm for the mode switch
+    sta.l $004209
+    lda #$01
+    sta.l irqStage
+    bra _irq_done
+_irq_sea:                ; stage 1: the mode switch, in hblank
+    lda.l $004212
+    and #$40
+    beq _irq_sea
     lda #$07
     sta.l $002105        ; sea rows: mode 7
+    lda.l irqLineSky     ; re-arm for next frame's cloud scroll
+    sta.l $004209
+    lda #$00
+    sta.l irqStage
+_irq_done:
     rep #$20
     pla
     rti

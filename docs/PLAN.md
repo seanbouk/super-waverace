@@ -389,7 +389,10 @@ Phases:
    shake" - the phase step's signed x unsigned product (see CLAUDE.md).
    Fifth (Sep 2): the intro text went back to the top of the screen with
    the clouds kept - BG3 rows 1-3 in the band (band TM now includes
-   BG3); the mid-sky rows stay for the results table. Balance deliberately untouched (the fade schedule
+   BG3); the mid-sky rows stay for the results table. Then the flyover's
+   clouds got their scroll back: the scanline IRQ fires twice per frame,
+   the first at the band edge writing the cloud rows' BG3 scroll while
+   the band (and its text) stays at 0 - no HDMA channel needed. Balance deliberately untouched (the fade schedule
    makes single races player-favoured; a 6-race total amplifies that).
 Post-jam: 2P VS. (split screen - see the cost sketch below).
 

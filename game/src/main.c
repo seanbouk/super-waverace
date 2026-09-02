@@ -65,6 +65,10 @@ extern void npcAim(void); // aimT/aimP/aimBias + npcTrig -> wpdx/wpdy (bias-
                           // aimed), apc = cross, apd = dot
 extern void npcVel(void); // apc/apd = ((bq >> 5) * npcSin/Cos) >> 2
 extern void irqOn(void);  // camera.asm: cli, once the timer regs are set
+// the two-stage scanline IRQ (camera.asm irqSwitch): stage 0 at
+// irqLineSky writes the cloud rows' BG3 scroll (cloudHofs), stage 1 at
+// irqLineSea flips to mode 7; vblTop resets the stage each frame
+u8 irqStage, irqLineSky, irqLineSea, cloudHofs;
 extern void waveRawLoad(void); // camera.asm: decode wrSrc's delta-d stream
                                // + synthesise a into WRAM $7F
 
@@ -622,6 +626,10 @@ static void waveHdma(u16 ph, u16 bufOff)
 static void vblTop(void)
 {
     REG_BGMODE = 0x09;
+    REG_BG3HOFS = 0; // the band's BG3 (intro text) sits still; the
+    REG_BG3HOFS = 0; // line-31 IRQ scrolls the cloud rows below it
+    irqStage = 0;
+    REG_VTIMEL = irqLineSky;
 }
 
 //---------------------------------------------------------------------------------
@@ -1571,7 +1579,11 @@ int main(void)
     REG_BGMODE = 0x09; // valid until the first IRQ fires
     REG_HTIMEL = 260 & 0xFF; // just before hblank; the handler spins
     REG_HTIMEH = 260 >> 8;   // on the hblank flag for the last few dots
-    REG_VTIMEL = WAVE_SKY_SWITCH - 1;
+    irqStage = 0;
+    irqLineSky = WAVE_UI_LINES - 1;  // stage 0: cloud scroll
+    irqLineSea = WAVE_SKY_SWITCH - 1; // stage 1: mode switch
+    cloudHofs = 0;
+    REG_VTIMEL = irqLineSky;
     REG_VTIMEH = 0;
     REG_NMITIMEN = 0xB1; // NMI + V=V,H=H timer IRQ + auto-joypad
     irqOn();             // camera.asm: cli
@@ -3024,14 +3036,14 @@ int main(void)
         // EXTBG, see ui.c) scrolls with the heading at 4px per binary
         // degree (from the 8.8 heading, so it stays smooth mid-turn) -
         // the 256px map wraps exactly 4 times per full turn, still a
-        // perfect loop. Written in vblank, both bytes back-to-back (the
-        // shared BGOFS prev-latch makes a split pair inherit garbage
-        // from the HDMA's $210D stream)
-        if (raceMode == RM_RACE && !skyUp)
-            REG_BG3HOFS = (u8)(camTheta16 >> 6);
+        // perfect loop. Applied by the line-31 IRQ to the sky rows only
+        // (camera.asm irqSwitch stage 0); the band above stays at 0, so
+        // the intro card's band text sits still while its clouds turn.
+        // The results table lives ON the cloud rows: no scroll under it
+        if (raceMode == RM_INTRO || (raceMode == RM_RACE && !skyUp))
+            cloudHofs = (u8)(camTheta16 >> 6);
         else
-            REG_BG3HOFS = 0; // the BG3 title / results table sit still
-        REG_BG3HOFS = 0;
+            cloudHofs = 0; // the BG3 title / results table sit still
         if (skyDirty) // sky text rows (composed mid-frame): the intro
         {             // card in the band, or the results table + prompt
             skyDirty = 0;

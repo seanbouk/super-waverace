@@ -7,20 +7,20 @@
 -- the log says DONE.
 local out = os.getenv("OUTDIR") or "./"
 local A = {
-  raceState = 0x7E3D0B, raceMode = 0x7E3D59, champOn = 0x7E3D66,
-  champRace = 0x7E3D67, champStage = 0x7E3D68, champPts = 0x7E3D69,
-  racePts = 0x7E3D6D,
+  raceState = 0x7E3D0F, raceMode = 0x7E3D5D, champOn = 0x7E3D6A,
+  champRace = 0x7E3D6B, champStage = 0x7E3D6C, champPts = 0x7E3D6D,
+  racePts = 0x7E3D71,
   -- progress probes (a "PROG" line every 600 frames tells a wedged
   -- chaser from a hung CPU): tick, skiWX/WY, vAlong, lapCount, pProg
-  tick = 0x7E3C75, skiWX = 0x7E3CA7, skiWY = 0x7E3CA9, vAlong = 0x7E3C7B,
-  lapCount = 0x7E3CBB, pProg = 0x7E3D1D, apStuck = 0x7E3EF5,
+  tick = 0x7E3C79, skiWX = 0x7E3CAB, skiWY = 0x7E3CAD, vAlong = 0x7E3C7F,
+  lapCount = 0x7E3CBF, pProg = 0x7E3D21, apStuck = 0x7E3EF9,
   -- finish bookkeeping: a "FIN" line whenever finCount changes, with
   -- every rider's progress (NPC laps count waypoint 0 like the player's)
-  finCount = 0x7E3D94, npcProg = 0x7E3D1F, npcLap = 0x7E3D8A,
+  finCount = 0x7E3D98, npcProg = 0x7E3D23, npcLap = 0x7E3D8E,
   -- "POS" lines every 60 frames after the player's finish: where the
   -- field comes to rest relative to the player (finishers must end AHEAD
   -- of the camera to be seen)
-  npcX = 0x7E3CCA, npcY = 0x7E3CD0, npcSpd = 0x7E3CE2,
+  npcX = 0x7E3CCE, npcY = 0x7E3CD4, npcSpd = 0x7E3CE6,
 }
 local prevFin = -1
 local frames = 0
