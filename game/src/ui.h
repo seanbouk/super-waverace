@@ -45,6 +45,12 @@ void uiClear(void);
 void uiMenuRow(u16 row, u16 x, char *s);
 void uiMenuCompose(u16 *dst, u16 x, char *s); // RAM only: call any time
 void uiMenuAppend(u16 *dst, u16 x, char *s);  // ditto, without clearing
+// sky text: the BG3 2bpp font (white + shade, priority over the gradient)
+// for the in-race results table. Compose into RAM rows any time, DMA them
+// in vblank / force blank. Blank = the cloud set's char 0 (transparent).
+void uiSkyCompose(u16 *dst, u16 x, char *s); // clears the row first
+void uiSkyAppend(u16 *dst, u16 x, char *s);
+void uiSkyRowDma(u16 *src, u16 row);         // BG3 map row (0x4400)
 void uiMenuRowDma(u16 *src, u16 row);         // vblank / force blank only
 void uiMenuClearRows(void);
 

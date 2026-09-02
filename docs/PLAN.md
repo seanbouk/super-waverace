@@ -368,8 +368,14 @@ Phases:
    FLYOVER - no racers drawn, constant half-pace speed, one full lap
    before the race (START skips); every real race ENDS ITSELF 5s after
    the player's finish with the field placed where it stands (no START),
-   and ARCADE got the same results page without points; buoys are no
-   longer solid in any mode (pass-through counts as the correct side). Balance deliberately untouched (the fade schedule
+   buoys are no longer solid in any mode (pass-through counts as the
+   correct side). Second review (Sep 2): NPCs park as they finish; a
+   live results table (BG3 2bpp sky font, white + shade over the cloud
+   rows) appears at the player's finish with all four riders - finishers
+   flagged with their points, the rest in live order - and updates as
+   they cross; PRESS START after 5s ends the race (the unfinished are
+   placed where they stand, points still paid), or it ends 3s after the
+   last finisher. Arcade's results page was dropped for it. Balance deliberately untouched (the fade schedule
    makes single races player-favoured; a 6-race total amplifies that).
 Post-jam: 2P VS. (split screen - see the cost sketch below).
 

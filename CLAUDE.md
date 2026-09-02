@@ -473,15 +473,29 @@ move waypoint 0/1 in the painter to move the grid.
   as tall sprites in standings order, leader raised, a 4-line table
   place/name/+race pts/total/P1 in map rows 21-24, prompt row 26 - rows
   >= 28 are BELOW the 224 visible lines; the final page's title is "<NAME> IS
-  CHAMPION"). EVERY real race ENDS ITSELF 5s (finFr, 300 real frames)
-  after the player's finish - FINISH! shows throughout, no START:
-  raceFinish() ranks all four riders where they stand at that moment by
-  the position counter's own comparison (waypoints passed, then nearer =
-  ahead; chPl = finish order), pays 9/6/3/1 in a championship, and
-  main()'s outer loop shows the page: ARCADE = champPage(PAGE_ARCADE)
-  (finish order, no points, "RACE RESULTS" - gated on raceState == 2 with
-  !champOn/!attract/!raceTT, so main() seeds raceState = 0 at boot) then
-  the title; championship = PAGE_CHAMP / PAGE_FINAL. Tables index by rider id = palette
+  CHAMPION"). THE FINISH (Sep 2): riders PARK as they cross the line
+  for the last time - NPCs count laps at waypoint 0 exactly like the
+  player (npcLap seeds 255; verified: both finish at prog 52 on the
+  17-waypoint courses), npcDone skips their whole update (they still
+  count as "ahead" for the position counter and are never shoved) - and
+  riderFinish() books each one into finList with its place's points
+  (9/6/3/1, paid at once in a championship). From the PLAYER's finish a
+  live RESULTS TABLE floats in the sky: BG3 2bpp text (skyf_gfx, ids
+  986-1023 = the last free 4bpp window after the minimap chars; white +
+  shade, uiSkyCompose/Append/RowDma in ui.c) written over the four
+  cloud rows 5-8 (finished riders first with a '#' flag + points, then
+  the rest in live order - liveOrder(): the position counter's own
+  comparison - recomposed only when the order changes, DMA'd in the
+  vblank tail; BG3HOFS is held at 0 under it, the clouds are simply
+  gone), FINISH! stays in the HUD. After 5s (finFr) PRESS START appears
+  on BG3 row 10 (just above the horizon); START ends the race with the
+  unfinished placed where they stand (raceFinish -> riderFinish), and
+  3s after the fourth rider crosses it ends anyway. skyRestore() (force
+  blank: cloud_map back over rows 5-8, row 10 blanked) runs in every
+  post-race path BEFORE the next screen - the championship page branch
+  and the attract branch (ARCADE has no results page: the sky table IS
+  its result; pause-quit lands there too). champPage is PAGE_CHAMP /
+  PAGE_FINAL only. Tables index by rider id = palette
   (riders ARE palettes): 0 MAGNUS, 1 CALLISTA, 2 MILO, 3 DAFYDD
   (sbRider). champOn/champRace/champStage drive main()'s outer loop
   (stage 0 intro pending, 1 intro running, 2 race running, 3 = page up,

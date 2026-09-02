@@ -362,6 +362,15 @@ HUD_GLYPHS = "0123456789'\"/!ADEFBHIKLMNOPRSTW*."  # * / . = pips; B took
 # chars), as 2bpp ids from the 0x4000 BG3 char base
 CLOUD_CHAR0 = (0x800 + len(HUD_GLYPHS) * 3 * 16) // 8
 HUD_CHAR0 = 128  # VRAM 0x4800 from the 0x4000 BG1 base (map ids are 10-bit)
+# Sky text font (the in-race results table): 2bpp on BG3, white fill +
+# shade, in the LAST free window of the 0x4000 bank - 4bpp chars 492-511
+# (after the 36 minimap chars) = words 0x5EC0-0x5FFF = 2bpp ids 986-1023,
+# the top of the 10-bit id range. '#' is the finished flag.
+SKYF_GLYPHS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-#"
+SKYF_CHAR0 = 1024 - len(SKYF_GLYPHS)
+SKYF_BYTES = len(SKYF_GLYPHS) * 16
+assert SKYF_CHAR0 * 8 >= (SKY_CHAR0 + 8 + 36) * 16, \
+    "sky font overlaps the minimap chars (8 sky rows + 36 minimap chars)"
 HUD_FONT = {  # 5x7, one int per row, bit 4 = leftmost pixel
     '0': (0x0E, 0x11, 0x13, 0x15, 0x19, 0x11, 0x0E),
     '1': (0x04, 0x0C, 0x04, 0x04, 0x04, 0x04, 0x0E),
@@ -400,6 +409,14 @@ HUD_FONT = {  # 5x7, one int per row, bit 4 = leftmost pixel
     'C': (0x0E, 0x11, 0x10, 0x10, 0x10, 0x11, 0x0E),
     'U': (0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x0E),
     'V': (0x11, 0x11, 0x11, 0x11, 0x11, 0x0A, 0x04),
+    # the rest of the alphabet + '-', for the 2bpp SKY font only (names)
+    'G': (0x0E, 0x11, 0x10, 0x17, 0x11, 0x11, 0x0E),
+    'J': (0x07, 0x02, 0x02, 0x02, 0x02, 0x12, 0x0C),
+    'Q': (0x0E, 0x11, 0x11, 0x11, 0x15, 0x12, 0x0D),
+    'X': (0x11, 0x11, 0x0A, 0x04, 0x0A, 0x11, 0x11),
+    'Y': (0x11, 0x11, 0x0A, 0x04, 0x04, 0x04, 0x04),
+    'Z': (0x1F, 0x01, 0x02, 0x04, 0x08, 0x10, 0x1F),
+    '-': (0x00, 0x00, 0x00, 0x1F, 0x00, 0x00, 0x00),
     # power pips: 7-bit-wide soft rectangles - circles and diamonds both
     # read as zeros at this size
     '*': (0x3E, 0x7F, 0x7F, 0x7F, 0x7F, 0x3E, 0x00),  # filled
@@ -408,6 +425,35 @@ HUD_FONT = {  # 5x7, one int per row, bit 4 = leftmost pixel
 HUD_RAMPS = (((252, 216, 32), (56, 200, 88)),   # row 4 titles: yellow -> green
              ((56, 200, 88), (252, 216, 32)),   # row 5 value top: green -> yel
              ((252, 216, 32), (228, 40, 32)))   # row 6 value bottom: yel -> red
+
+
+def build_sky_font():
+    """2bpp glyphs for the BG3 sky text: fill = index 1 (CGRAM 29, cloud
+    white), a 1px down-right shade = index 2 (CGRAM 30) - so the text
+    floats over any sky gradient without a box (BG1 console text would
+    show the backdrop in its cells). 5-bit rows sit at cols 1-5, shade to
+    col 6 - but never onto row 7, so lines on adjacent map rows keep a
+    1px gap (with it, the four table rows read as one cramped block)."""
+    n = len(SKYF_GLYPHS)
+    grid = [[0] * 8 for _ in range(n * 8)]
+    for gi, ch in enumerate(SKYF_GLYPHS):
+        if ch == '#':  # chequered flag: 2x2 blocks of white / shade
+            for y in range(6):
+                for x in range(6):
+                    grid[gi * 8 + y][x + 1] = \
+                        1 if ((x >> 1) + (y >> 1)) & 1 else 2
+            continue
+        rows = HUD_FONT[ch]
+        for r in range(7):
+            assert rows[r] < 0x20, "sky font glyphs must be 5 bits wide"
+            for x in range(5):
+                if rows[r] & (0x10 >> x):
+                    grid[gi * 8 + r][x + 1] = 1
+        for r in range(6):  # shade stays inside rows 0-6: row 7 is the
+            for x in range(5):  # 1px gap that keeps stacked lines apart
+                if rows[r] & (0x10 >> x) and not grid[gi * 8 + r + 1][x + 2]:
+                    grid[gi * 8 + r + 1][x + 2] = 2
+    return encode_2bpp(grid, 1, n)
 
 
 def build_hud_font():
@@ -2129,6 +2175,9 @@ def main():
     asm.append(db_lines(hud_gfx))
     asm.append("hud_pal:")
     asm.append(db_lines(hud_pal))
+    skyf_gfx = build_sky_font()
+    asm.append("skyf_gfx:")
+    asm.append(db_lines(skyf_gfx))
     asm.append(".ends")
     asm.append("")
 
@@ -2170,6 +2219,9 @@ def main():
 #define WAVE_CLOUD_ROW0 {{CLR0}}
 #define WAVE_CLOUD_TROWS {{CLTR}}
 #define WAVE_CLOUD_CHARS {{CLCH}}
+/* sky text font (BG3 2bpp, results table): A-Z 0-9 - # from this id */
+#define WAVE_SKYF_CHAR0 {{SKF0}}
+#define WAVE_SKYF_BYTES {{SKFB}}
 #define WAVE_CLOUD_SHADE 0x{{CLSH}}
 #define WAVE_UI_LINES {2}
 #define WAVE_BASE_ROLL 64
@@ -2257,6 +2309,8 @@ void courseNameTo(u8 c, char *out);
            .replace("{{CLR0}}", str(CLOUD_ROW0))
            .replace("{{CLTR}}", str(CLOUD_TROWS))
            .replace("{{CLCH}}", str(cloud_chars))
+           .replace("{{SKF0}}", str(SKYF_CHAR0))
+           .replace("{{SKFB}}", str(SKYF_BYTES))
            .replace("{{CLSH}}", "{0:04X}".format(
                ((CLOUD_SHADE[2] >> 3) << 10) | ((CLOUD_SHADE[1] >> 3) << 5)
                | (CLOUD_SHADE[0] >> 3)))
@@ -2377,7 +2431,7 @@ void courseNameTo(u8 c, char *out);
 
     # ---- byte-budget report ----
     fixed = len(ski_tiles) + len(tall_tiles) + len(sky_gfx) + len(cloud_gfx) \
-        + len(cloud_map) + len(hud_gfx) + len(hud_pal) + 256
+        + len(cloud_map) + len(hud_gfx) + len(hud_pal) + SKYF_BYTES + 256
     print("tile pool: {0} distinct tiles, {1} bytes (vs {2} bytes as {3} "
           "separate 16K sets)".format(pool_tiles, len(pool),
                                        16384 * len(baked_courses),

@@ -13,8 +13,12 @@ local A = {
   -- progress probes (a "PROG" line every 600 frames tells a wedged
   -- chaser from a hung CPU): tick, skiWX/WY, vAlong, lapCount, pProg
   tick = 0x7E3C75, skiWX = 0x7E3CA7, skiWY = 0x7E3CA9, vAlong = 0x7E3C7B,
-  lapCount = 0x7E3CBB, pProg = 0x7E3D1D, apStuck = 0x7E3D8B,
+  lapCount = 0x7E3CBB, pProg = 0x7E3D1D, apStuck = 0x7E3EE3,
+  -- finish bookkeeping: a "FIN" line whenever finCount changes, with
+  -- every rider's progress (NPC laps count waypoint 0 like the player's)
+  finCount = 0x7E3D94, npcProg = 0x7E3D1F, npcLap = 0x7E3D8A,
 }
+local prevFin = -1
 local frames = 0
 local presses = {
   {450, 458, "start"}, -- title -> menu
@@ -65,6 +69,19 @@ local function onFrame()
       fh2:write("DONE\n"); fh2:close()
     end
     prev = st
+  end
+  local fc = rd(A.finCount)
+  if fc ~= prevFin then
+    prevFin = fc
+    local fh = io.open(out .. "log.txt", "a")
+    fh:write(string.format("f%06d FIN count=%d pProg=%d npcProg=%d/%d/%d npcLap=%d/%d/%d\n",
+      frames, fc, emu.read16(A.pProg, emu.memType.snesMemory),
+      emu.read16(A.npcProg, emu.memType.snesMemory),
+      emu.read16(A.npcProg + 2, emu.memType.snesMemory),
+      emu.read16(A.npcProg + 4, emu.memType.snesMemory),
+      rd(A.npcLap), rd(A.npcLap + 1), rd(A.npcLap + 2)))
+    fh:close()
+    if fc > 0 then shots[frames + 60] = "fin" .. fc end
   end
   if frames % 600 == 0 then
     local fh = io.open(out .. "log.txt", "a")

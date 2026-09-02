@@ -285,6 +285,19 @@ u8 champOrd[4];             // standings order (rider ids), best first
 u16 chPr[4], chDs[4];       // finish-order sort keys (progress, distance)
 u8 chPl[4];                 // ...and their rider ids
 u8 sbLen;                   // menuBuf string builder length
+// ---- race finish: riders park past the line as they finish, and from
+// the player's finish a live results table floats in the sky (BG3 text
+// over the cloud rows): finished riders in finish order with a flag (and
+// their points in a championship), the rest in live race order below.
+// 5s on, PRESS START ends the race (the unfinished are placed where they
+// stand); 3s after everyone has finished it ends by itself.
+u8 npcLap[NPC_COUNT], npcDone[NPC_COUNT]; // laps (255 seed) / parked
+u8 finList[4], finCount;  // riders in finish order
+u8 ordTab[4], ordPrev[4]; // live table order / last composed order
+u8 skyUp, skyDirty, skyGo; // table shown / rows need DMA / prompt shown
+u16 finAllFr;              // frames since the last rider finished
+#define SKY_GO_ROW 10      // PRESS START: the BG3 row just over the horizon
+static u16 skyRows[5][UI_COLS]; // 4 table rows + the prompt row (RAM)
 u8 apFine;   // chaser: this correction is small - steer at quarter rate
 u8 apStuck;  // chaser: loops spent barely moving (wedged on a rope/shore)
 u16 ovlPrev; // last RAW pad, for overlay + pause edge detection
@@ -803,7 +816,16 @@ static void raceInit(void)
         npcWp[bi] = 0;
         npcProg[bi] = 0;
         npcDist[bi] = 0;
+        npcLap[bi] = 255; // -1, like lapCount: the grid crossing -> 0
+        npcDone[bi] = 0;
     }
+    finCount = 0;
+    skyUp = 0;
+    skyDirty = 0;
+    skyGo = 0;
+    finAllFr = 0;
+    for (bi = 0; bi < 4; bi++)
+        ordPrev[bi] = 255;
     npcBias[0] = -56; // green aims left of the line, purple right,
     npcBias[1] = 56;  // orange up the middle: three distinct lines
     npcBias[2] = 0;
@@ -1202,25 +1224,40 @@ static void sbRider(u8 r)
         sbCat("DAFYDD");
 }
 
-// the race's end (5s after the player's finish): rank all four riders
-// by race progress (the position counter's own comparison - waypoints
-// passed, then nearer to the next one = ahead) - racers behind the
-// player are placed where they stand, nobody waits - and, in a
-// championship, pay out 9/6/3/1
-static void raceFinish(void)
+// a rider crosses the line for the last time: next place in finList,
+// and in a championship the place's points (9/6/3/1) - paid at once, so
+// leaving early costs nobody anything
+static void riderFinish(u8 r)
 {
-    u8 i, j, t;
-    u16 tp;
-    chPr[0] = pProg;
-    chDs[0] = pDist;
-    chPl[0] = playerPal;
-    for (i = 0; i < NPC_COUNT; i++)
+    finList[finCount] = r;
+    if (champOn)
     {
-        chPr[1 + i] = npcProg[i];
-        chDs[1 + i] = npcDist[i];
-        chPl[1 + i] = npcPalTab[i];
+        racePts[r] = finCount == 0 ? 9 : finCount == 1 ? 6
+                     : finCount == 2 ? 3 : 1;
+        champPts[r] += racePts[r];
     }
-    for (i = 1; i < 4; i++) // insertion sort, most advanced first
+    finCount++;
+    ordPrev[0] = 255; // force the table to recompose
+}
+
+// the live order: finished riders first (finish order), then the rest by
+// race progress - the position counter's own comparison (waypoints
+// passed, then nearer to the next one = ahead). Only called once the
+// player has finished, so the unfinished are all NPCs.
+static void liveOrder(void)
+{
+    u8 i, j, m, t;
+    u16 tp;
+    m = 0;
+    for (i = 0; i < NPC_COUNT; i++)
+        if (!npcDone[i])
+        {
+            chPr[m] = npcProg[i];
+            chDs[m] = npcDist[i];
+            chPl[m] = npcPalTab[i];
+            m++;
+        }
+    for (i = 1; i < m; i++) // insertion sort, most advanced first
         for (j = i; j > 0; j--)
         {
             if ((s16)(chPr[j] - chPr[j - 1]) > 0
@@ -1239,13 +1276,75 @@ static void raceFinish(void)
             else
                 break;
         }
-    if (champOn)
-        for (i = 0; i < 4; i++)
+    for (i = 0; i < finCount; i++)
+        ordTab[i] = finList[i];
+    for (i = 0; i < m; i++)
+        ordTab[finCount + i] = chPl[i];
+}
+
+// the race is left with riders still out there: place them where they
+// stand (live order) so every rider has a result and, in a championship,
+// their points
+static void raceFinish(void)
+{
+    u8 k, n;
+    liveOrder();
+    n = finCount;
+    for (k = n; k < 4; k++)
+        riderFinish(ordTab[k]);
+}
+
+// the sky table: recompose (RAM) when the live order changes or the
+// prompt appears; the vblank tail DMAs the rows when skyDirty
+static void skyUpdate(void)
+{
+    u8 k, r, chg;
+    liveOrder();
+    chg = 0;
+    for (k = 0; k < 4; k++)
+        if (ordTab[k] != ordPrev[k])
+            chg = 1;
+    if (!chg)
+        return;
+    for (k = 0; k < 4; k++)
+    {
+        r = ordTab[k];
+        ordPrev[k] = r;
+        // "1ST CALLISTA #  9": place col 7, name 11, flag 20, points 22
+        uiSkyCompose(skyRows[k], 7, k == 0 ? "1ST" : k == 1 ? "2ND"
+                     : k == 2 ? "3RD" : "4TH");
+        sbClear();
+        sbRider(r);
+        uiSkyAppend(skyRows[k], 11, menuBuf);
+        if (k < finCount)
         {
-            t = i == 0 ? 9 : i == 1 ? 6 : i == 2 ? 3 : 1;
-            racePts[chPl[i]] = t;
-            champPts[chPl[i]] += t;
+            uiSkyAppend(skyRows[k], 20, "#");
+            if (champOn)
+            {
+                sbClear();
+                if (racePts[r] < 10)
+                    sbCat(" ");
+                sbNum(racePts[r]);
+                uiSkyAppend(skyRows[k], 22, menuBuf);
+            }
         }
+    }
+    skyDirty = 1;
+}
+
+// the table leaves BG3 with the race: clouds back, prompt row blank.
+// Force blank inside - call between states, before the next screen
+static void skyRestore(void)
+{
+    if (!skyUp)
+        return;
+    skyUp = 0;
+    setScreenOff();
+    dmaCopyVram((u8 *)&cloud_map, 0x4400 + WAVE_CLOUD_ROW0 * 32,
+                WAVE_CLOUD_TROWS * 64);
+    uiSkyCompose(skyRows[4], 0, "");
+    uiSkyRowDma(skyRows[4], SKY_GO_ROW);
+    setScreenOn();
 }
 
 // the intro card's band text: race number + course name (rows 1-2; the
@@ -1265,15 +1364,14 @@ static void introDraw(void)
     uiPrint((u16)((32 - sbLen) >> 1), 2, menuBuf);
 }
 
-// results / standings page (full-screen mode 1, the rider-select recipe):
-// the four riders as tall sprites in finish or standings order, the
-// leader raised, and a four-line table under them - place, name, and in
-// a championship this race's points + total - plus the P1 tag (names run
-// to 8 chars, so per-column text under the sprites collided). Standings
-// ties break on the latest race, then rider order. TEXT ONLY IN ROWS >=
-// 12. mode: PAGE_ARCADE (finish order, no points), PAGE_CHAMP (running
-// standings), PAGE_FINAL (title names the champion).
-#define PAGE_ARCADE 0
+// championship standings page (full-screen mode 1, the rider-select
+// recipe): the four riders as tall sprites in standings order, the
+// leader raised, and a four-line table under them - place, name, this
+// race's points, total, P1 tag (names run to 8 chars, so per-column
+// text under the sprites collided). Ties break on the latest race, then
+// rider order. TEXT ONLY IN ROWS >= 12. mode: PAGE_CHAMP (running
+// standings), PAGE_FINAL (title names the champion). Arcade has no page:
+// the in-race sky table is its result.
 #define PAGE_CHAMP 1
 #define PAGE_FINAL 2
 static void champPage(u8 mode)
@@ -1283,23 +1381,21 @@ static void champPage(u8 mode)
     u16 wait = 0;
     champStage = 3; // "standings up" - only the Lua harness reads this
     for (i = 0; i < 4; i++)
-        champOrd[i] = mode == PAGE_ARCADE ? chPl[i] : i;
-    if (mode != PAGE_ARCADE)
-        for (i = 1; i < 4; i++)
-            for (j = i; j > 0; j--)
+        champOrd[i] = i;
+    for (i = 1; i < 4; i++)
+        for (j = i; j > 0; j--)
+        {
+            a = champOrd[j];
+            b = champOrd[j - 1];
+            if (champPts[a] > champPts[b]
+                || (champPts[a] == champPts[b] && racePts[a] > racePts[b]))
             {
-                a = champOrd[j];
-                b = champOrd[j - 1];
-                if (champPts[a] > champPts[b]
-                    || (champPts[a] == champPts[b]
-                        && racePts[a] > racePts[b]))
-                {
-                    champOrd[j] = b;
-                    champOrd[j - 1] = a;
-                }
-                else
-                    break;
+                champOrd[j] = b;
+                champOrd[j - 1] = a;
             }
+            else
+                break;
+        }
     REG_NMITIMEN = 0x81; // NMI + auto-joypad; timer IRQ parked
     REG_HDMAEN = 0;
     setScreenOff();
@@ -1320,8 +1416,6 @@ static void champPage(u8 mode)
         sbRider(champOrd[0]);
         sbCat(" IS CHAMPION");
     }
-    else if (mode == PAGE_ARCADE)
-        sbCat("RACE RESULTS");
     else
     {
         sbCat("RACE ");
@@ -1352,19 +1446,16 @@ static void champPage(u8 mode)
         sbClear();
         sbRider(t);
         uiMenuAppend(menuRows[i], 7, menuBuf);
-        if (mode != PAGE_ARCADE)
-        {
-            sbClear();
-            sbCat("+");
-            sbNum(racePts[t]);
-            uiMenuAppend(menuRows[i], 16, menuBuf);
-            sbClear();
-            if (champPts[t] < 10)
-                sbCat(" "); // right-align the total
-            sbNum(champPts[t]);
-            sbCat(" PTS");
-            uiMenuAppend(menuRows[i], 20, menuBuf);
-        }
+        sbClear();
+        sbCat("+");
+        sbNum(racePts[t]);
+        uiMenuAppend(menuRows[i], 16, menuBuf);
+        sbClear();
+        if (champPts[t] < 10)
+            sbCat(" "); // right-align the total
+        sbNum(champPts[t]);
+        sbCat(" PTS");
+        uiMenuAppend(menuRows[i], 20, menuBuf);
         if (t == playerPal)
             uiMenuAppend(menuRows[i], 28, "P1");
     }
@@ -1470,15 +1561,6 @@ int main(void)
     raceMode = RM_RACE;
     raceInit();
 #else
-    if (!champOn && !attract && !raceTT && raceState == 2)
-    {
-        // ARCADE results: the race ended itself 5s after the finish
-        // (raceFinish placed the field); the page, then the title
-        mosaicSweep(0, 1);
-        REG_HDMAEN = 0;
-        champPage(PAGE_ARCADE);
-        raceState = 0;
-    }
     if (menuGo && menuSel == 0)
     {
         // CHAMPIONSHIP: rider select, then every course in order (B at
@@ -1528,6 +1610,7 @@ int main(void)
                 {
                     mosaicSweep(0, 1);
                     REG_HDMAEN = 0;
+                    skyRestore(); // the results table off BG3
                     champPage(champRace + 1 >= WAVE_COURSES ? PAGE_FINAL
                                                             : PAGE_CHAMP);
                     champRace++;
@@ -1594,6 +1677,7 @@ int main(void)
         if (raceMode == RM_RACE)
             raceMode = RM_TITLE; // first boot / back from a race
         REG_HDMAEN = 0; // a quit race's channels may still be streaming
+        skyRestore();   // an ARCADE race's results table (its only page)
         courseLoad(0);
         titleBg3(1);
         ovlInit = 0;
@@ -1851,11 +1935,24 @@ int main(void)
             if (raceState == 2)
             {
                 pad0 &= ~(KEY_B | KEY_Y);
-                // 5 seconds of FINISH!, then the race ends by itself:
-                // the field is placed where it stands (raceFinish) and
-                // the results page follows - no START needed
+                // the finish: the sky table tracks the field (riders park
+                // as they cross); after 5s PRESS START is offered - START
+                // ends the race with the unfinished placed where they
+                // stand; 3s after the last rider finishes it ends anyway
+                skyUpdate();
                 finFr += loopFrames;
-                if (finFr >= 300)
+                if (finCount >= 4)
+                    finAllFr += loopFrames;
+                if (finFr >= 300 && !skyGo)
+                {
+                    skyGo = 1;
+                    uiSkyCompose(skyRows[4], 10, "PRESS START");
+                    skyDirty = 1;
+                }
+                if (!(pad0 & KEY_START))
+                    startHeld = 0;
+                if ((skyGo && (pad0 & KEY_START) && !startHeld)
+                    || finAllFr >= 180 || (CHAMP_AUTO && finFr >= 300))
                 {
                     raceFinish();
                     raceDone = 1;
@@ -2101,6 +2198,9 @@ int main(void)
                 {
                     raceState = 2; // chequered flag
                     finPos = racePos;
+                    riderFinish(playerPal);
+                    skyUp = 1; // the results table rides the sky from here
+                    uiSkyCompose(skyRows[4], 0, "");
                 }
             }
             nextWp++;
@@ -2177,6 +2277,11 @@ int main(void)
             // grid until GO; TT = solo; the flyover has no racers at all
             for (bi = 0; bi < NPC_COUNT; bi++)
             {
+                if (npcDone[bi]) // parked past the line: ahead of anyone
+                {                // still racing, and it moves no more
+                    posAcc++;
+                    continue;
+                }
                 aimTX = pathX[npcWp[bi]];
                 aimTY = pathY[npcWp[bi]];
                 aimPX = npcX[bi];
@@ -2237,6 +2342,18 @@ int main(void)
                 npcDist[bi] = (u16)(wpdx + wpdy);
                 if (npcDist[bi] < 200)
                 {
+                    // waypoint 0 = the line: a lap, like the player's
+                    // (255 -> 0 at the grid). The last one parks the
+                    // rider just over it and books its finish
+                    if (npcWp[bi] == 0 && !attract)
+                    {
+                        npcLap[bi]++;
+                        if (npcLap[bi] >= RACE_LAPS && npcLap[bi] < 250)
+                        {
+                            npcDone[bi] = 1;
+                            riderFinish(npcPalTab[bi]);
+                        }
+                    }
                     npcWp[bi]++;
                     if (npcWp[bi] >= pathCount)
                         npcWp[bi] = 0;
@@ -2305,6 +2422,8 @@ int main(void)
             for (bi = 0; bi < NPC_COUNT; bi++)
                 for (bj = bi + 1; bj <= NPC_COUNT; bj++)
                 {
+                    if (npcDone[bi])
+                        break; // parked riders are never shoved
                     if (bj < NPC_COUNT)
                     {
                         ox = npcX[bj];
@@ -2808,11 +2927,18 @@ int main(void)
         // perfect loop. Written in vblank, both bytes back-to-back (the
         // shared BGOFS prev-latch makes a split pair inherit garbage
         // from the HDMA's $210D stream)
-        if (raceMode == RM_RACE)
+        if (raceMode == RM_RACE && !skyUp)
             REG_BG3HOFS = (u8)(camTheta16 >> 6);
         else
-            REG_BG3HOFS = 0; // the BG3 title must not drift with the camera
+            REG_BG3HOFS = 0; // the BG3 title / results table sit still
         REG_BG3HOFS = 0;
+        if (skyDirty) // the results table rows (composed mid-frame)
+        {
+            skyDirty = 0;
+            for (bi = 0; bi < WAVE_CLOUD_TROWS; bi++)
+                uiSkyRowDma(skyRows[bi], (u16)(WAVE_CLOUD_ROW0 + bi));
+            uiSkyRowDma(skyRows[4], SKY_GO_ROW);
+        }
         uiFlush();
         waveHdma(phase, camBufOff);
 

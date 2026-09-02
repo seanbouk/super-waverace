@@ -4,6 +4,7 @@
 extern char sky_gfx, sky_pal2; // baked mode-1 sky band (wavetables.asm)
 extern char cloud_gfx, cloud_map; // BG3 cloud overlay strip
 extern char hud_gfx, hud_pal;     // gradient HUD font + its CGRAM ramps
+extern char skyf_gfx;             // BG3 2bpp sky text font (results)
 
 #define REG_BG3VOFS (*(vuint8 *)0x2112)
 
@@ -75,6 +76,10 @@ void uiInit(void)
     bgSetMapPtr(2, 0x4400, SC_32x32);
     dmaCopyVram((u8 *)&cloud_gfx, 0x4000 + WAVE_CLOUD_CHAR0 * 8,
                 WAVE_CLOUD_CHARS * 16);
+    // the sky text font: 2bpp ids at the very top of the 10-bit range
+    // (the last free 4bpp window, after the minimap chars)
+    dmaCopyVram((u8 *)&skyf_gfx, 0x4000 + WAVE_SKYF_CHAR0 * 8,
+                WAVE_SKYF_BYTES);
     for (i = 0; i < UI_COLS * UI_ROWS; i++)
         uiMap[i] = 0x1C00 | WAVE_CLOUD_CHAR0; // the set's char 0 = blank
     for (i = 0; i < 16; i++) // clear the whole 32x32 map...
@@ -214,6 +219,43 @@ void uiMenuAppend(u16 *dst, u16 x, char *s)
 void uiMenuRowDma(u16 *src, u16 row)
 {
     dmaCopyVram((u8 *)src, 0x4000 + row * 32, 64);
+}
+
+// ---- sky text (BG3): the results table over the sky gradient ----
+#define SKY_BLANK (0x2000 | 0x1C00 | WAVE_CLOUD_CHAR0)
+static u16 skyGlyph(char c) // palette 7 + priority, like the clouds
+{
+    u16 g;
+    if (c >= 'A' && c <= 'Z')
+        g = (u16)(c - 'A');
+    else if (c >= '0' && c <= '9')
+        g = (u16)(26 + c - '0');
+    else if (c == '-')
+        g = 36;
+    else if (c == '#')
+        g = 37;
+    else
+        return SKY_BLANK;
+    return 0x2000 | 0x1C00 | (u16)(WAVE_SKYF_CHAR0 + g);
+}
+
+void uiSkyAppend(u16 *dst, u16 x, char *s)
+{
+    while (*s)
+        dst[x++] = skyGlyph(*s++);
+}
+
+void uiSkyCompose(u16 *dst, u16 x, char *s)
+{
+    u16 i;
+    for (i = 0; i < UI_COLS; i++)
+        dst[i] = SKY_BLANK;
+    uiSkyAppend(dst, x, s);
+}
+
+void uiSkyRowDma(u16 *src, u16 row)
+{
+    dmaCopyVram((u8 *)src, 0x4400 + row * 32, 64);
 }
 
 void uiMenuRow(u16 row, u16 x, char *s)
