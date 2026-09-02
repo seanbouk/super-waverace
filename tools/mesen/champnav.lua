@@ -7,13 +7,13 @@
 -- the log says DONE.
 local out = os.getenv("OUTDIR") or "./"
 local A = {
-  raceState = 0x7E3D0B, raceMode = 0x7E3D58, champOn = 0x7E3D65,
-  champRace = 0x7E3D66, champStage = 0x7E3D67, champPts = 0x7E3D68,
-  racePts = 0x7E3D6C,
+  raceState = 0x7E3D0B, raceMode = 0x7E3D59, champOn = 0x7E3D66,
+  champRace = 0x7E3D67, champStage = 0x7E3D68, champPts = 0x7E3D69,
+  racePts = 0x7E3D6D,
   -- progress probes (a "PROG" line every 600 frames tells a wedged
   -- chaser from a hung CPU): tick, skiWX/WY, vAlong, lapCount, pProg
   tick = 0x7E3C75, skiWX = 0x7E3CA7, skiWY = 0x7E3CA9, vAlong = 0x7E3C7B,
-  lapCount = 0x7E3CBB, pProg = 0x7E3D1D, apStuck = 0x7E3D8A,
+  lapCount = 0x7E3CBB, pProg = 0x7E3D1D, apStuck = 0x7E3D8B,
 }
 local frames = 0
 local presses = {
@@ -21,9 +21,20 @@ local presses = {
   {520, 528, "start"}, -- confirm CHAMPIONSHIP (cursor rests on it)
   {680, 688, "start"}, -- rider select: confirm rider 1
 }
+if os.getenv("ARCADE") then -- the ARCADE route instead (results page)
+  presses = {
+    {450, 458, "start"}, -- title -> menu
+    {520, 528, "down"},  -- TIME TRIALS
+    {560, 568, "down"},  -- ARCADE
+    {600, 608, "start"}, -- -> rider select
+    {760, 768, "start"}, -- confirm rider 1 -> course select
+    {920, 928, "start"}, -- SUNNY ISLAND -> race (the chaser drives)
+  }
+end
 local prev = ""
 local shots = {}
 local done = false
+local seenFinish = false
 local function rd(a) return emu.read(a, emu.memType.snesMemory) end
 local function onPoll()
   for _, pr in ipairs(presses) do
@@ -45,7 +56,9 @@ local function onFrame()
     local fh = io.open(out .. "log.txt", "a")
     fh:write(string.format("f%06d %s%s\n", frames, st, pts)); fh:close()
     shots[frames + 100] = st:gsub("[^%w]", "_")
-    if prev ~= "" and prev:find("on=1") and st:find("on=0") then
+    if st:find("rs=2") then seenFinish = true end
+    -- DONE = back on the title after at least one finish (both routes)
+    if not done and seenFinish and st:find("mode=1 on=0") then
       done = true
       shots[frames + 400] = "title_again"
       local fh2 = io.open(out .. "log.txt", "a")

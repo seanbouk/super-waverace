@@ -1350,9 +1350,11 @@ def compose_canvas(pat, course):
                     for px in range(8):
                         canvas[y][cx * 8 + px] = SAND
 
+    # buoys are NOT collidable (Sep 2: everyone drives through them - the
+    # gate judging gives a pass through the buoy the benefit of the doubt);
+    # only their footprint is painted. Cell value 3 is unused now.
     for bx, by, _side in buoys:
         cy, cx = (by >> 3) & 127, (bx >> 3) & 127
-        coll[cy * 128 + cx] = 3
         for py in range(8):
             for px in range(8):
                 d2 = (px * 2 - 7) ** 2 + (py * 2 - 7) ** 2

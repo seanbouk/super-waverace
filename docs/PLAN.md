@@ -364,7 +364,12 @@ Phases:
    MAGNUS, CALLISTA, MILO, DAFYDD (palette order). Pause+B abandons the
    championship. Verified hands-free in Mesen GUI mode with a CHAMP_AUTO
    build + tools/mesen/champnav.lua (WRAM state log + screenshots per
-   state change). Balance deliberately untouched (the fade schedule
+   state change). Amendments (Sep 2, user review): the intro is a
+   FLYOVER - no racers drawn, constant half-pace speed, one full lap
+   before the race (START skips); every real race ENDS ITSELF 5s after
+   the player's finish with the field placed where it stands (no START),
+   and ARCADE got the same results page without points; buoys are no
+   longer solid in any mode (pass-through counts as the correct side). Balance deliberately untouched (the fade schedule
    makes single races player-favoured; a 6-race total amplifies that).
 Post-jam: 2P VS. (split screen - see the cost sketch below).
 

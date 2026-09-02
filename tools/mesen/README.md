@@ -31,8 +31,10 @@ fixed frame window (tickrate.lua) are the only trustworthy before/after numbers.
   frames (tick/position/speed/lap/stuck - tells a wedged chaser from a
   hang) to OUTDIR/log.txt, screenshots ~100 frames after each change and
   every 1800 frames, writes DONE when the final standings hand back to
-  the title (~50K frames; set Mesen's EmulationSpeed to 0 = unthrottled
-  for the run). WRAM addresses in its header MOVE between builds.
+  the title (~65K frames; set Mesen's EmulationSpeed to 0 = unthrottled
+  for the run). `ARCADE=1` in the env walks the ARCADE route instead
+  (rider + course select, one chaser-driven race, the results page).
+  WRAM addresses in its header MOVE between builds.
 - `menuinput.lua` — GUI MODE ONLY (no --testrunner): scripted pad input via
   emu.setInput for the course-select menu (Down, then Start) + screenshots.
   Needs Snes.Port1.Type = SnesController in Mesen's settings; kill Mesen when done.

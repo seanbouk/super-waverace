@@ -107,6 +107,11 @@ u8 skiDist8, thrF8, thrR8;
 #define CHAMP_AUTO 0
 
 #define TURN_SPEED 2
+// championship intro flyover: skiVX/VY are SET each tick (no thrust,
+// drag or air), INTRO_PASSES applications of INTRO_THRUST along the
+// heading = 252*127/64*5 ~= 2500 (8.8) - about half racing pace
+#define INTRO_THRUST 252
+#define INTRO_PASSES 5
 #define THRUST 144 // applied at >>6: top speed = THRUST*32 (8.8 world/loop)
 #define GRAV 36       // 8.8 texels/loop^2 — floaty hangtime at race pace
 #define DIP 128       // rest waterline: 0.5 texel below surface
@@ -233,7 +238,8 @@ u16 lapFr;                    // frames this lap
 u8 lastLapSec, lastLapTenth;
 // HUD drawn-state (redraw only on change - uiPrint per tick is real cost):
 // hBan = FINISH! banner over the rank/lap cells
-u8 hudInit, hRank, hLapD, hSpd, hBan, finTk, hMinD, hSecU;
+u8 hudInit, hRank, hLapD, hSpd, hBan, hMinD, hSecU;
+u16 finFr; // frames since the player's finish: the race ends itself at 300
 char pwBuf[8]; // power pips / the TT best-lap cell, built on change
 // start-light tree: 6 sprites after the spray block. Reds count the
 // gun down one at a time, greens light together at GO, then the whole
@@ -762,7 +768,7 @@ static void raceInit(void)
     hMinD = 255;
     hSecU = 255;
     hBan = 0;
-    finTk = 0;
+    finFr = 0;
     ltState = 0;
     ltT = 0;
     ltRed = 0;
@@ -1196,11 +1202,12 @@ static void sbRider(u8 r)
         sbCat("DAFYDD");
 }
 
-// the finish tick: rank all four riders by race progress (the position
-// counter's own comparison - waypoints passed, then nearer to the next
-// one = ahead) and pay out 9/6/3/1. Racers behind the player are ranked
-// where they stand right now; the results screen never waits for them.
-static void champFinish(void)
+// the race's end (5s after the player's finish): rank all four riders
+// by race progress (the position counter's own comparison - waypoints
+// passed, then nearer to the next one = ahead) - racers behind the
+// player are placed where they stand, nobody waits - and, in a
+// championship, pay out 9/6/3/1
+static void raceFinish(void)
 {
     u8 i, j, t;
     u16 tp;
@@ -1232,12 +1239,13 @@ static void champFinish(void)
             else
                 break;
         }
-    for (i = 0; i < 4; i++)
-    {
-        t = i == 0 ? 9 : i == 1 ? 6 : i == 2 ? 3 : 1;
-        racePts[chPl[i]] = t;
-        champPts[chPl[i]] += t;
-    }
+    if (champOn)
+        for (i = 0; i < 4; i++)
+        {
+            t = i == 0 ? 9 : i == 1 ? 6 : i == 2 ? 3 : 1;
+            racePts[chPl[i]] = t;
+            champPts[chPl[i]] += t;
+        }
 }
 
 // the intro card's band text: race number + course name (rows 1-2; the
@@ -1257,34 +1265,41 @@ static void introDraw(void)
     uiPrint((u16)((32 - sbLen) >> 1), 2, menuBuf);
 }
 
-// standings page (full-screen mode 1, the rider-select recipe): the four
-// riders as tall sprites in standings order, the leader raised, and a
-// four-line table under them - place, name, this race's points, total,
-// P1 tag (names run to 8 chars, so per-column text under the sprites
-// collided). Ties break on the latest race, then rider order. TEXT ONLY
-// IN ROWS >= 12. final: the title names the champion.
-static void champPage(u8 final)
+// results / standings page (full-screen mode 1, the rider-select recipe):
+// the four riders as tall sprites in finish or standings order, the
+// leader raised, and a four-line table under them - place, name, and in
+// a championship this race's points + total - plus the P1 tag (names run
+// to 8 chars, so per-column text under the sprites collided). Standings
+// ties break on the latest race, then rider order. TEXT ONLY IN ROWS >=
+// 12. mode: PAGE_ARCADE (finish order, no points), PAGE_CHAMP (running
+// standings), PAGE_FINAL (title names the champion).
+#define PAGE_ARCADE 0
+#define PAGE_CHAMP 1
+#define PAGE_FINAL 2
+static void champPage(u8 mode)
 {
     u8 armed = 0, i, j, t, a, b;
     s16 rx;
     u16 wait = 0;
     champStage = 3; // "standings up" - only the Lua harness reads this
     for (i = 0; i < 4; i++)
-        champOrd[i] = i;
-    for (i = 1; i < 4; i++)
-        for (j = i; j > 0; j--)
-        {
-            a = champOrd[j];
-            b = champOrd[j - 1];
-            if (champPts[a] > champPts[b]
-                || (champPts[a] == champPts[b] && racePts[a] > racePts[b]))
+        champOrd[i] = mode == PAGE_ARCADE ? chPl[i] : i;
+    if (mode != PAGE_ARCADE)
+        for (i = 1; i < 4; i++)
+            for (j = i; j > 0; j--)
             {
-                champOrd[j] = b;
-                champOrd[j - 1] = a;
+                a = champOrd[j];
+                b = champOrd[j - 1];
+                if (champPts[a] > champPts[b]
+                    || (champPts[a] == champPts[b]
+                        && racePts[a] > racePts[b]))
+                {
+                    champOrd[j] = b;
+                    champOrd[j - 1] = a;
+                }
+                else
+                    break;
             }
-            else
-                break;
-        }
     REG_NMITIMEN = 0x81; // NMI + auto-joypad; timer IRQ parked
     REG_HDMAEN = 0;
     setScreenOff();
@@ -1300,11 +1315,13 @@ static void champPage(u8 final)
     uiFlush();
     uiMenuClearRows();
     sbClear();
-    if (final)
+    if (mode == PAGE_FINAL)
     {
         sbRider(champOrd[0]);
         sbCat(" IS CHAMPION");
     }
+    else if (mode == PAGE_ARCADE)
+        sbCat("RACE RESULTS");
     else
     {
         sbCat("RACE ");
@@ -1335,16 +1352,19 @@ static void champPage(u8 final)
         sbClear();
         sbRider(t);
         uiMenuAppend(menuRows[i], 7, menuBuf);
-        sbClear();
-        sbCat("+");
-        sbNum(racePts[t]);
-        uiMenuAppend(menuRows[i], 16, menuBuf);
-        sbClear();
-        if (champPts[t] < 10)
-            sbCat(" "); // right-align the total
-        sbNum(champPts[t]);
-        sbCat(" PTS");
-        uiMenuAppend(menuRows[i], 20, menuBuf);
+        if (mode != PAGE_ARCADE)
+        {
+            sbClear();
+            sbCat("+");
+            sbNum(racePts[t]);
+            uiMenuAppend(menuRows[i], 16, menuBuf);
+            sbClear();
+            if (champPts[t] < 10)
+                sbCat(" "); // right-align the total
+            sbNum(champPts[t]);
+            sbCat(" PTS");
+            uiMenuAppend(menuRows[i], 20, menuBuf);
+        }
         if (t == playerPal)
             uiMenuAppend(menuRows[i], 28, "P1");
     }
@@ -1390,6 +1410,7 @@ int main(void)
     attract = 0;
     ovlPrev = 0;
     champOn = 0;
+    raceState = 0; // BSS: a garbage 2 would show a results page at boot
 
     setMode7(0);
     // EXTBG spike: BG2 duplicates the mode 7 image with pixel bit 7 as a
@@ -1449,6 +1470,15 @@ int main(void)
     raceMode = RM_RACE;
     raceInit();
 #else
+    if (!champOn && !attract && !raceTT && raceState == 2)
+    {
+        // ARCADE results: the race ended itself 5s after the finish
+        // (raceFinish placed the field); the page, then the title
+        mosaicSweep(0, 1);
+        REG_HDMAEN = 0;
+        champPage(PAGE_ARCADE);
+        raceState = 0;
+    }
     if (menuGo && menuSel == 0)
     {
         // CHAMPIONSHIP: rider select, then every course in order (B at
@@ -1498,7 +1528,8 @@ int main(void)
                 {
                     mosaicSweep(0, 1);
                     REG_HDMAEN = 0;
-                    champPage(champRace + 1 >= WAVE_COURSES);
+                    champPage(champRace + 1 >= WAVE_COURSES ? PAGE_FINAL
+                                                            : PAGE_CHAMP);
                     champRace++;
                     if (champRace >= WAVE_COURSES)
                         champOn = 0; // final standings shown -> title
@@ -1506,10 +1537,11 @@ int main(void)
             }
             if (champOn)
             {
-                // intro card: the chaser cruises the racing line (the
-                // attract machinery, clouds kept) under a band overlay -
-                // race number, course name, flashing PRESS START; it
-                // auto-advances after ~8s (menuT counts loop ticks)
+                // intro card: the chaser cruises the racing line at a
+                // constant speed (the attract machinery with no racers
+                // drawn, clouds kept) under a band overlay - race number,
+                // course name, flashing PRESS START; it advances after
+                // one full lap, or on START
                 REG_HDMAEN = 0;
                 courseLoad(champRace);
                 attract = 1;
@@ -1627,9 +1659,11 @@ int main(void)
                     ovlFlash = (u8)(snes_vblank_count >> 5) & 1;
                     uiPrint(10, 3, ovlFlash ? "PRESS START" : "           ");
                 }
-                menuT++;
-                if (menuT > 140 || ((pad0 & (KEY_START | KEY_A))
-                                    && !(ovlPrev & (KEY_START | KEY_A))))
+                // lapCount seeds 255, 0 at the rolling start, 1 after
+                // the lap - the flyover shows the whole course once
+                if ((lapCount >= 1 && lapCount != 255)
+                    || ((pad0 & (KEY_START | KEY_A))
+                        && !(ovlPrev & (KEY_START | KEY_A))))
                     raceDone = 1; // -> the real race (main's flow)
             }
             else if (raceMode == RM_TITLE)
@@ -1711,7 +1745,7 @@ int main(void)
         }
         ovlPrev = pad0;
 
-        if (attract || (CHAMP_AUTO && champOn))
+        if (attract || (CHAMP_AUTO && raceMode == RM_RACE))
         {
 #if WAVE_MAX_PATH > 0
         // waypoint chaser — also the seed of the NPC racer brain.
@@ -1817,20 +1851,14 @@ int main(void)
             if (raceState == 2)
             {
                 pad0 &= ~(KEY_B | KEY_Y);
-                // results: once the FINISH banner has run its ~6s, a
-                // fresh START press hands back to the course select
-                if (!(pad0 & KEY_START))
-                    startHeld = 0;
-                if (finTk >= 120)
+                // 5 seconds of FINISH!, then the race ends by itself:
+                // the field is placed where it stands (raceFinish) and
+                // the results page follows - no START needed
+                finFr += loopFrames;
+                if (finFr >= 300)
                 {
-                    if ((pad0 & KEY_START) && !startHeld)
-                        raceDone = 1;
-                    if (attract || (CHAMP_AUTO && champOn))
-                    {
-                        menuT++;
-                        if (menuT > 90)
-                            raceDone = 1; // demo loop: restart the race
-                    }
+                    raceFinish();
+                    raceDone = 1;
                 }
             }
             else
@@ -1891,6 +1919,17 @@ int main(void)
         // ---- buoyancy / flight ----
         surf88 = ((s16)waveSurfH[phase]) << 8;
         inWater = (skiY <= surf88);
+        if (raceMode == RM_INTRO)
+        {
+            // flyover: a constant speed along the heading, set outright
+            // every tick - no thrust ramp, no drag, no coasting, and no
+            // dependence on being in the water (the ski is not drawn)
+            skiVX = 0;
+            skiVY = 0;
+            thrF8 = INTRO_THRUST;
+            for (bi = 0; bi < INTRO_PASSES; bi++)
+                skiThrustF();
+        }
         if (inWater)
         {
             // splash: hitting the water kills most vertical speed — this is
@@ -1924,17 +1963,20 @@ int main(void)
             }
             // hovercraft scrabble: thrust only bites in the water
             // (>>6 not >>7: doubled thrust and top speed)
-            if ((pad0 & KEY_B) && tick > 20) // grace while the spawn settles
+            if (raceMode != RM_INTRO) // the flyover set its speed above
             {
-                skiThrustF();
+                if ((pad0 & KEY_B) && tick > 20) // grace while the spawn settles
+                {
+                    skiThrustF();
+                }
+                if (pad0 & KEY_Y) // reverse: half thrust, backwards
+                {
+                    skiThrustR();
+                }
+                // water drag
+                skiVX -= skiVX >> 4;
+                skiVY -= skiVY >> 4;
             }
-            if (pad0 & KEY_Y) // reverse: half thrust, backwards
-            {
-                skiThrustR();
-            }
-            // water drag
-            skiVX -= skiVX >> 4;
-            skiVY -= skiVY >> 4;
         }
         else
         {
@@ -2059,8 +2101,6 @@ int main(void)
                 {
                     raceState = 2; // chequered flag
                     finPos = racePos;
-                    if (champOn)
-                        champFinish(); // rank all four, pay the points
                 }
             }
             nextWp++;
@@ -2110,7 +2150,11 @@ int main(void)
             // crossed (or overdue at gRel >= 3): judge the side, L wants
             // cross(dir, player - buoy) positive (bake-verified convention)
             gLat = gateNx[nextGate] * wpdy - gateNy[nextGate] * wpdx;
-            if ((gLat >= 0) == (gateLeft[nextGate] != 0))
+            // benefit of the doubt: buoys are not solid any more, so a
+            // pass THROUGH one (within a collision cell, 32 world units:
+            // |gLat| <= 128 at the normals' 64 scale) counts as correct
+            if ((gLat >= -128 && gLat <= 128)
+                || (gLat >= 0) == (gateLeft[nextGate] != 0))
             {
                 if (power < 5)
                     power++;
@@ -2129,7 +2173,8 @@ int main(void)
         // ---- NPC racers: kinematic waypoint followers (the autopilot's
         // steering brain), collision-probed so they cannot cross land ----
         posAcc = 1;
-        if (raceState && !raceTT) // frozen on the grid until GO; TT = solo
+        if (raceState && !raceTT && raceMode != RM_INTRO) // frozen on the
+            // grid until GO; TT = solo; the flyover has no racers at all
             for (bi = 0; bi < NPC_COUNT; bi++)
             {
                 aimTX = pathX[npcWp[bi]];
@@ -2363,6 +2408,11 @@ int main(void)
         oamSet(4, SKI_X, (u16)(sprTop - 32), 3, skiFlip, 0,
                skiLean ? 4 : 0, playerPal);
         OAM_TALL(4);
+        if (raceMode == RM_INTRO) // flyover: the course alone, no racers
+        {
+            oamSetVisible(0, OBJ_HIDE);
+            oamSetVisible(4, OBJ_HIDE);
+        }
 
         // ---- buoys: project into view space, pick scale, ride the water ----
 #if DEBUG_UI
@@ -2426,7 +2476,8 @@ int main(void)
             }
         }
 
-        if (!raceTT) // time trials: no NPCs at all (hidden at raceInit)
+        if (!raceTT && raceMode != RM_INTRO) // TT / flyover: no NPCs at
+                                             // all (hidden at raceInit)
         {
         // NPC racers ride the exact same pipeline: rear-view ski art,
         // one recolour palette per racer
@@ -2550,7 +2601,8 @@ int main(void)
             // cells may hang off the bottom - the screen edge clips them for
             // free, which is what keeps the short band looking full - but
             // never above the waterline, where they'd show beside the rider
-            if (!sprInt[bi] || sprY > 223 || sprY < (s16)waterRow)
+            if (!sprInt[bi] || sprY > 223 || sprY < (s16)waterRow
+                || raceMode == RM_INTRO) // no ski, no wake
             {
                 oamSetVisible((SPRAY_SPR + (bi << 1)) << 2, OBJ_HIDE);
                 oamSetVisible((SPRAY_SPR + (bi << 1) + 1) << 2, OBJ_HIDE);
@@ -2687,11 +2739,8 @@ int main(void)
             // FINISH! banner over the rank/lap cells (the countdown and
             // GO live on the start-light tree now)
             bq = 0;
-            if (raceState == 2 && finTk < 120)
-            {
-                bq = 5;
-                finTk++; // ~6s of FINISH!, then the rank comes back
-            }
+            if (raceState == 2)
+                bq = 5; // FINISH! for the 5s until the race ends itself
             if (hBan != (u8)bq)
             {
                 hBan = (u8)bq;

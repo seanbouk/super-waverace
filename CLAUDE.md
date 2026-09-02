@@ -460,19 +460,28 @@ move waypoint 0/1 in the painter to move the grid.
   palette-only: playerPal drives the player sprites, npcPalTab the NPCs;
   P2 joins here post-jam) -> course select -> race. CHAMPIONSHIP (phase
   3, Sep 2): rider select -> for every course in folder order: INTRO
-  CARD (courseLoad + raceInit with attract=1 = the chaser cruising the
-  racing line, raceMode RM_INTRO = band overlay "RACE n OF 6" / course
-  name / flashing PRESS START; START or ~8s -> mosaic, uiClear (else
-  the HUD inherits the card's text), raceInit AGAIN with attract=0 - no
-  reload, raceInit owns every race variable) -> race -> results ->
-  champPage (full-screen mode 1: the four riders as tall sprites in
-  standings order, leader raised, a 4-line table place/name/+race pts/
-  total/P1 in map rows 21-24, prompt row 26 - rows >= 28 are BELOW the
-  224 visible lines; the final page's title is "<NAME> IS
-  CHAMPION"). Points 9/6/3/1 by champFinish() on the player's FINISH
-  TICK: all four riders ranked by the position counter's own comparison
-  (waypoints passed, then nearer = ahead) - CPU racers behind are ranked
-  where they stand, nobody waits. Tables index by rider id = palette
+  FLYOVER (courseLoad + raceInit with attract=1 = the chaser steering
+  the racing line, raceMode RM_INTRO = band overlay "RACE n OF 6" /
+  course name / flashing PRESS START. NO RACERS: player sprites, spray
+  and both NPC blocks are RM_INTRO-gated; CONSTANT SPEED: skiVX/VY are
+  SET each tick = INTRO_PASSES x skiThrustF(INTRO_THRUST) along the
+  heading, thrust/drag skipped (~2500 8.8, half pace); it ends after ONE
+  FULL LAP (lapCount 255 -> 0 at the rolling start -> 1) or on START ->
+  mosaic, uiClear (else the HUD inherits the card's text), raceInit
+  AGAIN with attract=0 - no reload, raceInit owns every race variable)
+  -> race -> results -> champPage (full-screen mode 1: the four riders
+  as tall sprites in standings order, leader raised, a 4-line table
+  place/name/+race pts/total/P1 in map rows 21-24, prompt row 26 - rows
+  >= 28 are BELOW the 224 visible lines; the final page's title is "<NAME> IS
+  CHAMPION"). EVERY real race ENDS ITSELF 5s (finFr, 300 real frames)
+  after the player's finish - FINISH! shows throughout, no START:
+  raceFinish() ranks all four riders where they stand at that moment by
+  the position counter's own comparison (waypoints passed, then nearer =
+  ahead; chPl = finish order), pays 9/6/3/1 in a championship, and
+  main()'s outer loop shows the page: ARCADE = champPage(PAGE_ARCADE)
+  (finish order, no points, "RACE RESULTS" - gated on raceState == 2 with
+  !champOn/!attract/!raceTT, so main() seeds raceState = 0 at boot) then
+  the title; championship = PAGE_CHAMP / PAGE_FINAL. Tables index by rider id = palette
   (riders ARE palettes): 0 MAGNUS, 1 CALLISTA, 2 MILO, 3 DAFYDD
   (sbRider). champOn/champRace/champStage drive main()'s outer loop
   (stage 0 intro pending, 1 intro running, 2 race running, 3 = page up,
@@ -487,6 +496,11 @@ move waypoint 0/1 in the painter to move the grid.
   tools/mesen/champnav.lua in GUI mode for the hands-free 6-race sweep.
   Rider-select/menu text may
   ONLY use map rows >= 12: rows 4-11 are the sky band the race shows.
+  BUOYS ARE NOT SOLID (Sep 2, all modes): the bake no longer writes
+  collision value 3 under them (coll sum 3371 -> 3329 per course), and
+  the gate judge gives a pass THROUGH the buoy (|gLat| <= 128 = one
+  32-unit cell at the normals' 64 scale) the benefit of the doubt. The
+  NPC probes' `collVal == 3` pass-through is dead code now, harmless.
   The chaser has stuck-recovery (reverse out after ~2s wedged - it could
   deterministically grind forever on the start-line rope pocket). The
   course select draws the highlighted course's 48x48 minimap (painter
