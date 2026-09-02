@@ -443,8 +443,10 @@ move waypoint 0/1 in the painter to move the grid.
   console-font text in the HUD band; BG3 scroll frozen so the title sits
   still) -> START/A -> main menu (CHAMPIONSHIP / TIME TRIALS / 2P VS.,
   same attract race behind; B back, START/A confirm - that convention
-  everywhere) -> Time Trials = the classic course select -> race; the
-  other two are textScreen() placeholders for now. START in a race =
+  everywhere) -> ARCADE = a single race (the classic course select ->
+  3 laps vs NPCs; later also 2P's door: P2 will join at rider select);
+  CHAMPIONSHIP and TIME TRIALS are textScreen() placeholders until
+  their phases. START in a race =
   PAUSE (attract races skip the countdown AND the finish - raceState
   forced to 1, ltState 3, the lap-3 check gated on !attract - and
   overtaken NPCs respawn 4 waypoints ahead with progress pinned above the

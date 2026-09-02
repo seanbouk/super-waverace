@@ -252,7 +252,8 @@ u8 menuT;               // menu/results timers (autopilot auto-advance)
 #define RM_MENU 2  // main menu overlay (attract)
 u8 raceMode;
 u8 attract;  // the waypoint chaser drives (runtime; AUTOPILOT builds force it)
-u8 menuSel;  // 0 championship / 1 time trials / 2 2P vs.
+u8 menuSel;  // 0 championship / 1 time trials / 2 arcade (single races;
+             // later also the door to 2P: P2 presses START on rider select)
 u8 menuGo;   // menu confirmed: leave the attract race and dispatch
 u8 ovlInit, ovlFlash;
 u8 apFine;   // chaser: this correction is small - steer at quarter rate
@@ -1035,7 +1036,7 @@ static void ovlMenuDraw(void)
 {
     uiPrint(9, 1, menuSel == 0 ? ">CHAMPIONSHIP" : " CHAMPIONSHIP");
     uiPrint(9, 2, menuSel == 1 ? ">TIME TRIALS" : " TIME TRIALS");
-    uiPrint(9, 3, menuSel == 2 ? ">2P VS." : " 2P VS.");
+    uiPrint(9, 3, menuSel == 2 ? ">ARCADE" : " ARCADE");
 }
 
 //---------------------------------------------------------------------------------
@@ -1105,10 +1106,11 @@ int main(void)
     raceMode = RM_RACE;
     raceInit();
 #else
-    if (menuGo && menuSel == 1)
+    if (menuGo && menuSel == 2)
     {
-        // TIME TRIALS (phase 2 adds rider/track select + the TT HUD; for
-        // now it is the classic course select + a normal race)
+        // ARCADE: a single race - course select, 3 laps vs the NPCs (phase
+        // 2 adds rider select here, which is also where a second player
+        // will eventually join for 2P)
         menuGo = 0;
         mosaicSweep(0, 1);
         REG_HDMAEN = 0; // BEFORE any loader: waveRawLoad borrows the PPU
@@ -1122,13 +1124,13 @@ int main(void)
     }
     else
     {
-        if (menuGo) // championship (its phase pending) / 2P vs. (post-jam)
+        if (menuGo) // championship / time trials: phases pending
         {
             menuGo = 0;
             mosaicSweep(0, 1);
             REG_HDMAEN = 0;
             titleBg3(0);
-            textScreen(menuSel == 0 ? "CHAMPIONSHIP" : "2P VS.");
+            textScreen(menuSel == 0 ? "CHAMPIONSHIP" : "TIME TRIALS");
             raceMode = RM_MENU; // come back with the menu open
         }
         // the attract loop: SUNNY ISLAND forever, chaser driving, the

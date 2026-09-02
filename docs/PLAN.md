@@ -316,11 +316,18 @@ title strip is 2bpp = 3 colours + transparent for the eventual graphic.
 
 Phases:
 1. DONE (Sep 1) - runtime attract flag (AUTOPILOT builds unchanged),
-   TITLE/MENU overlays over the attract race (BG3 title strip + band
-   text), textScreen placeholders (CHAMPIONSHIP for now, 2P VS. until
-   post-jam), PAUSE (freeze loop, waveHdma re-kick per frame, resume
-   or quit-to-title), mosaicSweep transitions. Verified in Mesen GUI
-   mode with scripted input across the whole loop.
+   TITLE/MENU overlays over the attract race (band text + the two-word
+   sprite logo with slide-in), textScreen placeholders, PAUSE (freeze
+   loop, waveHdma re-kick per frame, resume or quit-to-title),
+   mosaicSweep transitions. Verified in Mesen GUI mode with scripted
+   input across the whole loop.
+1.5. DONE (Sep 2) - the third menu entry is ARCADE, not 2P VS.: a single
+   race (course select, 3 laps vs the NPCs - the classic flow), so
+   plain racing stays available while phases 2-3 are built. 2P VS. is
+   not a menu entry any more: when split screen lands post-jam, a
+   second player will JOIN from Arcade's rider select ("P2 press
+   start"), which phase 2 builds. TIME TRIALS is a placeholder page
+   until phase 2.
 2. Time trial - rider select (tall sprites, 4 palettes), track select
    with minimaps, TT race variant (no NPCs, BEST lap cell, endless),
    results/exit flow.
