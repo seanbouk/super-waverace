@@ -241,6 +241,7 @@ char pwBuf[6]; // power pip string, built on change
 #define TITLE_WR_X 64   // WAVERACER's resting left edge ((256 - 127) / 2)
 #define TITLE_SUP_X (TITLE_WR_X - 18) // Super rests 18px left of it
 s16 ttlWx, ttlSx; // the words' sliding left edges (title animation)
+u8 ttlWait;       // loops before the slide starts (~3s of empty sky)
 u8 raceDone, startHeld; // exit-to-menu flow (START on the results)
 u8 menuT;               // menu/results timers (autopilot auto-advance)
 // ---- game flow: the title screen IS the attract mode (a chaser-driven
@@ -457,6 +458,10 @@ static void drawLadder(u16 oid, u8 right)
 // 3 bit 0 of the entry; oamSet takes the low 8 bits, so the table bit is
 // OR'd in after every tall oamSet (idempotent if the lib ever sets it)
 #define OAM_TALL(oid) (oamMemory[(oid) + 3] |= 1)
+// the X sign bit lives in the OAM high table (2 bits per sprite: x8 +
+// size); oamSetEx(OBJ_SHOW) CLEARS it, so a negative x must set it back
+// AFTER - or the sprite wraps to the right edge (x = -24 shows at 232)
+#define OAM_X8(oid)     (oamMemory[512 + ((oid) >> 4)] |= (u8)(1 << ((((oid) >> 2) & 3) << 1)))
 
 static void drawSki(u16 oid, u16 tid, u8 pal)
 {
@@ -1006,7 +1011,9 @@ static void titleBlock(u16 oid, s16 x, u16 y, u16 gfx, u16 pal, u8 tall)
     oamSet(oid, (u16)x, y, 3, 0, 0, gfx, pal);
     if (tall)
         OAM_TALL(oid);
-    oamSetEx(oid, OBJ_LARGE, OBJ_SHOW);
+    oamSetEx(oid, OBJ_LARGE, OBJ_SHOW); // clears x8...
+    if (x < 0)
+        OAM_X8(oid); // ...so restore it or the block wraps to the right
 }
 
 // Super (3 blocks, palette 7) draws OVER Waveracer (4 blocks, palette 6):
@@ -1144,6 +1151,7 @@ int main(void)
         // eases both toward their marks and draws them (titleDraw)
         ttlWx = 400;  // virtual left edges, offscreen both sides
         ttlSx = -120;
+        ttlWait = 55; // ~3s of open sea before the words come on
         titleDraw();
     }
 #endif
@@ -1168,15 +1176,18 @@ int main(void)
                 if (raceMode == RM_MENU)
                     ovlMenuDraw();
             }
-            // title slide-in, eased (fast entry, soft landing)
-            if (ttlWx > TITLE_WR_X)
+            // title slide-in, eased (fast entry, soft landing), after a
+            // ~3s hold on the empty sky
+            if (ttlWait)
+                ttlWait--;
+            else if (ttlWx > TITLE_WR_X)
             {
                 ttlWx -= ((ttlWx - TITLE_WR_X) >> 3) + 2;
                 if (ttlWx < TITLE_WR_X)
                     ttlWx = TITLE_WR_X;
                 titleDraw();
             }
-            if (ttlSx < TITLE_SUP_X)
+            if (!ttlWait && ttlSx < TITLE_SUP_X)
             {
                 ttlSx += ((TITLE_SUP_X - ttlSx) >> 3) + 2;
                 if (ttlSx > TITLE_SUP_X)
