@@ -328,9 +328,19 @@ Phases:
    second player will JOIN from Arcade's rider select ("P2 press
    start"), which phase 2 builds. TIME TRIALS is a placeholder page
    until phase 2.
-2. Time trial - rider select (tall sprites, 4 palettes), track select
-   with minimaps, TT race variant (no NPCs, BEST lap cell, endless),
-   results/exit flow.
+2. Time trial - IN PROGRESS. Done (Sep 2, part a): rider select (the
+   four riders as tall sprites, palette-only; picked palette drives the
+   player, the other three drive the NPCs; feeds ARCADE too, and is
+   where P2 will join post-jam; TEXT ONLY IN MAP ROWS >= 12 - the sky
+   band rows 4-11 are shown by the race and a title written there burns
+   into every following race), the TT race variant (solo - the NPC
+   update AND projection blocks are !raceTT-gated; endless laps; TOP
+   best-lap HUD cell - "BEST" needs a B glyph and the HUD font's VRAM
+   window is exactly full; lap counter to 99), and chaser stuck-recovery
+   (barely moving ~2s while racing -> reverse out ~3s: the chaser could
+   deterministically wedge on the start-line rope pocket and grind
+   forever - traces pinned at x=1407; real pads never trigger it).
+   Remaining (part b): track select minimaps from the zone grid.
 3. Championship - course sequence, intro card (name + racing-line
    cruise), points + standings screens.
 Post-jam: 2P VS. (split screen - see the cost sketch below).

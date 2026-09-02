@@ -229,7 +229,7 @@ u8 lastLapSec, lastLapTenth;
 // HUD drawn-state (redraw only on change - uiPrint per tick is real cost):
 // hBan = FINISH! banner over the rank/lap cells
 u8 hudInit, hRank, hLapD, hSpd, hBan, finTk, hMinD, hSecU;
-char pwBuf[6]; // power pip string, built on change
+char pwBuf[8]; // power pips / the TT best-lap cell, built on change
 // start-light tree: 6 sprites after the spray block. Reds count the
 // gun down one at a time, greens light together at GO, then the whole
 // tree floats up and hides row by row as it reaches the HUD band.
@@ -255,8 +255,13 @@ u8 attract;  // the waypoint chaser drives (runtime; AUTOPILOT builds force it)
 u8 menuSel;  // 0 championship / 1 time trials / 2 arcade (single races;
              // later also the door to 2P: P2 presses START on rider select)
 u8 menuGo;   // menu confirmed: leave the attract race and dispatch
+u8 raceTT;   // time trial: solo, endless laps, BEST-lap HUD cell
+u8 playerPal;      // the picked rider = OBJ palette 0-3 (palette-only)
+u8 npcPalTab[3];   // the other three riders, in palette order
+u8 bestSec, bestTenth; // TT best lap (255 = none yet this race)
 u8 ovlInit, ovlFlash;
 u8 apFine;   // chaser: this correction is small - steer at quarter rate
+u8 apStuck;  // chaser: loops spent barely moving (wedged on a rope/shore)
 u16 ovlPrev; // last RAW pad, for overlay + pause edge detection
 u8 ltState, ltT, ltRed; // 0 showing, 2 rising, 3 done
 s16 ltY;
@@ -669,10 +674,10 @@ static void raceInit(void)
     REG_NMITIMEN = 0xB1; // NMI + V=V,H=H timer IRQ + auto-joypad (the
                          // course select parks the timer IRQ)
     REG_MOSAIC = 0;      // a transition may have left the sweep at 15
-    oamSet(0, SKI_X, 140, 3, 0, 0, 64, 0);
+    oamSet(0, SKI_X, 140, 3, 0, 0, 64, playerPal);
     oamSetEx(0, OBJ_LARGE, OBJ_SHOW);
     OAM_TALL(0);
-    oamSet(4, SKI_X, 108, 3, 0, 0, 0, 0); // player top: id 1, right
+    oamSet(4, SKI_X, 108, 3, 0, 0, 0, playerPal); // player top: id 1, right
     oamSetEx(4, OBJ_LARGE, OBJ_SHOW);     // behind the bottom half
     OAM_TALL(4);
     for (bi = 2; bi < TITLE_SPR + 8; bi++)
@@ -711,6 +716,7 @@ static void raceInit(void)
     camPX = (u16)(startX - ((WAVE_SKI_DIST * npcSin) >> 7)) & 4095;
     camPY = (u16)(startY - ((WAVE_SKI_DIST * npcCos) >> 7)) & 4095;
     apFine = 0;  // BSS
+    apStuck = 0;
     skiLean = 0; // BSS is not zero-initialised: garbage here reached
     skiFlip = 0; // oamSet as flip bits until the first steer input
     skiDist8 = WAVE_SKI_DIST; // 200 - must stay < 256 for the multiplier
@@ -724,6 +730,12 @@ static void raceInit(void)
     nextGate = 0;
     gateNeg = 0;
     pwDrawn = 255; // force the bar's first draw
+    bestSec = 255; // TT: no best lap yet
+    bestTenth = 0;
+    nt = 0; // the three riders the player did NOT pick drive the NPCs
+    for (bi = 0; bi < 4; bi++)
+        if (bi != playerPal && nt < NPC_COUNT)
+            npcPalTab[nt++] = bi;
     hudInit = 0;   // ditto the HUD furniture + every value cell
     hRank = 255;
     hLapD = 255;
@@ -1032,6 +1044,87 @@ static void titleDraw(void)
     titleBlock((TITLE_SPR + 6) << 2, (s16)(ttlWx + 96), TITLE_Y, 132, 6, 0);
 }
 
+// rider select (ARCADE and TIME TRIALS): the four riders as tall stacked
+// table-2 sprites on OBJ palettes 0-3 - riders are palette-only BY
+// DESIGN. Left/right picks (the choice rises, P1 tags it), START/A
+// confirms (returns 1), B backs out (returns 0). This screen is also
+// where player 2 will join post-jam ("P2 press start" -> 2P VS.).
+static u8 riderSelect(void)
+{
+    u8 armed = 0, sel, i, dirty;
+    s16 rx;
+    REG_NMITIMEN = 0x81; // NMI + auto-joypad; timer IRQ parked
+    REG_HDMAEN = 0;
+    setScreenOff();
+    for (bi = 0; bi < TITLE_SPR + 8; bi++)
+        oamSetVisible(bi << 2, OBJ_HIDE);
+    REG_BG1HOFS = 0; // write-twice pairs (shared prev-latch)
+    REG_BG1HOFS = 0;
+    REG_BG1VOFS = 0;
+    REG_BG1VOFS = 0;
+    REG_COLDATA = 0xE0;
+    REG_TM = 0x15;
+    REG_MOSAIC = 0;
+    uiClear();
+    uiFlush();
+    uiMenuClearRows();
+    // TEXT ONLY IN ROWS >= 12: rows 4-11 are the sky band the RACE shows
+    // (a row-8 title once burned itself into every following race's sky).
+    // The riders sit above the text; sprites would win priority anyway.
+    uiMenuRow(23, 9, "CHOOSE A RIDER");
+    uiMenuRow(25, 10, "PRESS START");
+    sel = playerPal;
+    dirty = 1;
+    menuPrev = 0xFFFF; // held keys must release before they count
+    setScreenOn();
+    while (1)
+    {
+        if (dirty) // compose mid-frame, DMA after the wait (the vblank
+            uiMenuCompose(menuRows[0], (u16)(4 + 7 * sel), "P1");
+        // the riders: two stacked 32x32 sprites each, the pick raised.
+        // OAM writes are RAM-side; the ISR DMAs them in the vblank
+        for (i = 0; i < 4; i++)
+        {
+            rx = 24 + 56 * i;
+            oy = i == sel ? 128 : 136; // bottom sprite; the pick rides high
+            oamSet((u16)((2 + 2 * i) << 2), (u16)rx, oy, 3, 0, 0, 64, i);
+            OAM_TALL((2 + 2 * i) << 2);
+            oamSetEx((u16)((2 + 2 * i) << 2), OBJ_LARGE, OBJ_SHOW);
+            oamSet((u16)((3 + 2 * i) << 2), (u16)rx, (u16)(oy - 32), 3,
+                   0, 0, 0, i);
+            OAM_TALL((3 + 2 * i) << 2);
+            oamSetEx((u16)((3 + 2 * i) << 2), OBJ_LARGE, OBJ_SHOW);
+        }
+        WaitForVBlank();
+        if (dirty)
+        {
+            dirty = 0;
+            uiMenuRowDma(menuRows[0], 21); // P1 tag, under the riders
+        }
+        pad0 = padsCurrent(0);
+        if (!(pad0 & (KEY_START | KEY_A | KEY_B)))
+            armed = 1;
+        if ((pad0 & KEY_LEFT) && !(menuPrev & KEY_LEFT) && sel)
+        {
+            sel--;
+            dirty = 1;
+        }
+        if ((pad0 & KEY_RIGHT) && !(menuPrev & KEY_RIGHT) && sel < 3)
+        {
+            sel++;
+            dirty = 1;
+        }
+        menuPrev = pad0;
+        if (armed && (pad0 & (KEY_START | KEY_A)))
+        {
+            playerPal = sel;
+            return 1;
+        }
+        if (armed && (pad0 & KEY_B))
+            return 0;
+    }
+}
+
 static void ovlMenuDraw(void)
 {
     uiPrint(9, 1, menuSel == 0 ? ">CHAMPIONSHIP" : " CHAMPIONSHIP");
@@ -1045,6 +1138,8 @@ int main(void)
     camTabsInitHeaders();
     courseSel = 0; // BSS; the menu cursor survives between races after this
     menuSel = 0;   // ditto every game-flow variable
+    raceTT = 0;
+    playerPal = 0;
     menuGo = 0;
     raceMode = RM_RACE;
     attract = 0;
@@ -1103,19 +1198,28 @@ int main(void)
     courseSelect();
     courseLoad(courseSel);
     attract = 1;
+    raceTT = 0;
+    playerPal = 0;
     raceMode = RM_RACE;
     raceInit();
 #else
-    if (menuGo && menuSel == 2)
+    if (menuGo && menuSel != 0)
     {
-        // ARCADE: a single race - course select, 3 laps vs the NPCs (phase
-        // 2 adds rider select here, which is also where a second player
-        // will eventually join for 2P)
+        // ARCADE (a single race vs the NPCs) and TIME TRIALS (solo,
+        // endless, best-lap) share the flow: rider select, course select,
+        // race. B at rider select backs out to the menu (the continue
+        // falls into the attract branch below).
         menuGo = 0;
         mosaicSweep(0, 1);
         REG_HDMAEN = 0; // BEFORE any loader: waveRawLoad borrows the PPU
                         // multiplier and ch0 keeps repainting CGRAM
         titleBg3(0);
+        raceTT = menuSel == 1;
+        if (!riderSelect())
+        {
+            raceMode = RM_MENU;
+            continue;
+        }
         attract = 0;
         raceMode = RM_RACE;
         courseSelect();
@@ -1124,19 +1228,21 @@ int main(void)
     }
     else
     {
-        if (menuGo) // championship / time trials: phases pending
+        if (menuGo) // championship: its phase is pending
         {
             menuGo = 0;
             mosaicSweep(0, 1);
             REG_HDMAEN = 0;
             titleBg3(0);
-            textScreen(menuSel == 0 ? "CHAMPIONSHIP" : "TIME TRIALS");
+            textScreen("CHAMPIONSHIP");
             raceMode = RM_MENU; // come back with the menu open
         }
         // the attract loop: SUNNY ISLAND forever, chaser driving, the
         // title or menu overlay in the band. Each finished race lands
         // back here (results auto-advance) and starts the next.
         attract = 1;
+        raceTT = 0;
+        playerPal = 0; // the demo rides rider 1
         if (raceMode == RM_RACE)
             raceMode = RM_TITLE; // first boot / back from a race
         REG_HDMAEN = 0; // a quit race's channels may still be streaming
@@ -1321,6 +1427,24 @@ int main(void)
         apu = apc < 0 ? -apc : apc;
         if ((apd > 0 && apu < apd) || (vAlong < 600 && vAlong > -600))
             pad0 |= KEY_B;
+        // wedged on a rope/shore (deterministically reachable: the traces
+        // ground at x=1407 forever): barely moving for ~2s while racing ->
+        // let go of the throttle and REVERSE out for ~3s, still steering,
+        // then drive on. A real pad never sets this.
+        if (raceState == 1 && vAlong < 300 && vAlong > -300)
+        {
+            if (apStuck < 90)
+                apStuck++;
+        }
+        else if (apStuck < 40)
+            apStuck = 0;
+        if (apStuck >= 40)
+        {
+            pad0 &= (u16)~KEY_B;
+            pad0 |= KEY_Y;
+            if (apStuck >= 90)
+                apStuck = 0;
+        }
 #else
             pad0 |= KEY_B;
 #endif
@@ -1576,7 +1700,17 @@ int main(void)
                 lastLapSec = (u8)(lapFr / 60); // division: once per lap
                 lastLapTenth = (u8)((lapFr % 60) / 6);
                 lapFr = 0;
-                if (!attract && raceState == 1 && lapCount >= RACE_LAPS)
+                if (raceTT && lapCount >= 1
+                    && (lastLapSec < bestSec
+                        || (lastLapSec == bestSec
+                            && lastLapTenth < bestTenth)))
+                {
+                    bestSec = lastLapSec;
+                    bestTenth = lastLapTenth;
+                    hRank = (u8)(bestSec + 1); // force the BEST cell redraw
+                }
+                if (!attract && !raceTT
+                    && raceState == 1 && lapCount >= RACE_LAPS)
                 {
                     raceState = 2; // chequered flag
                     finPos = racePos;
@@ -1648,7 +1782,7 @@ int main(void)
         // ---- NPC racers: kinematic waypoint followers (the autopilot's
         // steering brain), collision-probed so they cannot cross land ----
         posAcc = 1;
-        if (raceState) // frozen on the grid until GO
+        if (raceState && !raceTT) // frozen on the grid until GO; TT = solo
             for (bi = 0; bi < NPC_COUNT; bi++)
             {
                 aimTX = pathX[npcWp[bi]];
@@ -1876,10 +2010,11 @@ int main(void)
         // fires on that vblank, and waveHdma restores ch7 right after.
         // Two stacked sprites: the bottom keeps the old geometry (all the
         // waterline maths anchor to it), the rider's top half sits above
-        oamSet(0, SKI_X, (u16)sprTop, 3, skiFlip, 0, skiLean ? 68 : 64, 0);
+        oamSet(0, SKI_X, (u16)sprTop, 3, skiFlip, 0, skiLean ? 68 : 64,
+               playerPal);
         OAM_TALL(0);
         oamSet(4, SKI_X, (u16)(sprTop - 32), 3, skiFlip, 0,
-               skiLean ? 4 : 0, 0);
+               skiLean ? 4 : 0, playerPal);
         OAM_TALL(4);
 
         // ---- buoys: project into view space, pick scale, ride the water ----
@@ -1944,6 +2079,8 @@ int main(void)
             }
         }
 
+        if (!raceTT) // time trials: no NPCs at all (hidden at raceInit)
+        {
         // NPC racers ride the exact same pipeline: rear-view ski art,
         // one recolour palette per racer
         // project all three first, then hand out the OAM pairs NEAREST
@@ -1987,7 +2124,8 @@ int main(void)
                 pjCol = npjC[bi];
                 rdRow = npjR[bi];
                 drawSki((NPC_SPR + (ns << 1)) << 2,
-                        (NPC_SPR + (ns << 1) + 1) << 2, (u8)(1 + bi));
+                        (NPC_SPR + (ns << 1) + 1) << 2,
+                        (u8)(1 + npcPalTab[bi]));
             }
             else
             {
@@ -1995,6 +2133,7 @@ int main(void)
                 oamSetVisible((NPC_SPR + (ns << 1) + 1) << 2, OBJ_HIDE);
             }
         }
+        } // !raceTT
 #endif
 #if DEBUG_UI
         pjPfLines = (snes_vblank_count - pjPfV) * 262 + scanline() - pjPfA;
@@ -2146,13 +2285,16 @@ int main(void)
             {
                 hudInit = 1;
                 uiHudSmall(1, 1, HUD_PAL_TITLE, "TIME");
-                uiHudSmall(9, 1, HUD_PAL_TITLE, "RANK");
+                // TOP (not BEST: no B glyph - the HUD font's VRAM
+                // window is exactly full) = the best lap, where RANK sat
+                uiHudSmall(9, 1, HUD_PAL_TITLE, raceTT ? "TOP" : "RANK");
                 uiHudSmall(14, 1, HUD_PAL_TITLE, "LAP");
                 uiHudSmall(18, 1, HUD_PAL_TITLE, "SPEED");
                 uiHudSmall(25, 1, HUD_PAL_TITLE, "POWER");
                 uiHudSmall(20, 3, HUD_PAL_BOT, "KM/H");
                 uiHudBig(1, "0'00\"00");
-                uiHudBig(15, "/3");
+                if (!raceTT)
+                    uiHudBig(15, "/3");
             }
             // race clock M'SS"hh: minutes/seconds on change, hundredths
             // (frames-in-second * 5 / 3) every tick; frozen off-race
@@ -2174,6 +2316,36 @@ int main(void)
                 uiHudBigDigit(6, dly);
                 uiHudBigDigit(7, bq - dly * 10);
             }
+            if (raceTT)
+            {
+                // TOP cell: SS"T (laps are well under 100s; capped),
+                // redrawn when a better lap lands (hRank is its cache)
+                if (bestSec != 255 && hRank != bestSec)
+                {
+                    hRank = bestSec;
+                    bq = bestSec > 99 ? 99 : bestSec;
+                    pwBuf[0] = (char)('0' + bq / 10);
+                    pwBuf[1] = (char)('0' + bq % 10);
+                    pwBuf[2] = '"';
+                    pwBuf[3] = (char)('0' + bestTenth);
+                    pwBuf[4] = 0;
+                    uiHudBig(9, pwBuf);
+                }
+                dly = lapCount == 255 ? 1 : (u16)lapCount + 1;
+                if (dly > 99)
+                    dly = 99;
+                if (hLapD != (u8)dly)
+                {
+                    hLapD = (u8)dly;
+                    if (dly > 9)
+                        uiHudBigDigit(14, dly / 10);
+                    else
+                        uiHudBigClear(14, 1);
+                    uiHudBigDigit(15, dly % 10);
+                }
+            }
+            else
+            {
             // FINISH! banner over the rank/lap cells (the countdown and
             // GO live on the start-light tree now)
             bq = 0;
@@ -2213,6 +2385,7 @@ int main(void)
                     uiHudBigDigit(14, dly);
                 }
             }
+            } // !raceTT
             // speed: vAlong>>6 reads ~48 km/h at power-0 top, 96 at full
             bq = vAlong > 0 ? (u16)vAlong >> 6 : 0;
             if (hSpd != (u8)bq)

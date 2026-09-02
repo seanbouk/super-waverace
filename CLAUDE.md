@@ -443,10 +443,15 @@ move waypoint 0/1 in the painter to move the grid.
   console-font text in the HUD band; BG3 scroll frozen so the title sits
   still) -> START/A -> main menu (CHAMPIONSHIP / TIME TRIALS / 2P VS.,
   same attract race behind; B back, START/A confirm - that convention
-  everywhere) -> ARCADE = a single race (the classic course select ->
-  3 laps vs NPCs; later also 2P's door: P2 will join at rider select);
-  CHAMPIONSHIP and TIME TRIALS are textScreen() placeholders until
-  their phases. START in a race =
+  everywhere) -> ARCADE (single race vs NPCs) and TIME TRIALS (solo,
+  endless, TOP = best lap in the RANK cell; raceTT gates the NPC blocks,
+  the finish, and the HUD variant) both run rider select (4 riders,
+  palette-only: playerPal drives the player sprites, npcPalTab the NPCs;
+  P2 joins here post-jam) -> course select -> race. CHAMPIONSHIP is a
+  textScreen() placeholder until its phase. Rider-select/menu text may
+  ONLY use map rows >= 12: rows 4-11 are the sky band the race shows.
+  The chaser has stuck-recovery (reverse out after ~2s wedged - it could
+  deterministically grind forever on the start-line rope pocket). START in a race =
   PAUSE (attract races skip the countdown AND the finish - raceState
   forced to 1, ltState 3, the lap-3 check gated on !attract - and
   overtaken NPCs respawn 4 waypoints ahead with progress pinned above the
