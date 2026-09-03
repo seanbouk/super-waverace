@@ -40,6 +40,18 @@ fixed frame window (tickrate.lua) are the only trustworthy before/after numbers.
   tick/phase/phaseAcc/skiY/skiVv/vAlong/waterRow/camPY per frame to
   OUTDIR/rev.txt (+ a screenshot every 10 frames). Found the unsigned
   phase-step bug; keep it for any "the sea judders" report.
+- `p2nav.lua` — GUI-mode walk of the 2P flow with a `CHAMP_AUTO 1` +
+  `SPLIT_AUTO 1` build: ARCADE, SELECT on pad 1 joins P2 (the harness
+  stand-in for pad 2's START - Mesen's Lua setInput drives pad 1 whatever
+  port it is given), confirm, course, the split race (chaser drives P1, P2
+  mirrors), both finishes, the 2P results page, title. Logs flow state,
+  screenshots per change.
+- `shots.lua` — screenshots at fixed frames (env FRAMES="600,1200,..."),
+  for testrunner AUTOPILOT builds.
+- `countcalls.lua` — exec-callback counter: how often given ROM routines
+  run per loop tick over FRAMES frames (env FUNCS="name=hexaddr,..." from
+  the .sym, TICKADDR). Tick counts say a loop got slower; this says where
+  (or, as on Sep 3, that the hot routines did NOT run more).
 - `menuinput.lua` — GUI MODE ONLY (no --testrunner): scripted pad input via
   emu.setInput for the course-select menu (Down, then Start) + screenshots.
   Needs Snes.Port1.Type = SnesController in Mesen's settings; kill Mesen when done.

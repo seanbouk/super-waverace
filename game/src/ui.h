@@ -28,6 +28,10 @@ void uiInit(void);
 // height with the palette row of your choice; Digit avoids the glyph
 // lookup for per-tick counters. ' ' clears the cell(s).
 void uiHudSmall(u16 x, u16 y, u16 pal, char *s);
+// the same glyphs into a caller's 32-entry map row (the 2P HUD strip rows
+// live outside the band buffer); uiHudRowClear blanks such a row
+void uiHudSmallTo(u16 *dst, u16 x, u16 pal, char *s);
+void uiHudRowClear(u16 *dst);
 void uiHudBig(u16 x, char *s);
 void uiHudBigDigit(u16 x, u16 d);
 void uiHudBigClear(u16 x, u16 w);

@@ -75,6 +75,28 @@ u8 irqLine[4], irqAct[4];
 // block's line count, the depth table's last row (+ its byte offset), the
 // visible depth range, the per-phase raw stride, the ski's px-per-texel
 u16 camBlk2Ct, rdLast, rdLastOfs, pjNear, pjSpan, wvStride, skiPpt;
+// ---- two players (2P split, ARCADE only): the ACTIVE player's state is
+// the globals the whole race loop already uses; the other player's waits
+// in sv_* and ctxSwap() exchanges the two (~60 scalars, ~4 swaps a tick).
+// ctxCur = the player currently in the globals; ctxSet(p) swaps as needed.
+u8 split;  // this race is the 2P split screen
+u8 nPl;    // players in the race (1 or 2)
+u8 pl;     // the player / viewport being processed
+u8 npcN;   // CPU racers this race (3, or 2 in 2P: P2 takes slot 3)
+u8 ctxCur, p2Join, p2Pal;
+u8 pFin, myPal, finMin, finSecT, finSecU; // per player: finished, rider,
+                                          // finish time (the clock runs on)
+u8 h2S, h2P, h2L, h2W; // per player: the 2P HUD row's cached values
+u16 initX, initY;      // raceInit's grid slot for the player it sets up
+u16 pad1, vTop;        // pad 2; the active viewport's first line
+u8 sprSki, sprBuoy, sprRacer, ltSpr, nRc, hud2Dirty;
+u16 winTopA, winBotA, winTopB, winBotB;
+u16 refProg, refDist; // the CPU racers' schedule reference (the leading
+u8 refLap, refWp;     // human's progress / distance / lap / waypoint)
+static u16 hud2Row[2][UI_COLS];
+u16 sv_camPX, sv_camPY, sv_camTheta16, sv_skiWX, sv_skiWY, sv_phaseAcc, sv_phase, sv_camPhaseOff, sv_pProg, sv_pDist, sv_lapTicks, sv_lastLap, sv_lapFr, sv_lapBase;
+u8 sv_camTheta, sv_camSinMag, sv_camCosMag, sv_camSinNeg, sv_camCosNeg, sv_skiFlip, sv_skiLean, sv_inWater, sv_wasInWater, sv_waterRow, sv_nextWp, sv_lapCount, sv_lastLapSec, sv_lastLapTenth, sv_lineArm, sv_racePos, sv_finPos, sv_posAcc, sv_goTimer, sv_power, sv_nextGate, sv_gateNeg, sv_thrF8, sv_thrR8, sv_apFine, sv_apStuck, sv_pFin, sv_myPal, sv_finMin, sv_finSecT, sv_finSecU, sv_h2S, sv_h2P, sv_h2L, sv_h2W;
+s16 sv_camSinVal, sv_camCosVal, sv_prevSin, sv_prevCos, sv_skiVX, sv_skiVY, sv_skiY, sv_skiVv, sv_fracX, sv_fracY, sv_vAlong, sv_vSide, sv_surf88, sv_diff88, sv_sprTop;
 // the 2P TM table, composed per tick from both halves' horizons (backdrop
 // above each horizon, sea below, BG1 for the HUD strip): the two halves
 // run different phases, so no baked per-phase table can serve them
@@ -119,12 +141,9 @@ u8 skiDist8, thrF8, thrR8;
 // advances, so the whole 6-race loop cycles hands-free under a Lua
 // screenshot sweep in Mesen GUI mode. ALWAYS 0 for release builds.
 #define CHAMP_AUTO 0
-// SPLIT-SCREEN SPIKE (Sep 3): render the SAME race state into two half-
-// height viewports (the 2P layout: viewport A lines 0-103, the HUD strip
-// 104-119, viewport B from 120) with the 2P camera tables, a second
-// projection pass, no spray / HUD / start tree / clouds - to MEASURE the
-// loop cost of two views before the second player exists. 0 = the game.
-#define SPLIT 0
+// harness: AUTOPILOT races run 2P SPLIT with P2's pad mirroring P1's (the
+// chaser) - both halves live, both players driven. ALWAYS 0 for release.
+#define SPLIT_AUTO 0
 
 #define TURN_SPEED 2
 // championship intro flyover: skiVX/VY are SET each tick (no thrust,
@@ -333,8 +352,8 @@ u8 ltState, ltT, ltRed; // 0 showing, 2 rising, 3 done
 s16 ltY;
 // per-NPC projection results, buffered so the OAM pairs can be assigned
 // nearest-first (see the OAM-order note at NPC_SPR)
-u16 npjV[NPC_COUNT], npjC[NPC_COUNT], npjR[NPC_COUNT];
-u8 npjOk[NPC_COUNT], nord[NPC_COUNT], ns, nt;
+u16 npjV[NPC_COUNT + 1], npjC[NPC_COUNT + 1], npjR[NPC_COUNT + 1];
+u8 npjOk[NPC_COUNT + 1], nord[NPC_COUNT + 1], ns, nt; // +1: the other player (2P)
 // set to 1 to restore the dev readouts (position/physics/profiler)
 #define DEBUG_UI 0
 // projectPoint i/o
@@ -511,31 +530,31 @@ static void drawLadder(u16 oid, u8 right)
 {
     if (pjV < SCALE_V1)
     {
-        oamSet(oid, pjCol - 16, rdRow - 31, 3, 0, 0, right ? 12 : 8,
+        oamSet(oid, pjCol - 16, rdRow + vTop - 31, 3, 0, 0, right ? 12 : 8,
                WAVE_BUOY_PAL);
         oamSetEx(oid, OBJ_LARGE, OBJ_SHOW);
     }
     else if (pjV < SCALE_V2)
     {
-        oamSet(oid, pjCol - 16, rdRow - 31, 3, 0, 0, right ? 68 : 64,
+        oamSet(oid, pjCol - 16, rdRow + vTop - 31, 3, 0, 0, right ? 68 : 64,
                WAVE_BUOY_PAL);
         oamSetEx(oid, OBJ_LARGE, OBJ_SHOW);
     }
     else if (pjV < SCALE_V3)
     {
-        oamSet(oid, pjCol - 8, rdRow - 15, 3, 0, 0, right ? 74 : 72,
+        oamSet(oid, pjCol - 8, rdRow + vTop - 15, 3, 0, 0, right ? 74 : 72,
                WAVE_BUOY_PAL);
         oamSetEx(oid, OBJ_SMALL, OBJ_SHOW);
     }
     else if (pjV < SCALE_V4)
     {
-        oamSet(oid, pjCol - 8, rdRow - 15, 3, 0, 0, right ? 78 : 76,
+        oamSet(oid, pjCol - 8, rdRow + vTop - 15, 3, 0, 0, right ? 78 : 76,
                WAVE_BUOY_PAL);
         oamSetEx(oid, OBJ_SMALL, OBJ_SHOW);
     }
     else
     {
-        oamSet(oid, pjCol - 8, rdRow - 15, 3, 0, 0, right ? 106 : 104,
+        oamSet(oid, pjCol - 8, rdRow + vTop - 15, 3, 0, 0, right ? 106 : 104,
                WAVE_BUOY_PAL);
         oamSetEx(oid, OBJ_SMALL, OBJ_SHOW);
     }
@@ -561,35 +580,35 @@ static void drawSki(u16 oid, u16 tid, u8 pal)
     // in the 32-wide slots, n / n+32 in the 16-wide ones
     if (pjV < SCALE_V1)
     {
-        oamSet(oid, pjCol - 16, rdRow - 31, 3, 0, 0, 72, pal);
-        oamSet(tid, pjCol - 16, rdRow - 63, 3, 0, 0, 8, pal);
+        oamSet(oid, pjCol - 16, rdRow + vTop - 31, 3, 0, 0, 72, pal);
+        oamSet(tid, pjCol - 16, rdRow + vTop - 63, 3, 0, 0, 8, pal);
         oamSetEx(oid, OBJ_LARGE, OBJ_SHOW);
         oamSetEx(tid, OBJ_LARGE, OBJ_SHOW);
     }
     else if (pjV < SCALE_V2)
     {
-        oamSet(oid, pjCol - 16, rdRow - 31, 3, 0, 0, 76, pal);
-        oamSet(tid, pjCol - 16, rdRow - 63, 3, 0, 0, 12, pal);
+        oamSet(oid, pjCol - 16, rdRow + vTop - 31, 3, 0, 0, 76, pal);
+        oamSet(tid, pjCol - 16, rdRow + vTop - 63, 3, 0, 0, 12, pal);
         oamSetEx(oid, OBJ_LARGE, OBJ_SHOW);
         oamSetEx(tid, OBJ_LARGE, OBJ_SHOW);
     }
     else if (pjV < SCALE_V3)
     {
-        oamSet(oid, pjCol - 8, rdRow - 15, 3, 0, 0, 160, pal);
-        oamSet(tid, pjCol - 8, rdRow - 31, 3, 0, 0, 128, pal);
+        oamSet(oid, pjCol - 8, rdRow + vTop - 15, 3, 0, 0, 160, pal);
+        oamSet(tid, pjCol - 8, rdRow + vTop - 31, 3, 0, 0, 128, pal);
         oamSetEx(oid, OBJ_SMALL, OBJ_SHOW);
         oamSetEx(tid, OBJ_SMALL, OBJ_SHOW);
     }
     else if (pjV < SCALE_V4)
     {
-        oamSet(oid, pjCol - 8, rdRow - 15, 3, 0, 0, 162, pal);
-        oamSet(tid, pjCol - 8, rdRow - 31, 3, 0, 0, 130, pal);
+        oamSet(oid, pjCol - 8, rdRow + vTop - 15, 3, 0, 0, 162, pal);
+        oamSet(tid, pjCol - 8, rdRow + vTop - 31, 3, 0, 0, 130, pal);
         oamSetEx(oid, OBJ_SMALL, OBJ_SHOW);
         oamSetEx(tid, OBJ_SMALL, OBJ_SHOW);
     }
     else
     {
-        oamSet(oid, pjCol - 8, rdRow - 15, 3, 0, 0, 132, pal);
+        oamSet(oid, pjCol - 8, rdRow + vTop - 15, 3, 0, 0, 132, pal);
         oamSetEx(oid, OBJ_SMALL, OBJ_SHOW);
         oamSetVisible(tid, OBJ_HIDE); // smallest scale is one sprite
     }
@@ -600,24 +619,24 @@ static void drawSki(u16 oid, u16 tid, u8 pal)
 //---------------------------------------------------------------------------------
 static void waveHdma(u16 ph, u16 bufOff)
 {
-#if SPLIT
-    dmaTM.mem.p = (u8 *)tmBuf; // composed per tick (see the build)
-#else
-    dmaTM.mem.p = waveTM[ph];
-#endif
+    if (split)
+        dmaTM.mem.p = (u8 *)tmBuf; // composed per tick (see the build)
+    else
+        dmaTM.mem.p = waveTM[ph];
     dmaG.mem.p = waveG[ph];
 
     REG_HDMAEN = 0;
 
     // ch0: the sand distance fade (CGRAM entry 8 down the frame)
-#if SPLIT
-    REG_DMAP0 = 0x03; // the 2P table: one ramp per half
-    REG_BBAD0 = 0x21;
-    REG_A1T0LH = csFade2.mem.c.addr;
-    REG_A1B0 = csFade2.mem.c.bank;
-#else
-    uiHdma();
-#endif
+    if (split)
+    {
+        REG_DMAP0 = 0x03; // the 2P table: one ramp per half
+        REG_BBAD0 = 0x21;
+        REG_A1T0LH = csFade2.mem.c.addr;
+        REG_A1B0 = csFade2.mem.c.bank;
+    }
+    else
+        uiHdma();
 
     // ch1: TM UI/sky/sea split
     REG_DMAP1 = 0x00;
@@ -678,11 +697,221 @@ static void vblTop(void)
     REG_VTIMEL = irqLine[0];
 }
 
+static void ctxSwap(void) // exchange the globals with the waiting player
+{
+    u16 ct;
+    ct = camPX;
+    camPX = sv_camPX;
+    sv_camPX = (u16)ct;
+    ct = camPY;
+    camPY = sv_camPY;
+    sv_camPY = (u16)ct;
+    ct = camTheta16;
+    camTheta16 = sv_camTheta16;
+    sv_camTheta16 = (u16)ct;
+    ct = skiWX;
+    skiWX = sv_skiWX;
+    sv_skiWX = (u16)ct;
+    ct = skiWY;
+    skiWY = sv_skiWY;
+    sv_skiWY = (u16)ct;
+    ct = phaseAcc;
+    phaseAcc = sv_phaseAcc;
+    sv_phaseAcc = (u16)ct;
+    ct = phase;
+    phase = sv_phase;
+    sv_phase = (u16)ct;
+    ct = camPhaseOff;
+    camPhaseOff = sv_camPhaseOff;
+    sv_camPhaseOff = (u16)ct;
+    ct = pProg;
+    pProg = sv_pProg;
+    sv_pProg = (u16)ct;
+    ct = pDist;
+    pDist = sv_pDist;
+    sv_pDist = (u16)ct;
+    ct = lapTicks;
+    lapTicks = sv_lapTicks;
+    sv_lapTicks = (u16)ct;
+    ct = lastLap;
+    lastLap = sv_lastLap;
+    sv_lastLap = (u16)ct;
+    ct = lapFr;
+    lapFr = sv_lapFr;
+    sv_lapFr = (u16)ct;
+    ct = lapBase;
+    lapBase = sv_lapBase;
+    sv_lapBase = (u16)ct;
+    ct = camTheta;
+    camTheta = sv_camTheta;
+    sv_camTheta = (u8)ct;
+    ct = camSinMag;
+    camSinMag = sv_camSinMag;
+    sv_camSinMag = (u8)ct;
+    ct = camCosMag;
+    camCosMag = sv_camCosMag;
+    sv_camCosMag = (u8)ct;
+    ct = camSinNeg;
+    camSinNeg = sv_camSinNeg;
+    sv_camSinNeg = (u8)ct;
+    ct = camCosNeg;
+    camCosNeg = sv_camCosNeg;
+    sv_camCosNeg = (u8)ct;
+    ct = skiFlip;
+    skiFlip = sv_skiFlip;
+    sv_skiFlip = (u8)ct;
+    ct = skiLean;
+    skiLean = sv_skiLean;
+    sv_skiLean = (u8)ct;
+    ct = inWater;
+    inWater = sv_inWater;
+    sv_inWater = (u8)ct;
+    ct = wasInWater;
+    wasInWater = sv_wasInWater;
+    sv_wasInWater = (u8)ct;
+    ct = waterRow;
+    waterRow = sv_waterRow;
+    sv_waterRow = (u8)ct;
+    ct = nextWp;
+    nextWp = sv_nextWp;
+    sv_nextWp = (u8)ct;
+    ct = lapCount;
+    lapCount = sv_lapCount;
+    sv_lapCount = (u8)ct;
+    ct = lastLapSec;
+    lastLapSec = sv_lastLapSec;
+    sv_lastLapSec = (u8)ct;
+    ct = lastLapTenth;
+    lastLapTenth = sv_lastLapTenth;
+    sv_lastLapTenth = (u8)ct;
+    ct = lineArm;
+    lineArm = sv_lineArm;
+    sv_lineArm = (u8)ct;
+    ct = racePos;
+    racePos = sv_racePos;
+    sv_racePos = (u8)ct;
+    ct = finPos;
+    finPos = sv_finPos;
+    sv_finPos = (u8)ct;
+    ct = posAcc;
+    posAcc = sv_posAcc;
+    sv_posAcc = (u8)ct;
+    ct = goTimer;
+    goTimer = sv_goTimer;
+    sv_goTimer = (u8)ct;
+    ct = power;
+    power = sv_power;
+    sv_power = (u8)ct;
+    ct = nextGate;
+    nextGate = sv_nextGate;
+    sv_nextGate = (u8)ct;
+    ct = gateNeg;
+    gateNeg = sv_gateNeg;
+    sv_gateNeg = (u8)ct;
+    ct = thrF8;
+    thrF8 = sv_thrF8;
+    sv_thrF8 = (u8)ct;
+    ct = thrR8;
+    thrR8 = sv_thrR8;
+    sv_thrR8 = (u8)ct;
+    ct = apFine;
+    apFine = sv_apFine;
+    sv_apFine = (u8)ct;
+    ct = apStuck;
+    apStuck = sv_apStuck;
+    sv_apStuck = (u8)ct;
+    ct = pFin;
+    pFin = sv_pFin;
+    sv_pFin = (u8)ct;
+    ct = myPal;
+    myPal = sv_myPal;
+    sv_myPal = (u8)ct;
+    ct = finMin;
+    finMin = sv_finMin;
+    sv_finMin = (u8)ct;
+    ct = finSecT;
+    finSecT = sv_finSecT;
+    sv_finSecT = (u8)ct;
+    ct = finSecU;
+    finSecU = sv_finSecU;
+    sv_finSecU = (u8)ct;
+    ct = h2S;
+    h2S = sv_h2S;
+    sv_h2S = (u8)ct;
+    ct = h2P;
+    h2P = sv_h2P;
+    sv_h2P = (u8)ct;
+    ct = h2L;
+    h2L = sv_h2L;
+    sv_h2L = (u8)ct;
+    ct = h2W;
+    h2W = sv_h2W;
+    sv_h2W = (u8)ct;
+    ct = camSinVal;
+    camSinVal = sv_camSinVal;
+    sv_camSinVal = (s16)ct;
+    ct = camCosVal;
+    camCosVal = sv_camCosVal;
+    sv_camCosVal = (s16)ct;
+    ct = prevSin;
+    prevSin = sv_prevSin;
+    sv_prevSin = (s16)ct;
+    ct = prevCos;
+    prevCos = sv_prevCos;
+    sv_prevCos = (s16)ct;
+    ct = skiVX;
+    skiVX = sv_skiVX;
+    sv_skiVX = (s16)ct;
+    ct = skiVY;
+    skiVY = sv_skiVY;
+    sv_skiVY = (s16)ct;
+    ct = skiY;
+    skiY = sv_skiY;
+    sv_skiY = (s16)ct;
+    ct = skiVv;
+    skiVv = sv_skiVv;
+    sv_skiVv = (s16)ct;
+    ct = fracX;
+    fracX = sv_fracX;
+    sv_fracX = (s16)ct;
+    ct = fracY;
+    fracY = sv_fracY;
+    sv_fracY = (s16)ct;
+    ct = vAlong;
+    vAlong = sv_vAlong;
+    sv_vAlong = (s16)ct;
+    ct = vSide;
+    vSide = sv_vSide;
+    sv_vSide = (s16)ct;
+    ct = surf88;
+    surf88 = sv_surf88;
+    sv_surf88 = (s16)ct;
+    ct = diff88;
+    diff88 = sv_diff88;
+    sv_diff88 = (s16)ct;
+    ct = sprTop;
+    sprTop = sv_sprTop;
+    sv_sprTop = (s16)ct;
+    ctxCur ^= 1;
+}
+
+static void ctxSet(u8 p) // bring player p's state into the globals
+{
+    if (split && ctxCur != p)
+        ctxSwap();
+}
+
 // the screen layout: the IRQ stage table and the renderer's viewport
-// parameters, for the 1P screen or (SPLIT) the 2P split
+// parameters, for the 1P screen or the 2P split
 static void layoutSet(void)
 {
-#if SPLIT
+    vTop = 0; // the 1P screen's sprite layout; 2P sets these per view
+    sprSki = 0;
+    sprBuoy = 2;
+    sprRacer = NPC_SPR;
+    ltSpr = split ? 54 : LIGHT_SPR; // 2P: past both views' sprites
+    if (split)
+    {
     irqLine[0] = WAVE_SKY_SWITCH2 - 1; // viewport A: mode 7 at its switch
     irqAct[0] = 1;
     irqLine[1] = WAVE_LINES2 - 1;      // the HUD strip: mode 1
@@ -696,7 +925,9 @@ static void layoutSet(void)
     pjSpan = 445;
     wvStride = WAVE_RAW_STRIDE2;
     skiPpt = WAVE_SKI_PPT_Q4_2;
-#else
+    }
+    else
+    {
     irqLine[0] = WAVE_UI_LINES - 1;   // cloud scroll at the band's edge
     irqAct[0] = 0;
     irqLine[1] = WAVE_SKY_SWITCH - 1; // the mode switch
@@ -708,7 +939,7 @@ static void layoutSet(void)
     pjSpan = 445;
     wvStride = WAVE_RAW_STRIDE;
     skiPpt = WAVE_SKI_PPT_Q4;
-#endif
+    }
     irqStage = 0;
     cloudHofs = 0;
     REG_VTIMEL = irqLine[0];
@@ -725,11 +956,10 @@ static void courseLoad(u8 c)
 {
     setScreenOff();
     courseGeom(c);
-#if SPLIT
-    waveProfLoad2(courseProf); // the half-height viewport tables
-#else
-    waveProfLoad(courseProf);
-#endif
+    if (split)
+        waveProfLoad2(courseProf); // the half-height viewport tables
+    else
+        waveProfLoad(courseProf);
     waveRawLoad();
     // NB member-by-member: tcc copies only 16 BITS of a pointer-var to
     // pointer-var assignment (the bank byte never lands) - the (u8*)&sym
@@ -815,10 +1045,10 @@ static void raceInit(void)
     REG_NMITIMEN = 0xB1; // NMI + V=V,H=H timer IRQ + auto-joypad (the
                          // course select parks the timer IRQ)
     REG_MOSAIC = 0;      // a transition may have left the sweep at 15
-    oamSet(0, SKI_X, 140, 3, 0, 0, 64, playerPal);
+    oamSet(0, SKI_X, 140, 3, 0, 0, 64, myPal);
     oamSetEx(0, OBJ_LARGE, OBJ_SHOW);
     OAM_TALL(0);
-    oamSet(4, SKI_X, 108, 3, 0, 0, 0, playerPal); // player top: id 1, right
+    oamSet(4, SKI_X, 108, 3, 0, 0, 0, myPal); // player top: id 1, right
     oamSetEx(4, OBJ_LARGE, OBJ_SHOW);     // behind the bottom half
     OAM_TALL(4);
     for (bi = 2; bi < TITLE_SPR + 10; bi++)
@@ -856,8 +1086,8 @@ static void raceInit(void)
     camSinNeg = npcSin < 0 ? 1 : 0;
     camCosMag = (u8)(npcCos < 0 ? -npcCos : npcCos);
     camCosNeg = npcCos < 0 ? 1 : 0;
-    camPX = (u16)(startX - ((WAVE_SKI_DIST * npcSin) >> 7)) & 4095;
-    camPY = (u16)(startY - ((WAVE_SKI_DIST * npcCos) >> 7)) & 4095;
+    camPX = (u16)(initX - ((WAVE_SKI_DIST * npcSin) >> 7)) & 4095;
+    camPY = (u16)(initY - ((WAVE_SKI_DIST * npcCos) >> 7)) & 4095;
     apFine = 0;  // BSS
     apStuck = 0;
     skiLean = 0; // BSS is not zero-initialised: garbage here reached
@@ -875,9 +1105,9 @@ static void raceInit(void)
     pwDrawn = 255; // force the bar's first draw
     bestSec = 255; // TT: no best lap yet
     bestTenth = 0;
-    nt = 0; // the three riders the player did NOT pick drive the NPCs
+    nt = 0; // the riders no player picked drive the NPCs (2P: two of them)
     for (bi = 0; bi < 4; bi++)
-        if (bi != playerPal && nt < NPC_COUNT)
+        if (bi != playerPal && (!split || bi != p2Pal) && nt < NPC_COUNT)
             npcPalTab[nt++] = bi;
     hudInit = 0;   // ditto the HUD furniture + every value cell
     hRank = 255;
@@ -909,8 +1139,17 @@ static void raceInit(void)
     pProg = 0;
     lapTicks = 0;
     lastLap = 0;
-    skiWX = startX; // autopilot reads these before the first pass
-    skiWY = startY;
+    skiWX = initX; // autopilot reads these before the first pass
+    skiWY = initY;
+    pFin = 0;
+    finMin = 0;
+    finSecT = 0;
+    finSecU = 0;
+    h2S = 255; // 2P HUD row: force the first compose
+    h2P = 255;
+    h2L = 255;
+    h2W = 255;
+    hud2Dirty = 0;
     // NPC grid slots come from the bake too: just ahead of the player,
     // staggered in depth so no scanline drowns in sprites
     for (bi = 0; bi < NPC_COUNT; bi++)
@@ -1221,7 +1460,8 @@ static void titleDraw(void)
 // where player 2 will join post-jam ("P2 press start" -> 2P VS.).
 static u8 riderSelect(void)
 {
-    u8 armed = 0, sel, i, dirty;
+    u8 armed = 0, sel, i, dirty, sel2;
+    u16 prev2;
     s16 rx;
     REG_NMITIMEN = 0x81; // NMI + auto-joypad; timer IRQ parked
     REG_HDMAEN = 0;
@@ -1243,20 +1483,34 @@ static u8 riderSelect(void)
     // The riders sit above the text; sprites would win priority anyway.
     uiMenuRow(23, 9, "CHOOSE A RIDER");
     uiMenuRow(25, 10, "PRESS START");
+    // ARCADE: a second player joins with START on pad 2 - a P2 tag rides
+    // their pick (pad 2 left/right, never P1's rider), B on pad 2 leaves;
+    // P1's START confirms both
+    p2Join = 0;
+    if (menuSel == 2)
+        uiMenuRow(26, 8, "P2 PRESS START");
     sel = playerPal;
+    sel2 = sel == 0 ? 1 : 0;
     dirty = 1;
     menuPrev = 0xFFFF; // held keys must release before they count
+    prev2 = 0xFFFF;
     setScreenOn();
     while (1)
     {
         if (dirty) // compose mid-frame, DMA after the wait (the vblank
+        {
             uiMenuCompose(menuRows[0], (u16)(4 + 7 * sel), "P1");
+            if (p2Join)
+                uiMenuAppend(menuRows[0], (u16)(4 + 7 * sel2), "P2");
+            uiMenuCompose(menuRows[1], 8, p2Join || menuSel != 2
+                          ? "" : "P2 PRESS START");
+        }
         // the riders: two stacked 32x32 sprites each, the pick raised.
         // OAM writes are RAM-side; the ISR DMAs them in the vblank
         for (i = 0; i < 4; i++)
         {
             rx = 24 + 56 * i;
-            oy = i == sel ? 128 : 136; // bottom sprite; the pick rides high
+            oy = (i == sel || (p2Join && i == sel2)) ? 128 : 136; // picks ride high
             oamSet((u16)((2 + 2 * i) << 2), (u16)rx, oy, 3, 0, 0, 64, i);
             OAM_TALL((2 + 2 * i) << 2);
             oamSetEx((u16)((2 + 2 * i) << 2), OBJ_LARGE, OBJ_SHOW);
@@ -1269,9 +1523,58 @@ static u8 riderSelect(void)
         if (dirty)
         {
             dirty = 0;
-            uiMenuRowDma(menuRows[0], 21); // P1 tag, under the riders
+            uiMenuRowDma(menuRows[0], 21); // P1/P2 tags, under the riders
+            uiMenuRowDma(menuRows[1], 26); // the join prompt
         }
         pad0 = padsCurrent(0);
+        if (menuSel == 2)
+        {
+#if SPLIT_AUTO
+            // harness: Mesen's Lua setInput lands on pad 1 whatever port is
+            // asked for (measured), so SELECT on pad 1 stands in for P2's
+            // START here
+            pad1 = (pad0 & KEY_SELECT) ? KEY_START : 0;
+#else
+            pad1 = padsCurrent(1);
+#endif
+            if (!p2Join)
+            {
+                if ((pad1 & KEY_START) && !(prev2 & KEY_START))
+                {
+                    p2Join = 1;
+                    if (sel2 == sel)
+                        sel2 = sel == 0 ? 1 : 0;
+                    dirty = 1;
+                }
+            }
+            else
+            {
+                if ((pad1 & KEY_LEFT) && !(prev2 & KEY_LEFT) && sel2)
+                {
+                    sel2--;
+                    if (sel2 == sel && sel2)
+                        sel2--;
+                    else if (sel2 == sel)
+                        sel2 = sel + 1;
+                    dirty = 1;
+                }
+                if ((pad1 & KEY_RIGHT) && !(prev2 & KEY_RIGHT) && sel2 < 3)
+                {
+                    sel2++;
+                    if (sel2 == sel && sel2 < 3)
+                        sel2++;
+                    else if (sel2 == sel)
+                        sel2 = sel - 1;
+                    dirty = 1;
+                }
+                if ((pad1 & KEY_B) && !(prev2 & KEY_B))
+                {
+                    p2Join = 0;
+                    dirty = 1;
+                }
+            }
+            prev2 = pad1;
+        }
         if (!(pad0 & (KEY_START | KEY_A | KEY_B)))
             armed = 1;
         if ((pad0 & KEY_LEFT) && !(menuPrev & KEY_LEFT) && sel)
@@ -1288,6 +1591,7 @@ static u8 riderSelect(void)
         if (armed && (pad0 & (KEY_START | KEY_A)))
         {
             playerPal = sel;
+            p2Pal = sel2;
             return 1;
         }
         if (armed && (pad0 & KEY_B))
@@ -1357,7 +1661,7 @@ static void liveOrder(void)
     u8 i, j, m, t;
     u16 tp;
     m = 0;
-    for (i = 0; i < NPC_COUNT; i++)
+    for (i = 0; i < npcN; i++)
         if (!npcDone[i])
         {
             chPr[m] = npcProg[i];
@@ -1365,6 +1669,20 @@ static void liveOrder(void)
             chPl[m] = npcPalTab[i];
             m++;
         }
+    if (!pFin) // 2P: a player still racing when START ends it
+    {
+        chPr[m] = pProg;
+        chDs[m] = pDist;
+        chPl[m] = myPal;
+        m++;
+    }
+    if (split && !sv_pFin)
+    {
+        chPr[m] = sv_pProg;
+        chDs[m] = sv_pDist;
+        chPl[m] = sv_myPal;
+        m++;
+    }
     for (i = 1; i < m; i++) // insertion sort, most advanced first
         for (j = i; j > 0; j--)
         {
@@ -1497,6 +1815,7 @@ static void introDraw(void)
 // race number as the title) is kept for the harness / a future use.
 #define PAGE_CHAMP 1
 #define PAGE_FINAL 2
+#define PAGE_2P 3 // the 2P split's results: finish order, P1/P2 tags
 static void champPage(u8 mode)
 {
     u8 armed = 0, i, j, t, a, b;
@@ -1504,7 +1823,8 @@ static void champPage(u8 mode)
     u16 wait = 0;
     champStage = 3; // "standings up" - only the Lua harness reads this
     for (i = 0; i < 4; i++)
-        champOrd[i] = i;
+        champOrd[i] = mode == PAGE_2P ? finList[i] : i;
+    if (mode != PAGE_2P)
     for (i = 1; i < 4; i++)
         for (j = i; j > 0; j--)
         {
@@ -1539,6 +1859,8 @@ static void champPage(u8 mode)
         sbRider(champOrd[0]);
         sbCat(" IS CHAMPION");
     }
+    else if (mode == PAGE_2P)
+        sbCat("RACE RESULTS");
     else
     {
         sbCat("RACE ");
@@ -1569,18 +1891,23 @@ static void champPage(u8 mode)
         sbClear();
         sbRider(t);
         uiMenuAppend(menuRows[i], 7, menuBuf);
-        sbClear();
-        sbCat("+");
-        sbNum(racePts[t]);
-        uiMenuAppend(menuRows[i], 16, menuBuf);
-        sbClear();
-        if (champPts[t] < 10)
-            sbCat(" "); // right-align the total
-        sbNum(champPts[t]);
-        sbCat(" PTS");
-        uiMenuAppend(menuRows[i], 20, menuBuf);
+        if (mode != PAGE_2P)
+        {
+            sbClear();
+            sbCat("+");
+            sbNum(racePts[t]);
+            uiMenuAppend(menuRows[i], 16, menuBuf);
+            sbClear();
+            if (champPts[t] < 10)
+                sbCat(" "); // right-align the total
+            sbNum(champPts[t]);
+            sbCat(" PTS");
+            uiMenuAppend(menuRows[i], 20, menuBuf);
+        }
         if (t == playerPal)
             uiMenuAppend(menuRows[i], 28, "P1");
+        else if (split && t == p2Pal)
+            uiMenuAppend(menuRows[i], 28, "P2");
     }
     for (i = 0; i < 4; i++)
         uiMenuRowDma(menuRows[i], (u16)(21 + i)); // force blank: safe
@@ -1604,6 +1931,97 @@ static void champPage(u8 mode)
     mosaicSweep(0, 0); // pixelate away; the next state snaps mosaic clear
 }
 
+// the 2P HUD: one row per player in the strip between the halves (BG1
+// map rows 13/14, the small gradient font): "P1 1'23 2ND L2/3 **..."
+// - recomposed only when a shown value changes, DMA'd in the vblank tail
+static void hud2(void)
+{
+    u8 pos;
+    pos = pFin ? 9 : racePos;
+    if (h2S == rSecU && h2P == pos && h2L == lapCount && h2W == power)
+        return;
+    h2S = rSecU;
+    h2P = pos;
+    h2L = lapCount;
+    h2W = power;
+    uiHudRowClear(hud2Row[pl]);
+    uiHudSmallTo(hud2Row[pl], 1, HUD_PAL_TITLE, pl ? "P2" : "P1");
+    sbClear();
+    if (pFin) // this player's own finish time
+    {
+        sbNum(finMin);
+        sbCat("'");
+        menuBuf[sbLen++] = (char)('0' + finSecT);
+        menuBuf[sbLen++] = (char)('0' + finSecU);
+    }
+    else
+    {
+        sbNum(rMin);
+        sbCat("'");
+        menuBuf[sbLen++] = (char)('0' + rSecT);
+        menuBuf[sbLen++] = (char)('0' + rSecU);
+    }
+    menuBuf[sbLen] = 0;
+    uiHudSmallTo(hud2Row[pl], 4, HUD_PAL_BOT, menuBuf);
+    uiHudSmallTo(hud2Row[pl], 10, HUD_PAL_TITLE,
+                 pFin ? "FIN" : pos == 1 ? "1ST" : pos == 2 ? "2ND"
+                 : pos == 3 ? "3RD" : "4TH");
+    sbClear();
+    sbCat("L");
+    sbNum(lapCount == 255 ? 1 : lapCount < RACE_LAPS ? (u8)(lapCount + 1)
+                                                      : RACE_LAPS);
+    sbCat("/3");
+    uiHudSmallTo(hud2Row[pl], 14, HUD_PAL_BOT, menuBuf);
+    sbClear();
+    for (pos = 0; pos < 5; pos++)
+        sbCat(pos < power ? "*" : ".");
+    uiHudSmallTo(hud2Row[pl], 19, HUD_PAL_TITLE, menuBuf);
+    hud2Dirty |= (u8)(1 << pl);
+}
+
+// start a race on courseSel in the current mode: the layout, the course,
+// and the player state(s). 2P: P2 first (grid slot 3, then swapped out),
+// P1 last so the globals hold player 0
+static void raceStart(void)
+{
+    nPl = split ? 2 : 1;
+    npcN = split ? 2 : NPC_COUNT;
+    layoutSet();
+    courseLoad(courseSel);
+    if (split)
+    {
+        myPal = p2Pal;
+        initX = npcGridX[2];
+        initY = npcGridY[2];
+        raceInit();
+        ctxSwap();
+    }
+    myPal = playerPal;
+    initX = startX;
+    initY = startY;
+    raceInit();
+    ctxCur = 0;
+    if (split)
+    {
+        // the strip's two HUD rows start blank (menus wrote there)
+        uiHudRowClear(hud2Row[0]);
+        uiHudRowClear(hud2Row[1]);
+        uiMenuRowDma(hud2Row[0], 12);
+        uiMenuRowDma(hud2Row[0], 15);
+        // the strip's lines (104-119) are built by NEITHER view, so their
+        // HOFS entries still hold the last 1P race's sea scroll - and
+        // $210D is BG1's scroll in mode 1: the HUD rows came out shifted.
+        // Zero them in both table buffers (VOFS words are never written)
+        for (bi = WAVE_LINES2; bi < WAVE_VP_B_TOP; bi++)
+        {
+            camTabs[5400 + 1 + 4 * bi] = 0;
+            camTabs[5400 + 2 + 4 * bi] = 0;
+            camTabs[5400 + 900 + 1 + 4 * bi] = 0;
+            camTabs[5400 + 900 + 2 + 4 * bi] = 0;
+        }
+    }
+}
+
 static void ovlMenuDraw(void)
 {
     uiPrint(9, 1, menuSel == 0 ? ">CHAMPIONSHIP" : " CHAMPIONSHIP");
@@ -1625,6 +2043,12 @@ int main(void)
     ovlPrev = 0;
     champOn = 0;
     raceState = 0; // BSS: a garbage 2 would show a results page at boot
+    split = 0;
+    nPl = 1;
+    npcN = NPC_COUNT;
+    ctxCur = 0;
+    p2Join = 0;
+    p2Pal = 1;
 
     setMode7(0);
     // EXTBG spike: BG2 duplicates the mode 7 image with pixel bit 7 as a
@@ -1676,13 +2100,26 @@ int main(void)
     // harness build: the pre-flow hands-free loop (tickshot/menuinput and
     // friends assume boot -> course select -> race with the chaser driving)
     courseSelect();
-    courseLoad(courseSel);
     attract = 1;
     raceTT = 0;
     playerPal = 0;
+    p2Pal = 1;
     raceMode = RM_RACE;
-    raceInit();
+    split = SPLIT_AUTO;
+    raceStart();
 #else
+    if (split)
+    {
+        // a 2P split race just ended: its results page (unless quit from
+        // pause), then back to the 1P layout for the title's attract race
+        if (raceState == 2)
+        {
+            mosaicSweep(0, 1);
+            REG_HDMAEN = 0;
+            champPage(PAGE_2P);
+        }
+        split = 0;
+    }
     if (menuGo && menuSel == 0)
     {
         // CHAMPIONSHIP: rider select, then every course in order (B at
@@ -1720,7 +2157,11 @@ int main(void)
             uiClear();    // (and the band, or the HUD inherits it)
             attract = 0;
             raceMode = RM_RACE;
+            myPal = playerPal;
+            initX = startX;
+            initY = startY;
             raceInit();
+            ctxCur = 0;
             champStage = 2;
         }
         else
@@ -1753,12 +2194,20 @@ int main(void)
                 // course name, flashing PRESS START; it advances after
                 // one full lap, or on START
                 REG_HDMAEN = 0;
+                split = 0;
+                layoutSet();
                 courseLoad(champRace);
                 attract = 1;
                 raceMode = RM_INTRO;
                 ovlInit = 0;
                 ovlFlash = 2;
+                nPl = 1;
+                npcN = NPC_COUNT;
+                myPal = playerPal;
+                initX = startX;
+                initY = startY;
                 raceInit();
+                ctxCur = 0;
                 skyUp = 1;     // the card's text rides the sky rows
                 raceState = 1; // no countdown, no finish: it just cruises
                 ltState = 3;
@@ -1791,8 +2240,11 @@ int main(void)
         attract = 0;
         raceMode = RM_RACE;
         courseSelect();
-        courseLoad(courseSel);
-        raceInit();
+        // 2P split (ARCADE with a joined P2): the 2P layout + tables, two
+        // player states - P2 set up first on the third grid slot, swapped
+        // out, then P1 in the globals
+        split = (menuSel == 2 && p2Join) ? 1 : 0;
+        raceStart();
     }
     else
     {
@@ -1806,11 +2258,19 @@ int main(void)
             raceMode = RM_TITLE; // first boot / back from a race
         REG_HDMAEN = 0; // a quit race's channels may still be streaming
         skyRestore();   // an ARCADE race's results table (its only page)
+        split = 0;
+        layoutSet();
         courseLoad(0);
         titleBg3(1);
         ovlInit = 0;
         ovlFlash = 2; // neither 0 nor 1: force the first flash draw
+        nPl = 1;
+        npcN = NPC_COUNT;
+        myPal = playerPal;
+        initX = startX;
+        initY = startY;
         raceInit();
+        ctxCur = 0;
         raceState = 1; // attract: no countdown, no light tree - and no
         ltState = 3;   // finish either (see the lap check): it just runs
         // the title logo slides in: WAVERACER (4 blocks, palette 6) from
@@ -2042,51 +2502,325 @@ int main(void)
 #endif
         }
 
+#if WAVE_MAX_PATH > 0
+        // the CPU racers' schedule reference: the leading human (2P: from
+        // the end of last tick, whichever state is in the globals; the
+        // nudges yield to the player currently there)
+        if (split && (s16)(sv_pProg - pProg) > 0)
+        {
+            refProg = sv_pProg;
+            refDist = sv_pDist;
+            refLap = sv_lapCount;
+            refWp = sv_nextWp;
+        }
+        else
+        {
+            refProg = pProg;
+            refDist = pDist;
+            refLap = lapCount;
+            refWp = nextWp;
+        }
+        // ---- NPC racers: kinematic waypoint followers (the autopilot's
+        // steering brain), collision-probed so they cannot cross land ----
+        if (raceState && !raceTT && raceMode != RM_INTRO) // frozen on the
+            // grid until GO; TT = solo; the flyover has no racers at all
+            for (bi = 0; bi < npcN; bi++)
+            {
+                if (npcDone[bi] && npcSpd[bi] < 64) // finished and glided
+                    continue;                         // to rest: parked
+                aimTX = pathX[npcWp[bi]];
+                aimTY = pathY[npcWp[bi]];
+                aimPX = npcX[bi];
+                aimPY = npcY[bi];
+                aimBias = npcBias[bi]; // aims off the shared line (perp of
+                                       // heading): followers never stack up
+                npcA = npcTheta[bi];
+                npcTrig();
+                npcAim(); // wpdx/wpdy (bias-aimed), apc cross, apd dot
+                if (apd < 0)
+                {
+                    // target behind: commit to one side
+                    if (apc <= 0)
+                        npcTheta[bi] += NPC_TURN;
+                    else
+                        npcTheta[bi] -= NPC_TURN;
+                }
+                else if (apc < -(apd >> 3))
+                    npcTheta[bi] += NPC_TURN;
+                else if (apc > (apd >> 3))
+                    npcTheta[bi] -= NPC_TURN;
+                // corner slowdown: half cruise past ~45 deg off the line
+                apu = apc < 0 ? -apc : apc;
+                bq = npcSpd[bi];
+                if (apd < 0 || apu > apd)
+                    bq >>= 1;
+                // velocity along the (pre-turn) heading, 8.8 accums
+                npcVel(); // apc/apd = ((bq >> 5) * trig) >> 2
+                npcFX[bi] += apc;
+                stepX = npcFX[bi] >> 8;
+                npcFX[bi] &= 0x00FF;
+                // NPCs pass straight through buoy cells (3): the lateral
+                // bias lines cross them and snagging there looks broken.
+                // Sand (1) and rope (2) still block.
+                if (stepX)
+                {
+                    collOfs = ((npcY[bi] >> 5) & 127) * 128
+                              + (((u16)(npcX[bi] + stepX) >> 5) & 127);
+                    collProbe();
+                    if (!collVal || collVal == 3)
+                        npcX[bi] = (npcX[bi] + stepX) & 4095;
+                }
+                npcFY[bi] += apd;
+                stepY = npcFY[bi] >> 8;
+                npcFY[bi] &= 0x00FF;
+                if (stepY)
+                {
+                    collOfs = (((u16)(npcY[bi] + stepY) >> 5) & 127) * 128
+                              + ((npcX[bi] >> 5) & 127);
+                    collProbe();
+                    if (!collVal || collVal == 3)
+                        npcY[bi] = (npcY[bi] + stepY) & 4095;
+                }
+                // the start/finish line, as for the player: a TRUE
+                // crossing books the lap (255 -> 0 at the grid); the last
+                // one finishes the rider - it then glides to a stop
+                if (!attract)
+                {
+                    lnDx = (s16)((npcX[bi] - pathX[0]) & 4095);
+                    if (lnDx > 2048)
+                        lnDx -= 4096;
+                    lnDy = (s16)((npcY[bi] - pathY[0]) & 4095);
+                    if (lnDy > 2048)
+                        lnDy -= 4096;
+                    gLat = (lnDx < 0 ? -lnDx : lnDx)
+                           + (lnDy < 0 ? -lnDy : lnDy);
+                    if (gLat < 400)
+                    {
+                        gAlong = (lnDx >> 3) * startNx + (lnDy >> 3) * startNy;
+                        if (gAlong < 0)
+                            npcArm[bi] = 1;
+                        else if (npcArm[bi])
+                        {
+                            npcArm[bi] = 0;
+                            if (npcLap[bi] == 255
+                                || (u16)(npcProg[bi] - npcLapBase[bi])
+                                       >= (u16)(pathCount - 1))
+                            {
+                                npcLapBase[bi] = npcProg[bi];
+                                npcLap[bi]++;
+                                if (npcLap[bi] >= RACE_LAPS
+                                    && npcLap[bi] < 250 && !npcDone[bi])
+                                {
+                                    npcDone[bi] = 1;
+                                    riderFinish(npcPalTab[bi]);
+                                }
+                            }
+                        }
+                    }
+                    else
+                        npcArm[bi] = 0;
+                }
+                if (wpdx < 0)
+                    wpdx = -wpdx;
+                if (wpdy < 0)
+                    wpdy = -wpdy;
+                npcDist[bi] = (u16)(wpdx + wpdy);
+                if (npcDist[bi] < 200)
+                {
+                    npcWp[bi]++;
+                    if (npcWp[bi] >= pathCount)
+                        npcWp[bi] = 0;
+                    npcProg[bi]++;
+                }
+                // attract: recycled traffic. A racer overtaken by more
+                // than 3 waypoints respawns 4 segments ahead (beyond the
+                // sprite draw distance, so no pop) with its progress
+                // pinned ahead of the player: the rubber-band tiers then
+                // slow it down and the demo overtakes it again, forever
+                if (attract && (s16)(refProg - npcProg[bi]) > 3)
+                {
+                    apu = refWp + 4;
+                    if (apu >= pathCount)
+                        apu -= pathCount;
+                    npcX[bi] = pathX[apu];
+                    npcY[bi] = pathY[apu];
+                    npcWp[bi] = (u8)(apu + 1 >= pathCount ? 0 : apu + 1);
+                    npcProg[bi] = refProg + 4;
+                    npcFX[bi] = 0;
+                    npcFY[bi] = 0;
+                    npcTheta[bi] = startTheta; // the brain corrects it
+                }
+                // schedule rubber-banding: is it ahead of the player?
+                rubDiff = (s16)npcProg[bi] - (s16)refProg;
+                if (rubDiff > 0)
+                    apu = 1;
+                else if (rubDiff < 0)
+                    apu = 0;
+                else // same waypoint: nearer to it = ahead
+                    apu = npcDist[bi] < refDist ? 1 : 0;
+                // ...and should it still be, per its fade schedule? Gap
+                // caps keep the race close for players off autopilot pace:
+                // a scheduled leader never runs away, a faded racer never
+                // falls out of sight
+                if (npcDone[bi])
+                    spdTgt = 0; // finished: ease off and glide to rest
+                else if (refLap < npcFade[bi])
+                {
+                    if (!apu)
+                        spdTgt = SPD_FAST; // behind schedule: catch up
+                    else if (rubDiff > 3)
+                        spdTgt = SPD_HOLD; // never run away from the player
+                    else
+                        spdTgt = SPD_CRUISE;
+                }
+                else
+                {
+                    // fading: keep SLOW until CLEARLY passed (a tie-boundary
+                    // equilibrium otherwise pins it to the player's tail)
+                    if (rubDiff >= -3)
+                        spdTgt = SPD_SLOW;
+                    else if (rubDiff < -10)
+                        spdTgt = SPD_CRUISE; // far back: stay in sight
+                    else
+                        spdTgt = SPD_HOLD;
+                }
+                if (npcDone[bi]) // a long glide (~220 units, the player
+                    npcSpd[bi] -= npcSpd[bi] >> 4; // pulls up in ~50)
+                else
+                    npcSpd[bi] += (s16)(spdTgt - npcSpd[bi]) >> 3;
+            }
+        if (raceState)
+        {
+            // unstack the racers: when two are within ~28 texels the NPC
+            // shoves off along the dominant axis (land-checked). Cheap
+            // pairwise nudges, deliberately not a flocking system.
+            for (bi = 0; bi < npcN; bi++)
+                for (bj = bi + 1; bj <= npcN; bj++)
+                {
+                    if (npcDone[bi])
+                        break; // parked riders are never shoved
+                    if (bj < npcN)
+                    {
+                        ox = npcX[bj];
+                        oy = npcY[bj];
+                    }
+                    else // the player: NPCs yield, the player never moves
+                    {
+                        ox = skiWX;
+                        oy = skiWY;
+                    }
+                    wpdx = (s16)((npcX[bi] - ox) & 4095);
+                    if (wpdx > 2048)
+                        wpdx -= 4096;
+                    wpdy = (s16)((npcY[bi] - oy) & 4095);
+                    if (wpdy > 2048)
+                        wpdy -= 4096;
+                    if (wpdx > 112 || wpdx < -112 || wpdy > 112 || wpdy < -112)
+                        continue;
+                    apu = wpdx < 0 ? -wpdx : wpdx;
+                    apd = wpdy < 0 ? -wpdy : wpdy;
+                    if (apu >= apd)
+                    {
+                        apc = wpdx >= 0 ? 6 : -6;
+                        collOfs = ((npcY[bi] >> 5) & 127) * 128
+                                  + (((u16)(npcX[bi] + apc) >> 5) & 127);
+                        collProbe();
+                        if (!collVal || collVal == 3) // buoys don't block NPCs
+                            npcX[bi] = (npcX[bi] + apc) & 4095;
+                    }
+                    else
+                    {
+                        apc = wpdy >= 0 ? 6 : -6;
+                        collOfs = (((u16)(npcY[bi] + apc) >> 5) & 127) * 128
+                                  + ((npcX[bi] >> 5) & 127);
+                        collProbe();
+                        if (!collVal || collVal == 3)
+                            npcY[bi] = (npcY[bi] + apc) & 4095;
+                    }
+                }
+        }
+#endif
+
+        camBufOff = (tick & 1) ? 900 : 0; // this loop's table buffer
+        tick++;                            // (both views write into it)
+
+        // ==== the per-player pass: race flow, steering, physics, race
+        // progress, then this player's VIEW - velocity split, wave phase,
+        // camera tables, sprites (ski, buoys, racers; 2P: the other player
+        // among them, at their last-tick position). 1P: one pass over the
+        // globals; 2P: the second pass swaps P2's state in and reads pad 2.
+        // The CPU racers moved above, before either pass ====
+#if SPLIT_AUTO
+        pad1 = pad0; // harness: P2 mirrors P1 (the chaser)
+#else
+        pad1 = padsCurrent(1);
+#endif
+        for (pl = 0; pl < nPl; pl++)
+        {
+        ctxSet(pl);
+        if (pl)
+            pad0 = pad1;
         // ---- race flow: countdown holds the engines, GO releases them,
-        // the finish cuts them again (masks the autopilot too) ----
+        // the finish cuts them again (masks the autopilot too). The
+        // countdown and the clock are shared (player 0's pass); the
+        // finish and its engine cut are per player ----
         if (raceState == 0)
         {
             pad0 &= ~(KEY_B | KEY_Y);
-            rTick += (u8)loopFrames; // counting down in real frames
-            if (rTick >= 240)        // 4 seconds: 3.. 2.. 1.. GO
+            if (pl == 0)
             {
-                raceState = 1;
-                goTimer = 30;
-                lapTicks = 0;
-                rTick = 0;
-                lapFr = 0;
+                rTick += (u8)loopFrames; // counting down in real frames
+                if (rTick >= 240)        // 4 seconds: 3.. 2.. 1.. GO
+                {
+                    raceState = 1;
+                    goTimer = 30;
+                    sv_goTimer = 30;
+                    lapTicks = 0;
+                    sv_lapTicks = 0;
+                    rTick = 0;
+                    lapFr = 0;
+                    sv_lapFr = 0;
+                }
             }
         }
         else
         {
             if (goTimer)
                 goTimer--;
-            if (raceState == 2)
+            if (pFin)
+                pad0 &= ~(KEY_B | KEY_Y); // finished: engines cut
+            if (pl == 0 && raceState == 2)
             {
-                pad0 &= ~(KEY_B | KEY_Y);
-                // the finish: the sky table tracks the field (riders
-                // glide to rest as they cross); after 5s PRESS START is
-                // offered and the race waits for it - START ends it with
-                // the unfinished placed where they stand
-                skyUpdate();
+                // the end sequence, from the FIRST finish: 1P - the sky
+                // table tracks the field (riders glide to rest as they
+                // cross), PRESS START after 5s ends it; 2P - the race
+                // runs on until everyone has finished, or START (P1)
+                // after 5s; the unfinished are placed where they stand
                 finFr += loopFrames;
-                if (finFr >= 300 && !skyGo)
+                if (!split)
                 {
-                    skyGo = 1;
-                    uiSkyCompose(skyRows[4], 10, "PRESS START");
-                    skyDirty = 1;
+                    skyUpdate();
+                    if (finFr >= 300 && !skyGo)
+                    {
+                        skyGo = 1;
+                        uiSkyCompose(skyRows[4], 10, "PRESS START");
+                        skyDirty = 1;
+                    }
                 }
                 if (!(pad0 & KEY_START))
                     startHeld = 0;
-                if ((skyGo && (pad0 & KEY_START) && !startHeld)
+                if ((finFr >= 300 && (pad0 & KEY_START) && !startHeld)
+                    || (split && finCount >= 4 && finFr >= 180)
                     || (CHAMP_AUTO && finFr >= 300))
                 {
                     raceFinish();
                     raceDone = 1;
                 }
             }
-            else
+            if (pl == 0 && (raceState == 1 || split))
             {
+                // the race clock (1P: frozen at the finish; 2P: runs on,
+                // each player keeps their own finish time)
                 rTick += (u8)loopFrames;
                 if (rTick >= 60)
                 {
@@ -2103,7 +2837,6 @@ int main(void)
                         }
                     }
                 }
-                lapFr += loopFrames;
                 // player pace EMA (~3s window) drives the NPC speed tiers;
                 // floored so a parked player still gets a beatable field
                 apu = vAlong < 0 ? 0 : vAlong;
@@ -2111,6 +2844,8 @@ int main(void)
                 if (paceEma < 1500)
                     paceEma = 1500;
             }
+            if (!pFin)
+                lapFr += loopFrames;
         }
 
         // ---- steering: turn authority scales with speed (no speed, no
@@ -2351,14 +3086,25 @@ int main(void)
                     bestTenth = lastLapTenth;
                     hRank = (u8)(bestSec + 1); // force the BEST cell redraw
                 }
-                if (!attract && !raceTT
-                    && raceState == 1 && lapCount >= RACE_LAPS)
+                if (!attract && !raceTT && !pFin
+                    && raceState >= 1 && lapCount >= RACE_LAPS)
                 {
-                    raceState = 2; // chequered flag
+                    pFin = 1; // this player's chequered flag
                     finPos = racePos;
-                    riderFinish(playerPal);
-                    skyUp = 1; // the results table rides the sky from here
-                    uiSkyCompose(skyRows[4], 0, "");
+                    finMin = rMin;
+                    finSecT = rSecT;
+                    finSecU = rSecU;
+                    riderFinish(myPal);
+                    if (raceState == 1)
+                    {
+                        raceState = 2; // the first finish: end sequence
+                        finFr = 0;
+                    }
+                    if (!split)
+                    {
+                        skyUp = 1; // the results table rides the sky
+                        uiSkyCompose(skyRows[4], 0, "");
+                    }
                 }
                 }
             }
@@ -2366,6 +3112,22 @@ int main(void)
         else
             lineArm = 0;
         lapTicks++;
+        // ---- race position: CPU racers ahead (waypoints passed, then
+        // nearer to the next = ahead) + (2P) the other player ----
+        if (raceState && !raceTT)
+        {
+            posAcc = 1;
+            for (bi = 0; bi < npcN; bi++)
+            {
+                rubDiff = (s16)npcProg[bi] - (s16)pProg;
+                if (rubDiff > 0 || (rubDiff == 0 && npcDist[bi] < pDist))
+                    posAcc++;
+            }
+            if (split && ((s16)(sv_pProg - pProg) > 0
+                          || (sv_pProg == pProg && sv_pDist < pDist)))
+                posAcc++;
+            racePos = posAcc;
+        }
 
 #if WAVE_MAX_BUOYS > 0
         // ---- power gates: judge the armed buoy (racing-line order) when
@@ -2427,234 +3189,15 @@ int main(void)
         }
 #endif
 
-        // ---- NPC racers: kinematic waypoint followers (the autopilot's
-        // steering brain), collision-probed so they cannot cross land ----
-        posAcc = 1;
-        if (raceState && !raceTT && raceMode != RM_INTRO) // frozen on the
-            // grid until GO; TT = solo; the flyover has no racers at all
-            for (bi = 0; bi < NPC_COUNT; bi++)
-            {
-                if (npcDone[bi] && npcSpd[bi] < 64) // finished and glided
-                {                                     // to rest: parked
-                    posAcc++; // ahead of anyone still racing
-                    continue;
-                }
-                aimTX = pathX[npcWp[bi]];
-                aimTY = pathY[npcWp[bi]];
-                aimPX = npcX[bi];
-                aimPY = npcY[bi];
-                aimBias = npcBias[bi]; // aims off the shared line (perp of
-                                       // heading): followers never stack up
-                npcA = npcTheta[bi];
-                npcTrig();
-                npcAim(); // wpdx/wpdy (bias-aimed), apc cross, apd dot
-                if (apd < 0)
-                {
-                    // target behind: commit to one side
-                    if (apc <= 0)
-                        npcTheta[bi] += NPC_TURN;
-                    else
-                        npcTheta[bi] -= NPC_TURN;
-                }
-                else if (apc < -(apd >> 3))
-                    npcTheta[bi] += NPC_TURN;
-                else if (apc > (apd >> 3))
-                    npcTheta[bi] -= NPC_TURN;
-                // corner slowdown: half cruise past ~45 deg off the line
-                apu = apc < 0 ? -apc : apc;
-                bq = npcSpd[bi];
-                if (apd < 0 || apu > apd)
-                    bq >>= 1;
-                // velocity along the (pre-turn) heading, 8.8 accums
-                npcVel(); // apc/apd = ((bq >> 5) * trig) >> 2
-                npcFX[bi] += apc;
-                stepX = npcFX[bi] >> 8;
-                npcFX[bi] &= 0x00FF;
-                // NPCs pass straight through buoy cells (3): the lateral
-                // bias lines cross them and snagging there looks broken.
-                // Sand (1) and rope (2) still block.
-                if (stepX)
-                {
-                    collOfs = ((npcY[bi] >> 5) & 127) * 128
-                              + (((u16)(npcX[bi] + stepX) >> 5) & 127);
-                    collProbe();
-                    if (!collVal || collVal == 3)
-                        npcX[bi] = (npcX[bi] + stepX) & 4095;
-                }
-                npcFY[bi] += apd;
-                stepY = npcFY[bi] >> 8;
-                npcFY[bi] &= 0x00FF;
-                if (stepY)
-                {
-                    collOfs = (((u16)(npcY[bi] + stepY) >> 5) & 127) * 128
-                              + ((npcX[bi] >> 5) & 127);
-                    collProbe();
-                    if (!collVal || collVal == 3)
-                        npcY[bi] = (npcY[bi] + stepY) & 4095;
-                }
-                // the start/finish line, as for the player: a TRUE
-                // crossing books the lap (255 -> 0 at the grid); the last
-                // one finishes the rider - it then glides to a stop
-                if (!attract)
-                {
-                    lnDx = (s16)((npcX[bi] - pathX[0]) & 4095);
-                    if (lnDx > 2048)
-                        lnDx -= 4096;
-                    lnDy = (s16)((npcY[bi] - pathY[0]) & 4095);
-                    if (lnDy > 2048)
-                        lnDy -= 4096;
-                    gLat = (lnDx < 0 ? -lnDx : lnDx)
-                           + (lnDy < 0 ? -lnDy : lnDy);
-                    if (gLat < 400)
-                    {
-                        gAlong = (lnDx >> 3) * startNx + (lnDy >> 3) * startNy;
-                        if (gAlong < 0)
-                            npcArm[bi] = 1;
-                        else if (npcArm[bi])
-                        {
-                            npcArm[bi] = 0;
-                            if (npcLap[bi] == 255
-                                || (u16)(npcProg[bi] - npcLapBase[bi])
-                                       >= (u16)(pathCount - 1))
-                            {
-                                npcLapBase[bi] = npcProg[bi];
-                                npcLap[bi]++;
-                                if (npcLap[bi] >= RACE_LAPS
-                                    && npcLap[bi] < 250 && !npcDone[bi])
-                                {
-                                    npcDone[bi] = 1;
-                                    riderFinish(npcPalTab[bi]);
-                                }
-                            }
-                        }
-                    }
-                    else
-                        npcArm[bi] = 0;
-                }
-                if (wpdx < 0)
-                    wpdx = -wpdx;
-                if (wpdy < 0)
-                    wpdy = -wpdy;
-                npcDist[bi] = (u16)(wpdx + wpdy);
-                if (npcDist[bi] < 200)
-                {
-                    npcWp[bi]++;
-                    if (npcWp[bi] >= pathCount)
-                        npcWp[bi] = 0;
-                    npcProg[bi]++;
-                }
-                // attract: recycled traffic. A racer overtaken by more
-                // than 3 waypoints respawns 4 segments ahead (beyond the
-                // sprite draw distance, so no pop) with its progress
-                // pinned ahead of the player: the rubber-band tiers then
-                // slow it down and the demo overtakes it again, forever
-                if (attract && (s16)(pProg - npcProg[bi]) > 3)
-                {
-                    apu = nextWp + 4;
-                    if (apu >= pathCount)
-                        apu -= pathCount;
-                    npcX[bi] = pathX[apu];
-                    npcY[bi] = pathY[apu];
-                    npcWp[bi] = (u8)(apu + 1 >= pathCount ? 0 : apu + 1);
-                    npcProg[bi] = pProg + 4;
-                    npcFX[bi] = 0;
-                    npcFY[bi] = 0;
-                    npcTheta[bi] = startTheta; // the brain corrects it
-                }
-                // schedule rubber-banding: is it ahead of the player?
-                rubDiff = (s16)npcProg[bi] - (s16)pProg;
-                if (rubDiff > 0)
-                    apu = 1;
-                else if (rubDiff < 0)
-                    apu = 0;
-                else // same waypoint: nearer to it = ahead
-                    apu = npcDist[bi] < pDist ? 1 : 0;
-                if (apu)
-                    posAcc++;
-                // ...and should it still be, per its fade schedule? Gap
-                // caps keep the race close for players off autopilot pace:
-                // a scheduled leader never runs away, a faded racer never
-                // falls out of sight
-                if (npcDone[bi])
-                    spdTgt = 0; // finished: ease off and glide to rest
-                else if (lapCount < npcFade[bi])
-                {
-                    if (!apu)
-                        spdTgt = SPD_FAST; // behind schedule: catch up
-                    else if (rubDiff > 3)
-                        spdTgt = SPD_HOLD; // never run away from the player
-                    else
-                        spdTgt = SPD_CRUISE;
-                }
-                else
-                {
-                    // fading: keep SLOW until CLEARLY passed (a tie-boundary
-                    // equilibrium otherwise pins it to the player's tail)
-                    if (rubDiff >= -3)
-                        spdTgt = SPD_SLOW;
-                    else if (rubDiff < -10)
-                        spdTgt = SPD_CRUISE; // far back: stay in sight
-                    else
-                        spdTgt = SPD_HOLD;
-                }
-                if (npcDone[bi]) // a long glide (~220 units, the player
-                    npcSpd[bi] -= npcSpd[bi] >> 4; // pulls up in ~50)
-                else
-                    npcSpd[bi] += (s16)(spdTgt - npcSpd[bi]) >> 3;
-            }
-        if (raceState)
-        {
-            racePos = posAcc;
-            // unstack the racers: when two are within ~28 texels the NPC
-            // shoves off along the dominant axis (land-checked). Cheap
-            // pairwise nudges, deliberately not a flocking system.
-            for (bi = 0; bi < NPC_COUNT; bi++)
-                for (bj = bi + 1; bj <= NPC_COUNT; bj++)
-                {
-                    if (npcDone[bi])
-                        break; // parked riders are never shoved
-                    if (bj < NPC_COUNT)
-                    {
-                        ox = npcX[bj];
-                        oy = npcY[bj];
-                    }
-                    else // the player: NPCs yield, the player never moves
-                    {
-                        ox = skiWX;
-                        oy = skiWY;
-                    }
-                    wpdx = (s16)((npcX[bi] - ox) & 4095);
-                    if (wpdx > 2048)
-                        wpdx -= 4096;
-                    wpdy = (s16)((npcY[bi] - oy) & 4095);
-                    if (wpdy > 2048)
-                        wpdy -= 4096;
-                    if (wpdx > 112 || wpdx < -112 || wpdy > 112 || wpdy < -112)
-                        continue;
-                    apu = wpdx < 0 ? -wpdx : wpdx;
-                    apd = wpdy < 0 ? -wpdy : wpdy;
-                    if (apu >= apd)
-                    {
-                        apc = wpdx >= 0 ? 6 : -6;
-                        collOfs = ((npcY[bi] >> 5) & 127) * 128
-                                  + (((u16)(npcX[bi] + apc) >> 5) & 127);
-                        collProbe();
-                        if (!collVal || collVal == 3) // buoys don't block NPCs
-                            npcX[bi] = (npcX[bi] + apc) & 4095;
-                    }
-                    else
-                    {
-                        apc = wpdy >= 0 ? 6 : -6;
-                        collOfs = (((u16)(npcY[bi] + apc) >> 5) & 127) * 128
-                                  + ((npcX[bi] >> 5) & 127);
-                        collProbe();
-                        if (!collVal || collVal == 3)
-                            npcY[bi] = (npcY[bi] + apc) & 4095;
-                    }
-                }
-        }
 #endif
-
+        // ---- this player's view ----
+        if (split)
+        {
+            vTop = pl ? WAVE_VP_B_TOP : 0;
+            sprSki = pl ? 24 : 0;   // view A: ski 0-1, buoys 2-17, racers
+            sprBuoy = pl ? 26 : 2;  // 18-23; view B: 24-25, 26-41, 42-47
+            sprRacer = pl ? 42 : 18;
+        }
         // split velocity into forward/side components along the heading
         skiSplit();
         if (inWater)
@@ -2676,8 +3219,6 @@ int main(void)
         phase = phaseAcc >> 8;
 
         camPhaseOff = phase * wvStride;
-        camBufOff = (tick & 1) ? 900 : 0;
-        tick++;
 
         // skip building the sky lines — their table entries are never shown
         skip = waveSky[phase];
@@ -2685,48 +3226,41 @@ int main(void)
             skip = 126;
         vbl0 = snes_vblank_count;
         profStartLine = scanline();
-#if SPLIT
-        // the per-tick TM table: both halves show this phase's horizon
-        // (the spike shares one camera; 2P proper uses each view's phase)
-        tmBuf[0] = (u8)skip;
-        tmBuf[1] = 0x10;
-        tmBuf[2] = (u8)(WAVE_LINES2 - skip);
-        tmBuf[3] = 0x13;
-        tmBuf[4] = 16;
-        tmBuf[5] = 0x11;
-        tmBuf[6] = (u8)skip;
-        tmBuf[7] = 0x10;
-        tmBuf[8] = (u8)(WAVE_LINES2 - skip);
-        tmBuf[9] = 0x13;
-        tmBuf[10] = 0;
-        // two half-height viewports from the SAME camera state (the spike):
-        // each builds its own line span - block counts from its first
-        // built line (a half may start inside HDMA block 2)
-        for (bi = 0; bi < 2; bi++)
+        if (split)
         {
-            ox = (bi ? WAVE_VP_B_TOP : 0) + skip; // first built line
-            oy = WAVE_LINES2 - skip;               // lines to build
-            if (ox < 127)
-            {
-                camBlk1Ct = (u16)(127 - ox) < oy ? (u16)(127 - ox) : oy;
-                camDstOff = camBufOff + 1 + 4 * ox;
-            }
-            else
-            {
-                camBlk1Ct = 0;
-                camDstOff = camBufOff + 2 + 4 * ox; // past the $E1 header
-            }
-            camBlk2Ct = oy - camBlk1Ct;
-            camSrcOff = camPhaseOff + 2 * skip;
-            buildCamTables();
+            // this view's half of the per-tick TM table: backdrop above
+            // its horizon, sea below; [4..5] = the HUD strip between
+            bi = pl ? 6 : 0;
+            tmBuf[bi] = (u8)skip;
+            tmBuf[bi + 1] = 0x10;
+            tmBuf[bi + 2] = (u8)(WAVE_LINES2 - skip);
+            tmBuf[bi + 3] = 0x13;
+            tmBuf[4] = 16;
+            tmBuf[5] = 0x11;
+            tmBuf[10] = 0;
+            ox = vTop + skip;        // first built line
+            oy = WAVE_LINES2 - skip; // lines to build
         }
-#else
-        camBlk1Ct = 127 - skip;
-        camBlk2Ct = 97;
+        else
+        {
+            ox = skip;
+            oy = 224 - skip;
+        }
+        // block counts from the first built line (a 2P half may start
+        // inside HDMA block 2: lines 127+)
+        if (ox < 127)
+        {
+            camBlk1Ct = (u16)(127 - ox) < oy ? (u16)(127 - ox) : oy;
+            camDstOff = camBufOff + 1 + 4 * ox;
+        }
+        else
+        {
+            camBlk1Ct = 0;
+            camDstOff = camBufOff + 2 + 4 * ox; // past the $E1 header
+        }
+        camBlk2Ct = oy - camBlk1Ct;
         camSrcOff = camPhaseOff + 2 * skip;
-        camDstOff = camBufOff + 1 + 4 * skip;
         buildCamTables();
-#endif
         profFrames = snes_vblank_count - vbl0;
         profLines = profFrames * 262 + scanline() - profStartLine;
 
@@ -2752,30 +3286,19 @@ int main(void)
         // fires on that vblank, and waveHdma restores ch7 right after.
         // Two stacked sprites: the bottom keeps the old geometry (all the
         // waterline maths anchor to it), the rider's top half sits above
-        oamSet(0, SKI_X, (u16)sprTop, 3, skiFlip, 0, skiLean ? 68 : 64,
-               playerPal);
-        OAM_TALL(0);
-        oamSet(4, SKI_X, (u16)(sprTop - 32), 3, skiFlip, 0,
-               skiLean ? 4 : 0, playerPal);
-        OAM_TALL(4);
+        oamSet(sprSki << 2, SKI_X, (u16)(sprTop + vTop), 3, skiFlip, 0,
+               skiLean ? 68 : 64, myPal);
+        OAM_TALL(sprSki << 2);
+        oamSetEx(sprSki << 2, OBJ_LARGE, OBJ_SHOW);
+        oamSet((sprSki + 1) << 2, SKI_X, (u16)(sprTop + vTop - 32), 3,
+               skiFlip, 0, skiLean ? 4 : 0, myPal);
+        OAM_TALL((sprSki + 1) << 2);
+        oamSetEx((sprSki + 1) << 2, OBJ_LARGE, OBJ_SHOW);
         if (raceMode == RM_INTRO) // flyover: the course alone, no racers
         {
-            oamSetVisible(0, OBJ_HIDE);
-            oamSetVisible(4, OBJ_HIDE);
+            oamSetVisible(sprSki << 2, OBJ_HIDE);
+            oamSetVisible((sprSki + 1) << 2, OBJ_HIDE);
         }
-#if SPLIT
-        // viewport B's ski: ids 46-47 (past the title logo's 38-44; the
-        // 1P layout is buoys 2-17, NPC pairs 18-23, spray 24-31, lamps
-        // 32-37 - B's buoys reuse 24-37 and B's racers 38-43 in the spike)
-        oamSet(184, SKI_X, (u16)(sprTop + WAVE_VP_B_TOP), 3, skiFlip, 0,
-               skiLean ? 68 : 64, playerPal);
-        OAM_TALL(184);
-        oamSetEx(184, OBJ_LARGE, OBJ_SHOW);
-        oamSet(188, SKI_X, (u16)(sprTop + WAVE_VP_B_TOP - 32), 3, skiFlip, 0,
-               skiLean ? 4 : 0, playerPal);
-        OAM_TALL(188);
-        oamSetEx(188, OBJ_LARGE, OBJ_SHOW);
-#endif
 
         // ---- buoys: project into view space, pick scale, ride the water ----
 #if DEBUG_UI
@@ -2789,31 +3312,16 @@ int main(void)
             pjY = buoyY[bi];
             projectPoint();
             if (pjOk)
-                drawLadder((2 + bi) << 2, buoyType[bi]);
+                drawLadder((sprBuoy + bi) << 2, buoyType[bi]);
             else
-                oamSetVisible((2 + bi) << 2, OBJ_HIDE);
+                oamSetVisible((sprBuoy + bi) << 2, OBJ_HIDE);
         }
-#if SPLIT
-        for (bi = 0; bi < buoyCount; bi++) // viewport B: ids 24-37
-        {
-            pjX = buoyX[bi];
-            pjY = buoyY[bi];
-            projectPoint();
-            if (pjOk)
-            {
-                rdRow += WAVE_VP_B_TOP;
-                drawLadder((24 + bi) << 2, buoyType[bi]);
-            }
-            else
-                oamSetVisible((24 + bi) << 2, OBJ_HIDE);
-        }
-#endif
 #endif
 #if WAVE_MAX_PATH > 0
         // ---- start-light tree: reds count the gun down one at a time,
         // greens light together at GO, and a couple of seconds later the
         // whole tree floats up, each row hiding as it meets the HUD ----
-        if (ltState < 3 && !SPLIT)
+        if (ltState < 3 && (!split || pl == 0)) // 2P: the top half's
         {
             if (raceState == 0)
                 ltRed = rTick >= 180 ? 3 : rTick >= 120 ? 2
@@ -2830,26 +3338,26 @@ int main(void)
             {
                 ox = 104 + ((u16)gj << 4);
                 if (ltY < 34) // row reaches the HUD band: gone
-                    oamSetVisible((LIGHT_SPR + gj) << 2, OBJ_HIDE);
+                    oamSetVisible((ltSpr + gj) << 2, OBJ_HIDE);
                 else
                 {
                     oy = raceState == 0 && gj < ltRed ? WAVE_LIGHT_CELL + 2
                                                       : WAVE_LIGHT_CELL;
-                    oamSet((LIGHT_SPR + gj) << 2, ox, (u16)ltY, 3, 0, 0,
+                    oamSet((ltSpr + gj) << 2, ox, (u16)ltY, 3, 0, 0,
                            oy, 4);
-                    oamSetEx((LIGHT_SPR + gj) << 2, OBJ_SMALL, OBJ_SHOW);
+                    oamSetEx((ltSpr + gj) << 2, OBJ_SMALL, OBJ_SHOW);
                 }
                 if (ltY + 16 < 34)
                 {
-                    oamSetVisible((LIGHT_SPR + 3 + gj) << 2, OBJ_HIDE);
+                    oamSetVisible((ltSpr + 3 + gj) << 2, OBJ_HIDE);
                     ltState = 3; // bottom row gone too: tree done
                 }
                 else
                 {
                     oy = raceState ? WAVE_LIGHT_CELL + 4 : WAVE_LIGHT_CELL;
-                    oamSet((LIGHT_SPR + 3 + gj) << 2, ox, (u16)(ltY + 16),
+                    oamSet((ltSpr + 3 + gj) << 2, ox, (u16)(ltY + 16),
                            3, 0, 0, oy, 4);
-                    oamSetEx((LIGHT_SPR + 3 + gj) << 2, OBJ_SMALL, OBJ_SHOW);
+                    oamSetEx((ltSpr + 3 + gj) << 2, OBJ_SMALL, OBJ_SHOW);
                 }
             }
         }
@@ -2862,7 +3370,7 @@ int main(void)
         // project all three first, then hand out the OAM pairs NEAREST
         // FIRST: sprite-vs-sprite priority is OAM order, so a passing
         // racer must take the earlier pair or its halves layer wrongly
-        for (bi = 0; bi < NPC_COUNT; bi++)
+        for (bi = 0; bi < npcN; bi++)
         {
             pjX = npcX[bi];
             pjY = npcY[bi];
@@ -2873,25 +3381,27 @@ int main(void)
             npjR[bi] = rdRow;
             nord[bi] = bi;
         }
-        if (npjV[nord[0]] > npjV[nord[1]]) // 3-element sort network
+        nRc = npcN;
+        if (split) // the other player: entry npcN, drawn in their colours
         {
-            nt = nord[0];
-            nord[0] = nord[1];
-            nord[1] = nt;
+            pjX = sv_skiWX;
+            pjY = sv_skiWY;
+            projectPoint();
+            npjOk[npcN] = pjOk;
+            npjV[npcN] = pjOk ? pjV : 0xFFFF;
+            npjC[npcN] = pjCol;
+            npjR[npcN] = rdRow;
+            nord[npcN] = npcN;
+            nRc++;
         }
-        if (npjV[nord[1]] > npjV[nord[2]])
-        {
-            nt = nord[1];
-            nord[1] = nord[2];
-            nord[2] = nt;
-        }
-        if (npjV[nord[0]] > npjV[nord[1]])
-        {
-            nt = nord[0];
-            nord[0] = nord[1];
-            nord[1] = nt;
-        }
-        for (ns = 0; ns < NPC_COUNT; ns++)
+        for (ns = 1; ns < nRc; ns++) // insertion sort, nearest first
+            for (nt = ns; nt > 0 && npjV[nord[nt]] > npjV[nord[nt - 1]]; nt--)
+            {
+                bi = nord[nt];
+                nord[nt] = nord[nt - 1];
+                nord[nt - 1] = bi;
+            }
+        for (ns = 0; ns < nRc; ns++)
         {
             bi = nord[ns];
             if (npjOk[bi])
@@ -2899,47 +3409,39 @@ int main(void)
                 pjV = npjV[bi];
                 pjCol = npjC[bi];
                 rdRow = npjR[bi];
-                drawSki((NPC_SPR + (ns << 1)) << 2,
-                        (NPC_SPR + (ns << 1) + 1) << 2, npcPalTab[bi]);
+                drawSki((sprRacer + (ns << 1)) << 2,
+                        (sprRacer + (ns << 1) + 1) << 2,
+                        bi < npcN ? npcPalTab[bi] : sv_myPal);
             }
             else
             {
-                oamSetVisible((NPC_SPR + (ns << 1)) << 2, OBJ_HIDE);
-                oamSetVisible((NPC_SPR + (ns << 1) + 1) << 2, OBJ_HIDE);
+                oamSetVisible((sprRacer + (ns << 1)) << 2, OBJ_HIDE);
+                oamSetVisible((sprRacer + (ns << 1) + 1) << 2, OBJ_HIDE);
             }
         }
-#if SPLIT
-        // viewport B: project again (the real cost), same order, ids 38-43
-        for (ns = 0; ns < NPC_COUNT; ns++)
-        {
-            bi = nord[ns];
-            pjX = npcX[bi];
-            pjY = npcY[bi];
-            projectPoint();
-            if (pjOk)
-            {
-                rdRow += WAVE_VP_B_TOP;
-                drawSki((38 + (ns << 1)) << 2, (39 + (ns << 1)) << 2,
-                        npcPalTab[bi]);
-            }
-            else
-            {
-                oamSetVisible((38 + (ns << 1)) << 2, OBJ_HIDE);
-                oamSetVisible((39 + (ns << 1)) << 2, OBJ_HIDE);
-            }
-        }
-#endif
         } // !raceTT
 #endif
+        // this view's hull window rows; the 2P HUD row
+        if (pl == 0)
+        {
+            winTopA = waterRow;
+            winBotA = (u16)(sprTop + 31);
+        }
+        else
+        {
+            winTopB = (u16)(waterRow + WAVE_VP_B_TOP);
+            winBotB = (u16)(sprTop + 31 + WAVE_VP_B_TOP);
+        }
+        if (split)
+            hud2();
+        } // ==== the per-player pass ====
 #if DEBUG_UI
         pjPfLines = (snes_vblank_count - pjPfV) * 262 + scanline() - pjPfA;
 #endif
-#if SPLIT
-        // no spray in 2P; both hulls' waterline windows
-        sprY = sprTop + 31;
-        buildWinTab2(waterRow, (u16)sprY, (u16)(waterRow + WAVE_VP_B_TOP),
-                     (u16)(sprY + WAVE_VP_B_TOP));
-#else
+        if (split) // no spray in 2P; both hulls' waterline windows
+            buildWinTab2(winTopA, winBotA, winTopB, winBotB);
+        else
+        {
         // ---- wake conveyor: scroll, then re-fill the top cell ----
         // Scroll rate is a chosen multiple of speed, not the true water
         // velocity (which crosses the whole band in a single loop and just
@@ -3028,7 +3530,7 @@ int main(void)
         if (sprY > 223)
             sprY = 223;
         buildWinTab(waterRow, (u16)sprY);
-#endif
+        }
 
         if ((tick & 3) == 0)
         {
@@ -3083,7 +3585,7 @@ int main(void)
             // row in the baked font), row 0 + columns 0/31 left clear for
             // CRT overscan, everything redrawn only on change. The
             // title/menu overlays own the band during attract ----
-            if (raceMode == RM_RACE && !SPLIT)
+            if (raceMode == RM_RACE && !split)
             {
             if (!hudInit)
             {
@@ -3219,6 +3721,14 @@ int main(void)
             cloudHofs = (u8)(camTheta16 >> 6);
         else
             cloudHofs = 0; // the BG3 title / results table sit still
+        if (hud2Dirty) // the 2P HUD strip rows (composed mid-frame)
+        {
+            if (hud2Dirty & 1)
+                uiMenuRowDma(hud2Row[0], 13);
+            if (hud2Dirty & 2)
+                uiMenuRowDma(hud2Row[1], 14);
+            hud2Dirty = 0;
+        }
         if (skyDirty) // sky text rows (composed mid-frame): the intro
         {             // card in the band, or the results table + prompt
             skyDirty = 0;

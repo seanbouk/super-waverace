@@ -139,6 +139,23 @@ void uiHudSmall(u16 x, u16 y, u16 pal, char *s)
     }
 }
 
+void uiHudSmallTo(u16 *dst, u16 x, u16 pal, char *s)
+{
+    u16 *p = dst + x;
+    while (*s)
+    {
+        *p++ = *s == ' ' ? UI_ATTR : pal | (WAVE_HUD_CHAR0 + hudIdx(*s));
+        s++;
+    }
+}
+
+void uiHudRowClear(u16 *dst)
+{
+    u16 i;
+    for (i = 0; i < UI_COLS; i++)
+        dst[i] = UI_ATTR;
+}
+
 void uiHudBig(u16 x, char *s)
 {
     u16 *t = uiMap + 2 * UI_COLS + x;

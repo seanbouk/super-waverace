@@ -456,6 +456,13 @@ Order: (1) SPIKE - bake the 2P camera + layout, render the same race
 state into both halves, read the tick rate; (2) player context + P2
 input (port 2); (3) the other player as a racer in each view; (4) flow:
 rider select P2 join, race, results page; (5) cuts by measurement.
+Steps 2-4 DONE (Sep 3): see CLAUDE.md "TWO PLAYERS" for the mechanism
+(one per-player pass over swapped state, CPU racers moved once against
+the leading human, per-player positions/finish, 2P HUD strip, join on
+the rider select, PAGE_2P results). Verified end to end in Mesen with
+the SPLIT_AUTO/CHAMP_AUTO harness build (p2nav.lua): join, split race,
+both finishes, results, title. Ticks in 6000 frames: 1P 1701, 2P 1194 (pre-2P
+1P build 1853). Step 5 (cuts) is next if the 2P rate wants it.
 Sprites pop at the seam (no per-sprite clipping) - accepted, as in Mario
 Kart.
 

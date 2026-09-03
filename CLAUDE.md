@@ -268,11 +268,52 @@ Mesen.exe --testrunner --timeout=30 <rom> <script.lua>   # arg order-free
   phases, so no baked per-phase table can serve them; COLDATA is a fixed
   ramp (no crest glow in 2P) that must END on add 0 - HDMA holds the last
   entry (the bottom sea went pale once); the sand fade is csFade2 (one
-  ramp per half, sand_fade_table's `spans`). `#define SPLIT 1` (main.c, ALWAYS 0 for the
-  game) is the measurement spike: same camera into both halves - see
-  PLAN.md "Two-player split screen". Screenshots showed the trap of a
-  FIXED sky switch: sea rows above the true horizon render the far-cap
-  distance as stretched streaks - hence the per-tick TM.
+  ramp per half, sand_fade_table's `spans`). Screenshots showed the trap
+  of a FIXED sky switch: sea rows above the true horizon render the
+  far-cap distance as stretched streaks - hence the per-tick TM. The
+  strip's lines (104-119) are built by NEITHER view, so raceStart zeroes
+  their HOFS table entries in both buffers: $210D is BG1's scroll in mode
+  1 and the HUD rows came out shifted by the last 1P race's sea scroll.
+- **TWO PLAYERS (Sep 3, ARCADE only, `split` runtime):** the ACTIVE
+  player's state IS the globals the race loop always used; the other
+  player's waits in sv_* (~65 scalars: camera, physics, phase, progress,
+  laps, gates, finish, HUD caches, myPal) and ctxSwap() exchanges them;
+  ctxCur says who is in; ctxSet(p) swaps as needed. The loop is ONE
+  per-player pass (`for (pl = 0; pl < nPl; pl++) { ctxSet(pl); ... }`):
+  race flow, steering, physics, progress, line, gates, position, THEN
+  that player's view (velocity split, wave phase, camera tables into its
+  half, ski, buoys, racers) - so 2 swaps a tick. The CPU racers move
+  ONCE, BEFORE the pass, scheduled against refProg/refDist/refLap/refWp
+  = the LEADING human's state from the end of the previous tick (their
+  nudges yield to whichever player is in the globals then); each view
+  draws them post-move, and the OTHER player at their last-tick
+  position (nord/npjV have NPC_COUNT+1 slots; the 4th racer's palette is
+  sv_myPal; a 4-entry insertion sort replaced the 3-network). The race
+  position is per player (posAcc in the pass: CPU racers ahead + the
+  other player). raceState stays SHARED (0 countdown, 1 racing, 2 = the
+  end sequence from the FIRST finish); pFin is per player (engine cut,
+  finMin/finSecT/finSecU = their own finish time; the clock RUNS ON in
+  2P). 2P ends when finCount >= 4 (+3s) or START (P1) after 5s;
+  raceFinish/liveOrder place the unfinished, players included; the
+  results page is champPage(PAGE_2P): finish order, P1/P2 tags, no
+  points. raceStart(): layoutSet, courseLoad, then raceInit for P2 (myPal
+  = p2Pal, initX/Y = npcGrid slot 3), ctxSwap, raceInit for P1 - the
+  globals hold player 0; npcN = 2 (npcPalTab = the two unpicked riders).
+  Sprites per view: A ski 0-1, buoys 2-17, racers 18-23; B ski 24-25,
+  buoys 26-41, racers 42-47; the start tree at 54+ (view A only). vTop
+  (the view's first line) is added inside drawSki/drawLadder. The 2P HUD
+  = one small-font row per player in BG1 rows 13/14 (the strip) composed
+  by hud2() on change into hud2Row[] and DMA'd in the vblank tail: "P1
+  1'23 2ND L2/3 **...". P2 joins on ARCADE's rider select: START on pad
+  2 (p2Join, a P2 tag, pad-2 left/right, never P1's rider, B leaves), P1's
+  START confirms both (p2Pal). Mesen 2.1.1's Lua setInput lands on PAD 1
+  whatever port index it is given (measured: pad_keys[1] never moves), so
+  `SPLIT_AUTO 1` builds take SELECT on pad 1 as P2's START at the rider
+  select and mirror P1's pad onto P2 in the race - tools/mesen/p2nav.lua
+  walks the whole 2P flow with a CHAMP_AUTO 1 + SPLIT_AUTO 1 build (both
+  ALWAYS 0 for release). Real pad 2 = hardware. Measured (AllZeros, 6000
+  frames from power-on, autopilot): 1P 1701 ticks (the pre-2P build 1853),
+  2P 1194.
 - **make skips a source touched in the SAME SECOND its object was
   built** (mtime granularity): a `sed` flip + `touch` + `make` right after
   a build silently rebuilds NOTHING and you copy a stale ROM. `sleep 2`
