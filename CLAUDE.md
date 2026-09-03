@@ -200,16 +200,18 @@ Mesen.exe --testrunner --timeout=30 <rom> <script.lua>   # arg order-free
   native IRQ vector -> irqStub, a 4-byte jml in BANK 0 (bank 0 had 11
   bytes free - the stub is the only thing that fits there) -> irqSwitch
   (camera.asm): ack $4211 (mandatory or it refires), spin on the $4212
-  hblank flag, write $2105=7. The IRQ fires TWICE per frame since Sep 2
-  (irqStage, the handler re-arms VTIMEL; vblTop resets stage 0 + line
-  irqLineSky every frame): stage 0 at irqLineSky = UI_LINES-1 writes the
-  cloud rows' BG3HOFS (cloudHofs, set by the main-loop tail: heading>>6
-  in RM_RACE/RM_INTRO, 0 under the results table) - in the ACTIVE part of
-  line 32 (a blank BG3 row, so invisible), NOT in hblank where the
+  hblank flag, write $2105=7. The IRQ runs a STAGE TABLE per frame
+  (Sep 3: irqLine[i]/irqAct[i], irqN; irqStage = the one being serviced;
+  the handler re-arms VTIMEL for the next; vblTop resets stage 0 + line 0
+  every frame; layoutSet() fills the table). Acts: 0 = the cloud rows'
+  BG3HOFS (cloudHofs, set by the main-loop tail: heading>>6 in RM_RACE/
+  RM_INTRO, 0 under the results table) - written in the ACTIVE part of
+  the next line (a blank BG3 row, so invisible), NOT in hblank where the
   8-channel HDMA burst could split the write-twice pair and poison the
   shared BGOFS latch; vblTop writes BG3HOFS 0 at frame top so the BAND's
-  BG3 (the intro card text) sits still while the clouds turn. Stage 1 at
-  irqLineSea = WAVE_SKY_SWITCH-1 is the mode switch, H dot 260. The NMI
+  BG3 (the intro card text) sits still while the clouds turn; 1 = mode 7;
+  2 = mode 1 (0x09). 1P: {31: 0, 87: 1}. The 2P split: {switch-1: 1,
+  103: 2, 120+switch-1: 1}. H dot 260 throughout. The NMI
   callback (nmiSet -> vblTop) restores mode 0x09 at frame top EVERY frame
   (the main loop is slower than the frame rate). irqOn (camera.asm) does
   the cli. Menus park the timer IRQ (NMITIMEN 0x81): their own BG3HOFS
@@ -246,6 +248,33 @@ Mesen.exe --testrunner --timeout=30 <rom> <script.lua>   # arg order-free
   (Aug 28). Cast the unsigned operand to s16 before multiplying anything
   that can be negative. Reproduce/verify with tools/mesen/revtrace.lua
   (GUI mode, release build: holds Y and traces phase/skiY/waterRow).
+- **The renderer's viewport is parameterised (Sep 3, for the 2P split):**
+  buildCamTables takes camBlk1Ct AND camBlk2Ct (lines to build in HDMA
+  block 1 = lines 0-126 and block 2 = 127-223; either may be 0 - a
+  viewport can start inside block 2; C computes them from the first
+  built line L: block-1 entry offset 1+4L, block-2 offset 2+4L); rowDepth
+  reads rdLast/rdLastOfs (last row / its byte offset: 223/446 for 1P,
+  103/206 for a 2P half); projectPoint's visible depth range is
+  pjNear/pjSpan (176/445 1P, 140/445 CAM2); the phase stride is wvStride
+  (448 / 208) and the ski's px-per-texel skiPpt. layoutSet() sets them
+  all. The 2P tables: CAM2 in tools/wave_params.json (pitch/fovV/lines;
+  camH/fovH/skiDist SHARED - the a-formula, sprite scales and the ski
+  anchor hang off those), baked as wave_rawd2_f<n> + WAVE_LINES2/
+  WAVE_VP_B_TOP/WAVE_SKY_SWITCH2/WAVE_RAW_STRIDE2/WAVE_SKI_PPT_Q4_2, loaded
+  by waveProfLoad2 (same WRAM as 1P's set - only one layout runs at a
+  time; waveSky[] = the half's per-phase horizon). The 2P TM table is
+  COMPOSED PER TICK in tmBuf (12 bytes: backdrop above each half's
+  horizon, sea below, BG1 for the HUD strip) - the halves run different
+  phases, so no baked per-phase table can serve them; COLDATA is a fixed
+  ramp (no crest glow in 2P). `#define SPLIT 1` (main.c, ALWAYS 0 for the
+  game) is the measurement spike: same camera into both halves - see
+  PLAN.md "Two-player split screen". Screenshots showed the trap of a
+  FIXED sky switch: sea rows above the true horizon render the far-cap
+  distance as stretched streaks - hence the per-tick TM.
+- **make skips a source touched in the SAME SECOND its object was
+  built** (mtime granularity): a `sed` flip + `touch` + `make` right after
+  a build silently rebuilds NOTHING and you copy a stale ROM. `sleep 2`
+  between builds in any flip-build-copy chain, and cmp the copies.
 - **Velocity-product overflow rule**: speeds are 8.8 and reach ~4600 since
   the speed doubling; any (v * trig) product must pre-shift v by >>5 (then
   >>2 after) — the old >>4/>>3 pattern overflows s16 above ~4096.
@@ -333,9 +362,11 @@ Mesen.exe --testrunner --timeout=30 <rom> <script.lua>   # arg order-free
   priority field orders against BGs, never other sprites). Consequence:
   multi-sprite entities need ADJACENT ids, and entities that overlap at
   varying depths need their OAM slots assigned by depth per tick. Layout:
-  player pair 0-1, buoys 2-15, NPC pairs 16-21 handed out nearest-first
-  (projections buffered, 3-element sort network), spray 22-29, lamps
-  30-35. A half-covered stacked racer reads as a racer floating by
+  player pair 0-1, buoys 2-17 (WAVE_MAX_BUOYS 16), NPC pairs 18-23 handed
+  out nearest-first (projections buffered, 3-element sort network), spray
+  24-31, lamps 32-37, title logo 38-44 (the SPLIT spike puts viewport B's
+  buoys at 24-37, racers 38-43, ski 46-47 - the old "16-21" note here
+  cost an hour: the B ski landed on NPC pair 3). A half-covered stacked racer reads as a racer floating by
   exactly the seam height - that's how this bug presents.
 - **Mesen: `emu.takeScreenshot()` lags `emu.read(snesSpriteRam)` by exactly 3
   frames** (measured by dumping 21 consecutive frames of OAM state against

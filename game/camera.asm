@@ -26,7 +26,11 @@
 ;                              X = dest entry offset (long,X stores)
 ;
 ; Inputs  (C globals): camTheta, camPX, camPY, camSrcOff, camDstOff,
-;                      camBlk1Ct (sky lines are skipped; C precomputes)
+;                      camBlk1Ct / camBlk2Ct = lines to build in HDMA block
+;                      1 (lines 0-126) / block 2 (127-223); C precomputes
+;                      from the viewport's first built line and line count
+;                      (1P: sky lines skipped, 127-skip / 97; 2P halves:
+;                      either count may be 0 - a half can start in block 2)
 ; Outputs (C globals): camTabs[] tables, camSinVal/camCosVal (s16, +/-127=1.0)
 ;
 ; camTabs layout: +0 M7A | +904 M7C | +1808 M7X | +2712 M7Y | +3616 HOFS,
@@ -190,8 +194,12 @@ camDP dsb 64 ; 0-15 build, 16-31 projectPoint, 32-39 ski, 40-51 npc
     sta.l camTabs + 3602,x     ; M7Y (second word of the X entry)
 .ENDM
 
-; full dual-block build loop for one sign combination
+; full dual-block build loop for one sign combination (16-bit A here)
 .MACRO BUILDBODY
+    lda.b DP_CT
+    bne _l1\@
+    jmp _s2\@                  ; no block-1 lines: X already sits in block 2
+                               ; (a jmp: the line body is past branch range)
 _l1\@:
     OPTLINE \1, \2, \3, \4
     iny
@@ -205,7 +213,11 @@ _l1\@:
     jmp _l1\@
 _b1\@:
     inx                        ; skip the $E1 header byte
-    lda #97
+_s2\@:
+    lda.l camBlk2Ct
+    bne _c2\@
+    jmp buildDone              ; nothing in block 2: done (jmp: range)
+_c2\@:
     sta.b DP_CT
 _l2\@:
     OPTLINE \1, \2, \3, \4
@@ -386,13 +398,13 @@ rowDepth:
     ; instead of up to 223 linear steps. Single mode (16-bit) throughout.
     lda.l camPhaseOff
     clc
-    adc #446
+    adc.l rdLastOfs      ; 2 * rdLast: the viewport's bottom row
     tax
-    lda.l WRD_L,x        ; P(223): bottom row already deep enough?
+    lda.l WRD_L,x        ; P(last): bottom row already deep enough?
     cmp.l rdV
     bcc _rd_srch
     sta.l rdD
-    lda #223
+    lda.l rdLast
     sta.l rdRow
     bra _rd_done
 _rd_srch:
@@ -407,7 +419,7 @@ _rd_srch:
 _rd_bin:
     lda #0               ; invariant: P(lo) true, P(hi) false
     sta.b RD_LO
-    lda #223
+    lda.l rdLast
     sta.b RD_HI
 _rd_iter:
     lda.b RD_LO
@@ -590,8 +602,8 @@ _pj_dyok:
     ; depth cull: 176 <= v <= 620
     lda.b PJ_V
     sec
-    sbc #176
-    cmp #445
+    sbc.l pjNear         ; visible depth range [pjNear, pjNear + pjSpan)
+    cmp.l pjSpan         ; (1P: 176 / 445; the 2P camera sets its own)
     bcs _pj_far
     ; lateral cull: |u| <= 480
     lda.b PJ_U
@@ -1538,9 +1550,13 @@ _wr_anz:
 .ENDS
 
 ;----------------------------------------------------------------------------
-; Scanline IRQ, TWO firings per frame (irqStage, re-armed by rewriting
-; VTIMEL in the handler; the NMI callback in main.c resets stage 0 + the
-; first line every frame):
+; Scanline IRQ, a TABLE of stages per frame (irqLine[i] / irqAct[i], irqN
+; entries; irqStage = the one being serviced; the handler re-arms VTIMEL
+; for the next; the NMI callback in main.c resets stage 0 + line 0 every
+; frame). Acts: 0 = the cloud rows' BG3 scroll (below), 1 = mode 7, 2 =
+; mode 1 (the 2P layout's HUD strip between the halves). 1P runs
+; {31: scroll, 87: mode 7}; the 2P split {switch-1: 7, 103: 1, 120+switch-1:
+; 7}. The two 1P stages, for the record:
 ;  stage 0, line irqLineSky (= UI_LINES-1, the band's last line): the
 ;    cloud rows' BG3 scroll (cloudHofs, set by the main loop) - the band
 ;    above keeps the 0 the NMI wrote, so text on BG3 rows 1-3 (the intro
@@ -1565,41 +1581,55 @@ irqStub:
 
 .SECTION ".irqsw" SUPERFREE
 irqSwitch:
-    rep #$20
-    pha                  ; 16-bit push: covers A whatever mode we landed in
+    rep #$30
+    pha                  ; 16-bit pushes: cover A/X whatever mode we landed in
+    phx
+    lda.l irqStage
+    and #$00FF
+    tax                  ; X = stage index (16-bit, for the long,X tables)
     sep #$20
     lda.l $004211        ; TIMEUP: acknowledge the timer IRQ
-    lda.l irqStage
-    bne _irq_sea
-_irq_hb:                 ; stage 0: wait for hblank...
+    lda.l irqAct,x
+    beq _irq_scroll
+    cmp #$02
+    beq _irq_m1
+_irq_w7:                 ; act 1: mode 7, in hblank
     lda.l $004212        ; HVBJOY
     and #$40             ; hblank flag
-    beq _irq_hb
-_irq_act:                ; ...and for it to END (the HDMA burst is done)
-    lda.l $004212
-    and #$40
-    bne _irq_act
-    lda.l cloudHofs      ; BG3HOFS write-twice pair, uninterruptible now
-    sta.l $002111
-    lda #$00
-    sta.l $002111
-    lda.l irqLineSea     ; re-arm for the mode switch
-    sta.l $004209
-    lda #$01
-    sta.l irqStage
-    bra _irq_done
-_irq_sea:                ; stage 1: the mode switch, in hblank
-    lda.l $004212
-    and #$40
-    beq _irq_sea
+    beq _irq_w7
     lda #$07
-    sta.l $002105        ; sea rows: mode 7
-    lda.l irqLineSky     ; re-arm for next frame's cloud scroll
-    sta.l $004209
+    sta.l $002105
+    bra _irq_next
+_irq_m1:                 ; act 2: mode 1 (+ BG3 priority), in hblank
+    lda.l $004212
+    and #$40
+    beq _irq_m1
+    lda #$09
+    sta.l $002105
+    bra _irq_next
+_irq_scroll:             ; act 0: wait for hblank...
+    lda.l $004212
+    and #$40
+    beq _irq_scroll
+_irq_act:                ; ...and for it to END (the HDMA burst is done):
+    lda.l $004212        ; the pair lands in the active part of a blank
+    and #$40             ; BG3 row, uninterruptible
+    bne _irq_act
+    lda.l cloudHofs
+    sta.l $002111
     lda #$00
+    sta.l $002111
+_irq_next:
+    inx
+    txa                  ; next stage (low byte)
+    cmp.l irqN
+    bcs _irq_done        ; last one this frame: the NMI re-arms line 0
     sta.l irqStage
+    lda.l irqLine,x
+    sta.l $004209
 _irq_done:
-    rep #$20
+    rep #$30
+    plx
     pla
     rti
 

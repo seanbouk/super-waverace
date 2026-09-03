@@ -65,10 +65,20 @@ extern void npcAim(void); // aimT/aimP/aimBias + npcTrig -> wpdx/wpdy (bias-
                           // aimed), apc = cross, apd = dot
 extern void npcVel(void); // apc/apd = ((bq >> 5) * npcSin/Cos) >> 2
 extern void irqOn(void);  // camera.asm: cli, once the timer regs are set
-// the two-stage scanline IRQ (camera.asm irqSwitch): stage 0 at
-// irqLineSky writes the cloud rows' BG3 scroll (cloudHofs), stage 1 at
-// irqLineSea flips to mode 7; vblTop resets the stage each frame
-u8 irqStage, irqLineSky, irqLineSea, cloudHofs;
+// the scanline IRQ's stage table (camera.asm irqSwitch): irqLine[i] fires
+// irqAct[i] (0 = the cloud rows' BG3 scroll = cloudHofs, 1 = mode 7, 2 =
+// mode 1), irqN stages per frame; vblTop resets to stage 0 each frame.
+// layoutSet() fills it for the 1P screen or the 2P split
+u8 irqStage, irqN, cloudHofs;
+u8 irqLine[4], irqAct[4];
+// per-layout renderer parameters (camera.asm reads them): the second HDMA
+// block's line count, the depth table's last row (+ its byte offset), the
+// visible depth range, the per-phase raw stride, the ski's px-per-texel
+u16 camBlk2Ct, rdLast, rdLastOfs, pjNear, pjSpan, wvStride, skiPpt;
+// the 2P TM table, composed per tick from both halves' horizons (backdrop
+// above each horizon, sea below, BG1 for the HUD strip): the two halves
+// run different phases, so no baked per-phase table can serve them
+u8 tmBuf[12];
 extern void waveRawLoad(void); // camera.asm: decode wrSrc's delta-d stream
                                // + synthesise a into WRAM $7F
 
@@ -109,6 +119,12 @@ u8 skiDist8, thrF8, thrR8;
 // advances, so the whole 6-race loop cycles hands-free under a Lua
 // screenshot sweep in Mesen GUI mode. ALWAYS 0 for release builds.
 #define CHAMP_AUTO 0
+// SPLIT-SCREEN SPIKE (Sep 3): render the SAME race state into two half-
+// height viewports (the 2P layout: viewport A lines 0-103, the HUD strip
+// 104-119, viewport B from 120) with the 2P camera tables, a second
+// projection pass, no spray / HUD / start tree / clouds - to MEASURE the
+// loop cost of two views before the second player exists. 0 = the game.
+#define SPLIT 0
 
 #define TURN_SPEED 2
 // championship intro flyover: skiVX/VY are SET each tick (no thrust,
@@ -426,6 +442,25 @@ static void buildWinTab(u16 top, u16 bot)
     *w = 0x00;
 }
 
+// the 2P split: two hulls, two masked spans (viewport A's, then B's)
+static void buildWinTab2(u16 topA, u16 botA, u16 topB, u16 botB)
+{
+    u8 *w = winTab;
+    if (botA > 223)
+        botA = 223;
+    if (botB > 223)
+        botB = 223;
+    w = winPut(w, topA, 0xFF, 0x00);
+    if (botA >= topA)
+        w = winPut(w, botA - topA + 1, 0x00, 0xFF);
+    if (topB > botA + 1)
+        w = winPut(w, topB - botA - 1, 0xFF, 0x00);
+    if (botB >= topB)
+        w = winPut(w, botB - topB + 1, 0x00, 0xFF);
+    w = winPut(w, 1, 0xFF, 0x00);
+    *w = 0x00;
+}
+
 //---------------------------------------------------------------------------------
 // Shift the cell ladder down and write a new intensity at the top. Intensity
 // comes from sprWet, a smoothed in-water speed, NOT an instantaneous sample:
@@ -565,7 +600,11 @@ static void drawSki(u16 oid, u16 tid, u8 pal)
 //---------------------------------------------------------------------------------
 static void waveHdma(u16 ph, u16 bufOff)
 {
+#if SPLIT
+    dmaTM.mem.p = (u8 *)tmBuf; // composed per tick (see the build)
+#else
     dmaTM.mem.p = waveTM[ph];
+#endif
     dmaG.mem.p = waveG[ph];
 
     REG_HDMAEN = 0;
@@ -629,7 +668,44 @@ static void vblTop(void)
     REG_BG3HOFS = 0; // the band's BG3 (intro text) sits still; the
     REG_BG3HOFS = 0; // line-31 IRQ scrolls the cloud rows below it
     irqStage = 0;
-    REG_VTIMEL = irqLineSky;
+    REG_VTIMEL = irqLine[0];
+}
+
+// the screen layout: the IRQ stage table and the renderer's viewport
+// parameters, for the 1P screen or (SPLIT) the 2P split
+static void layoutSet(void)
+{
+#if SPLIT
+    irqLine[0] = WAVE_SKY_SWITCH2 - 1; // viewport A: mode 7 at its switch
+    irqAct[0] = 1;
+    irqLine[1] = WAVE_LINES2 - 1;      // the HUD strip: mode 1
+    irqAct[1] = 2;
+    irqLine[2] = WAVE_VP_B_TOP + WAVE_SKY_SWITCH2 - 1; // viewport B
+    irqAct[2] = 1;
+    irqN = 3;
+    rdLast = WAVE_LINES2 - 1;
+    rdLastOfs = 2 * (WAVE_LINES2 - 1);
+    pjNear = 140; // CAM2's bottom row is ~144-164 texels out
+    pjSpan = 445;
+    wvStride = WAVE_RAW_STRIDE2;
+    skiPpt = WAVE_SKI_PPT_Q4_2;
+#else
+    irqLine[0] = WAVE_UI_LINES - 1;   // cloud scroll at the band's edge
+    irqAct[0] = 0;
+    irqLine[1] = WAVE_SKY_SWITCH - 1; // the mode switch
+    irqAct[1] = 1;
+    irqN = 2;
+    rdLast = 223;
+    rdLastOfs = 446;
+    pjNear = 176;
+    pjSpan = 445;
+    wvStride = WAVE_RAW_STRIDE;
+    skiPpt = WAVE_SKI_PPT_Q4;
+#endif
+    irqStage = 0;
+    cloudHofs = 0;
+    REG_VTIMEL = irqLine[0];
+    REG_VTIMEH = 0;
 }
 
 //---------------------------------------------------------------------------------
@@ -642,7 +718,11 @@ static void courseLoad(u8 c)
 {
     setScreenOff();
     courseGeom(c);
+#if SPLIT
+    waveProfLoad2(courseProf); // the half-height viewport tables
+#else
     waveProfLoad(courseProf);
+#endif
     waveRawLoad();
     // NB member-by-member: tcc copies only 16 BITS of a pointer-var to
     // pointer-var assignment (the bank byte never lands) - the (u8*)&sym
@@ -1579,12 +1659,7 @@ int main(void)
     REG_BGMODE = 0x09; // valid until the first IRQ fires
     REG_HTIMEL = 260 & 0xFF; // just before hblank; the handler spins
     REG_HTIMEH = 260 >> 8;   // on the hblank flag for the last few dots
-    irqStage = 0;
-    irqLineSky = WAVE_UI_LINES - 1;  // stage 0: cloud scroll
-    irqLineSea = WAVE_SKY_SWITCH - 1; // stage 1: mode switch
-    cloudHofs = 0;
-    REG_VTIMEL = irqLineSky;
-    REG_VTIMEH = 0;
+    layoutSet(); // the IRQ stage table + viewport parameters
     REG_NMITIMEN = 0xB1; // NMI + V=V,H=H timer IRQ + auto-joypad
     irqOn();             // camera.asm: cli
 
@@ -2593,7 +2668,7 @@ int main(void)
                    & wvMask;
         phase = phaseAcc >> 8;
 
-        camPhaseOff = phase * WAVE_RAW_STRIDE;
+        camPhaseOff = phase * wvStride;
         camBufOff = (tick & 1) ? 900 : 0;
         tick++;
 
@@ -2601,13 +2676,50 @@ int main(void)
         skip = waveSky[phase];
         if (skip > 126)
             skip = 126;
-        camBlk1Ct = 127 - skip;
-        camSrcOff = camPhaseOff + 2 * skip;
-        camDstOff = camBufOff + 1 + 4 * skip;
-
         vbl0 = snes_vblank_count;
         profStartLine = scanline();
+#if SPLIT
+        // the per-tick TM table: both halves show this phase's horizon
+        // (the spike shares one camera; 2P proper uses each view's phase)
+        tmBuf[0] = (u8)skip;
+        tmBuf[1] = 0x10;
+        tmBuf[2] = (u8)(WAVE_LINES2 - skip);
+        tmBuf[3] = 0x13;
+        tmBuf[4] = 16;
+        tmBuf[5] = 0x11;
+        tmBuf[6] = (u8)skip;
+        tmBuf[7] = 0x10;
+        tmBuf[8] = (u8)(WAVE_LINES2 - skip);
+        tmBuf[9] = 0x13;
+        tmBuf[10] = 0;
+        // two half-height viewports from the SAME camera state (the spike):
+        // each builds its own line span - block counts from its first
+        // built line (a half may start inside HDMA block 2)
+        for (bi = 0; bi < 2; bi++)
+        {
+            ox = (bi ? WAVE_VP_B_TOP : 0) + skip; // first built line
+            oy = WAVE_LINES2 - skip;               // lines to build
+            if (ox < 127)
+            {
+                camBlk1Ct = (u16)(127 - ox) < oy ? (u16)(127 - ox) : oy;
+                camDstOff = camBufOff + 1 + 4 * ox;
+            }
+            else
+            {
+                camBlk1Ct = 0;
+                camDstOff = camBufOff + 2 + 4 * ox; // past the $E1 header
+            }
+            camBlk2Ct = oy - camBlk1Ct;
+            camSrcOff = camPhaseOff + 2 * skip;
+            buildCamTables();
+        }
+#else
+        camBlk1Ct = 127 - skip;
+        camBlk2Ct = 97;
+        camSrcOff = camPhaseOff + 2 * skip;
+        camDstOff = camBufOff + 1 + 4 * skip;
         buildCamTables();
+#endif
         profFrames = snes_vblank_count - vbl0;
         profLines = profFrames * 262 + scanline() - profStartLine;
 
@@ -2624,7 +2736,7 @@ int main(void)
         waterRow = waveSkiRow[phase];
         diff88 = skiY - surf88; // positive = above the surface
         sprTop = (s16)waterRow - WAVE_SKI_REST_ROW
-                 - (((diff88 >> 4) * WAVE_SKI_PPT_Q4) >> 8);
+                 - (((diff88 >> 4) * (s16)skiPpt) >> 8);
         if (sprTop < 24)
             sprTop = 24;
         if (sprTop > 190)
@@ -2644,6 +2756,19 @@ int main(void)
             oamSetVisible(0, OBJ_HIDE);
             oamSetVisible(4, OBJ_HIDE);
         }
+#if SPLIT
+        // viewport B's ski: ids 46-47 (past the title logo's 38-44; the
+        // 1P layout is buoys 2-17, NPC pairs 18-23, spray 24-31, lamps
+        // 32-37 - B's buoys reuse 24-37 and B's racers 38-43 in the spike)
+        oamSet(184, SKI_X, (u16)(sprTop + WAVE_VP_B_TOP), 3, skiFlip, 0,
+               skiLean ? 68 : 64, playerPal);
+        OAM_TALL(184);
+        oamSetEx(184, OBJ_LARGE, OBJ_SHOW);
+        oamSet(188, SKI_X, (u16)(sprTop + WAVE_VP_B_TOP - 32), 3, skiFlip, 0,
+               skiLean ? 4 : 0, playerPal);
+        OAM_TALL(188);
+        oamSetEx(188, OBJ_LARGE, OBJ_SHOW);
+#endif
 
         // ---- buoys: project into view space, pick scale, ride the water ----
 #if DEBUG_UI
@@ -2661,12 +2786,27 @@ int main(void)
             else
                 oamSetVisible((2 + bi) << 2, OBJ_HIDE);
         }
+#if SPLIT
+        for (bi = 0; bi < buoyCount; bi++) // viewport B: ids 24-37
+        {
+            pjX = buoyX[bi];
+            pjY = buoyY[bi];
+            projectPoint();
+            if (pjOk)
+            {
+                rdRow += WAVE_VP_B_TOP;
+                drawLadder((24 + bi) << 2, buoyType[bi]);
+            }
+            else
+                oamSetVisible((24 + bi) << 2, OBJ_HIDE);
+        }
+#endif
 #endif
 #if WAVE_MAX_PATH > 0
         // ---- start-light tree: reds count the gun down one at a time,
         // greens light together at GO, and a couple of seconds later the
         // whole tree floats up, each row hiding as it meets the HUD ----
-        if (ltState < 3)
+        if (ltState < 3 && !SPLIT)
         {
             if (raceState == 0)
                 ltRed = rTick >= 180 ? 3 : rTick >= 120 ? 2
@@ -2761,11 +2901,38 @@ int main(void)
                 oamSetVisible((NPC_SPR + (ns << 1) + 1) << 2, OBJ_HIDE);
             }
         }
+#if SPLIT
+        // viewport B: project again (the real cost), same order, ids 38-43
+        for (ns = 0; ns < NPC_COUNT; ns++)
+        {
+            bi = nord[ns];
+            pjX = npcX[bi];
+            pjY = npcY[bi];
+            projectPoint();
+            if (pjOk)
+            {
+                rdRow += WAVE_VP_B_TOP;
+                drawSki((38 + (ns << 1)) << 2, (39 + (ns << 1)) << 2,
+                        npcPalTab[bi]);
+            }
+            else
+            {
+                oamSetVisible((38 + (ns << 1)) << 2, OBJ_HIDE);
+                oamSetVisible((39 + (ns << 1)) << 2, OBJ_HIDE);
+            }
+        }
+#endif
         } // !raceTT
 #endif
 #if DEBUG_UI
         pjPfLines = (snes_vblank_count - pjPfV) * 262 + scanline() - pjPfA;
 #endif
+#if SPLIT
+        // no spray in 2P; both hulls' waterline windows
+        sprY = sprTop + 31;
+        buildWinTab2(waterRow, (u16)sprY, (u16)(waterRow + WAVE_VP_B_TOP),
+                     (u16)(sprY + WAVE_VP_B_TOP));
+#else
         // ---- wake conveyor: scroll, then re-fill the top cell ----
         // Scroll rate is a chosen multiple of speed, not the true water
         // velocity (which crosses the whole band in a single loop and just
@@ -2854,6 +3021,7 @@ int main(void)
         if (sprY > 223)
             sprY = 223;
         buildWinTab(waterRow, (u16)sprY);
+#endif
 
         if ((tick & 3) == 0)
         {
@@ -2908,7 +3076,7 @@ int main(void)
             // row in the baked font), row 0 + columns 0/31 left clear for
             // CRT overscan, everything redrawn only on change. The
             // title/menu overlays own the band during attract ----
-            if (raceMode == RM_RACE)
+            if (raceMode == RM_RACE && !SPLIT)
             {
             if (!hudInit)
             {

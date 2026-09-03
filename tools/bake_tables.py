@@ -95,6 +95,17 @@ def load_params():
 
 P = load_params()
 TAN_HALF_H = math.tan(math.radians(P["fovH"]) / 2)
+# The 2P split-screen camera: SAME camH/fovH/skiDist (the a-formula, sprite
+# scales and the ski anchor hang off those), pitched down with a narrower
+# vertical field over LINES2 lines per half (both halves are identical
+# viewports at different rows). Layout: viewport A lines 0..LINES2-1, the
+# two HUD rows 104..119 (back to back, the divider), viewport B from 120.
+CAM2 = dict(pitch=-14.0, fovV=24.0, lines=104)
+CAM2.update(P.get("cam2", {}))
+LINES2 = int(CAM2["lines"])
+HUD2_TOP = LINES2          # the divider strip: two 8-line HUD rows
+VP_B_TOP = LINES2 + 16
+assert VP_B_TOP + LINES2 == SCANLINES, "2P layout must tile 224 lines"
 K_WAVE = 2 * math.pi / P["wavelength"]
 
 
@@ -140,6 +151,47 @@ def raycast_phase(phi):
         n_sky += 1
     sea = [h if h is not None else P["maxX"] for h in hits[n_sky:]]
     return n_sky, sea
+
+
+def raycast_lines(phi, pitch, fovV, lines):
+    """raycast_phase for an arbitrary camera pitch / vertical field / line
+    count (the 2P half-height viewport)."""
+    hits = []
+    for i in range(lines):
+        frac = i / (lines - 1)
+        ang = math.radians(pitch + fovV / 2 - frac * fovV)
+        hits.append(cast(ang, phi))
+    n_sky = 0
+    while n_sky < lines and hits[n_sky] is None:
+        n_sky += 1
+    sea = [h if h is not None else P["maxX"] for h in hits[n_sky:]]
+    return n_sky, sea
+
+
+def split_tables(switch2, sky_top, max_sky):
+    """The 2P layout's TM and COLDATA tables - FIXED (phase-independent):
+    each half is backdrop-only sky to its switch (a linear COLDATA ramp from
+    0 to the strip value - no tiled gradient, no clouds), then the sea with
+    NO crest glow (the two halves run different phases, and one baked
+    per-phase table cannot serve both); between them the HUD strip, BG1
+    only, add 0. Sea rows above a phase's true horizon carry the far-cap
+    distance, so the horizon reads flat at the switch line."""
+    def half(top):
+        tm = repeat_blocks(switch2, SKY_TM) \
+            + repeat_blocks(LINES2 - switch2, SEA_TM)
+        g = []
+        for i in range(switch2):
+            g.append((0xE0 | min(31, round(sky_top * i / max(1, switch2 - 1))),))
+        for i in range(max_sky - switch2):  # the safe strip: hold the ramp's
+            g.append((0xE0 | min(31, sky_top),))  # end to the deepest horizon
+        return tm, g
+    tm_a, g_a = half(0)
+    tm_b, g_b = half(VP_B_TOP)
+    tab_tm = bytes(tm_a + repeat_blocks(16, 0x11) + tm_b
+                   + bytearray((0x00,)))
+    g_entries = g_a + [(0xE0,)] * (LINES2 - max_sky + 16) + g_b
+    tab_g = hdma_table(0, (0xE0,), g_entries)
+    return tab_tm, tab_g
 
 
 # ---- HDMA table encoding -------------------------------------------------
@@ -1801,6 +1853,21 @@ def bake_profile(pp, sky_switch, sky_ref):
         out["surf_h"].append(round(P["amp"] * math.sin(K_WAVE * P["skiDist"] + phi)))
     out["rawd"] = encode_delta(raw_d)
     out["raw_words"] = len(raw_d)
+    # ---- the 2P half-height viewport: same maths, CAM2's pitch/fovV/lines
+    raw_d2, out["sky2"], out["ski_row2"] = [], [], []
+    for p in range(phases):
+        phi = 2 * math.pi * p / phases
+        n_sky, sea_x = raycast_lines(phi, CAM2["pitch"], CAM2["fovV"], LINES2)
+        xs = [P["maxX"]] * n_sky + sea_x
+        d_words = [round(x) & 0xFFFF for x in xs]
+        raw_d2 += d_words
+        out["sky2"].append(n_sky)
+        row = LINES2 - 1
+        while row > 0 and d_words[row] < P["skiDist"]:
+            row -= 1
+        out["ski_row2"].append(row)
+    out["rawd2"] = encode_delta(raw_d2)
+    out["raw_words2"] = len(raw_d2)
     return out
 
 
@@ -2032,6 +2099,19 @@ def main():
 
     # ---- bake every profile and course ----
     baked_profs = [bake_profile(pp, sky_switch, sky_ref) for pp in profiles]
+    # ---- 2P split layout: one fixed switch per half (the deepest horizon
+    # of every profile under CAM2, less the safe margin, to a tile row)
+    switch2 = ((min(min(bp["sky2"]) for bp in baked_profs) - SKY_SAFE)
+               // 8) * 8
+    assert 8 <= switch2 <= 40, "2P switch out of range: {0}".format(switch2)
+    max_sky2 = max(max(bp["sky2"]) for bp in baked_profs)
+    tm2, g2 = split_tables(switch2, round(sky_add_at(sky_switch, sky_ref)),
+                           max_sky2)
+    ski_ppt2 = round((P["camH"] / (P["skiDist"] ** 2 + P["camH"] ** 2))
+                     * ((LINES2 - 1) / math.radians(CAM2["fovV"])) * 2 * 16)
+    print("2P layout: switch {0}, ski rows {1}, stride {2}, ppt {3}".format(
+        switch2, sorted(set(sum((bp["ski_row2"] for bp in baked_profs), []))),
+        LINES2 * 2, ski_ppt2))
     baked_courses = [bake_course(cdir, sky_switch, sky_ref)
                      for _, cdir, _, _ in course_meta]
     for i, ((folder, cdir, mname, pi), bc) in enumerate(
@@ -2064,6 +2144,21 @@ def main():
         asm.append(".ends")
         asm.append("")
         externs.append("extern char wave_rawd_f{0};".format(pf))
+        asm.append('.section ".wraw2{0}" superfree'.format(pf))
+        asm.append("wave_rawd2_f{0}:".format(pf))
+        asm.append(db_lines(bp["rawd2"]))
+        asm.append(".ends")
+        asm.append("")
+        externs.append("extern char wave_rawd2_f{0};".format(pf))
+    asm.append('.section ".wsplit" superfree')
+    asm.append("wave_tm2:")
+    asm.append(db_lines(tm2))
+    asm.append("wave_g2:")
+    asm.append(db_lines(g2))
+    asm.append(".ends")
+    asm.append("")
+    externs.append("extern char wave_tm2;")
+    externs.append("extern char wave_g2;")
 
     # ---- the cross-course TILE POOL ----
     # Every course's 256 Mode 7 tiles come from the same water pattern and
@@ -2232,6 +2327,13 @@ def main():
 /* sky text font (BG3 2bpp, results table): A-Z 0-9 - # from this id */
 #define WAVE_SKYF_CHAR0 {{SKF0}}
 #define WAVE_SKYF_BYTES {{SKFB}}
+/* 2P split screen: half-height viewports (CAM2 in wave_params.json) at
+   lines 0 and WAVE_VP_B_TOP, the two HUD rows between; fixed sky switch */
+#define WAVE_LINES2 {{LN2}}
+#define WAVE_VP_B_TOP {{VPB}}
+#define WAVE_SKY_SWITCH2 {{SW2}}
+#define WAVE_RAW_STRIDE2 {{ST2}}
+#define WAVE_SKI_PPT_Q4_2 {{PP2}}
 #define WAVE_CLOUD_SHADE 0x{{CLSH}}
 #define WAVE_UI_LINES {2}
 #define WAVE_BASE_ROLL 64
@@ -2248,7 +2350,8 @@ extern s8 waveSurfH[WAVE_MAX_PHASES];
 extern u16 wvSteps; /* phase steps per (vAlong>>4) texel, from wavelength */
 extern u16 wvMask;  /* phases*256 - 1 */
 extern dmaMemory wrSrc; /* delta-d stream for waveRawLoad (camera.asm) */
-extern u16 wrWords;     /* decoded d words (= phases * 224) */
+extern u16 wrWords;     /* decoded d words (= phases * lines) */
+void waveProfLoad2(u8 pf); /* the 2P viewport set of the same profile */
 
 /* per-course geometry: counts, start grid (world units, ski positions;
    heading in binary degrees), buoys, racing line - filled by courseGeom */
@@ -2321,6 +2424,11 @@ void courseNameTo(u8 c, char *out);
            .replace("{{CLCH}}", str(cloud_chars))
            .replace("{{SKF0}}", str(SKYF_CHAR0))
            .replace("{{SKFB}}", str(SKYF_BYTES))
+           .replace("{{LN2}}", str(LINES2))
+           .replace("{{VPB}}", str(VP_B_TOP))
+           .replace("{{SW2}}", str(switch2))
+           .replace("{{ST2}}", str(LINES2 * 2))
+           .replace("{{PP2}}", str(ski_ppt2))
            .replace("{{CLSH}}", "{0:04X}".format(
                ((CLOUD_SHADE[2] >> 3) << 10) | ((CLOUD_SHADE[1] >> 3) << 5)
                | (CLOUD_SHADE[0] >> 3)))
@@ -2371,6 +2479,29 @@ void courseNameTo(u8 c, char *out);
             f.write("        wvMask = {0};\n".format(bp["mask"]))
             f.write("        wrSrc.mem.p = (u8 *)&wave_rawd_f{0};\n".format(pf))
             f.write("        wrWords = {0};\n".format(bp["raw_words"]))
+            f.write("        break;\n")
+        f.write("    }\n}\n\n")
+
+        # the 2P viewport set: fixed TM/G tables for every phase, the
+        # half-height d stream, a constant sky skip (the fixed switch)
+        f.write("void waveProfLoad2(u8 pf)\n{\n    u8 p;\n"
+                "    for (p = 0; p < WAVE_MAX_PHASES; p++)\n    {\n"
+                "        waveTM[p] = (u8 *)&wave_tm2;\n"
+                "        waveG[p] = (u8 *)&wave_g2;\n"
+                "    }\n"
+                "    switch (pf)\n    {\n")
+        for pf, bp in enumerate(baked_profs):
+            f.write("    case {0}:\n".format(pf))
+            for p, v in enumerate(bp["sky2"]):
+                f.write("        waveSky[{0}] = {1};\n".format(p, v))
+            for p, v in enumerate(bp["ski_row2"]):
+                f.write("        waveSkiRow[{0}] = {1};\n".format(p, v))
+            for p, v in enumerate(bp["surf_h"]):
+                f.write("        waveSurfH[{0}] = {1};\n".format(p, v))
+            f.write("        wvSteps = {0};\n".format(bp["steps"]))
+            f.write("        wvMask = {0};\n".format(bp["mask"]))
+            f.write("        wrSrc.mem.p = (u8 *)&wave_rawd2_f{0};\n".format(pf))
+            f.write("        wrWords = {0};\n".format(bp["raw_words2"]))
             f.write("        break;\n")
         f.write("    }\n}\n\n")
 

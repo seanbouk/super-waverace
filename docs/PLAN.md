@@ -394,7 +394,7 @@ Phases:
    the first at the band edge writing the cloud rows' BG3 scroll while
    the band (and its text) stays at 0 - no HDMA channel needed. Balance deliberately untouched (the fade schedule
    makes single races player-favoured; a 6-race total amplifies that).
-Post-jam: 2P VS. (split screen - see the cost sketch below).
+4. 2P VS. - IN THE JAM (agreed Sep 3): see "Two-player split screen" below.
 
 ---
 
@@ -426,11 +426,49 @@ of the same on stock hardware - it is SA-1 territory.
 - Super FX works (GSU builds the HDMA tables in its own RAM, HDMA reads them
   from the cart bus; 60Hz plausible) but is a second toolchain + big rewrite.
 
-**Two-player split-screen cost sketch** (deferred; no unknowns, ~all pieces
-are variants of existing systems): one extra baked viewport table set (both
-halves are identical viewports at different rows) + per-player wave phase
-accumulators; buildCamTables parameterised per half (camBlk1Ct/SrcOff/DstOff
-plumbing half-exists); per-viewport projection bounds with cull margins at
-the split (no per-sprite clipping exists - Mario Kart pops at the seam too);
-second HUD band via the mode-split HDMA; duplicated player state; P2 sky =
-backdrop+COLDATA gradient. Stock = ~15Hz (rough); with SA-1 = 30Hz solid.
+## Two-player split screen (agreed Sep 3, for the jam)
+
+Decisions: ARCADE only (the championship stays single-player); top/bottom
+split (mode 7 is one plane per line); FOUR racers total - two humans + two
+CPU (the third NPC slot becomes the other player); P2 joins from arcade's
+rider select ("P2 press start"); no spray in 2P; clouds only if the layout
+has room (they cost nothing); one HUD row per player in the small font;
+the CPU racers go to zero only if the measurement forces it. Stock
+hardware, no SA-1 (jam rule). A CRT pass of the current build comes first
+(the scanline-IRQ mode switch has never been on hardware and 2P fires it
+several times a frame).
+
+Design: each half is the race recipe again - HUD band, thin sky, mode 7
+sea - with its OWN camera: pitched down, horizon a few lines under its
+HUD, ~8-16 HUD + 8-16 sky + 80-90 sea lines. The bake emits a second
+viewport set (wave depth tables per profile, projection constants, sprite
+scale bands, TM/COLDATA/sand-fade line tables for the 2P layout); the
+loader picks the 1P or 2P set into the same WRAM (~40K ROM). The IRQ
+gains stages (band-edge scroll + mode switch per half, mode 1 again at
+the second HUD). Player state is a CONTEXT copied in/out around each
+player's update (the physics asm reads fixed globals). Each view projects
+buoys + the three other racers with the existing rear-view art. The 2P
+result is a full-screen page (the champion-page code), not the sky table.
+Estimate: table build +~25% (per scanline, two halves ~ one screen);
+per-player work doubles; 13-15 Hz with two CPU racers and no spray.
+
+Order: (1) SPIKE - bake the 2P camera + layout, render the same race
+state into both halves, read the tick rate; (2) player context + P2
+input (port 2); (3) the other player as a racer in each view; (4) flow:
+rider select P2 join, race, results page; (5) cuts by measurement.
+Sprites pop at the seam (no per-sprite clipping) - accepted, as in Mario
+Kart.
+
+SPIKE RESULT (Sep 3, `#define SPLIT 1` in main.c, AUTOPILOT, RAM
+AllZeros, ticks in 2000 frames from power-on): 1P 551 (baseline 554 -
+the refactors cost nothing), split 457 = 17% slower with two table
+builds, two projection passes, both skis and both hull windows, no spray
+/ HUD / start tree. In frames per loop: 3.6 -> 4.4, i.e. ~16.5 -> ~13.7
+Hz. Not yet in the spike: the second physics/collision pass (asm, cheap),
+P2 input, the other player as a racer (+1 projection per view), two HUD
+rows; minus one CPU racer. Net expectation for real 2P: 13-14 Hz - inside
+the estimate. Camera: CAM2 pitch -14, fovV 24, 104 lines (camH/fovH/
+skiDist shared): far distance ~556 texels like 1P, horizon 20-24 lines
+down, ski row 74-85 of 104. Layout: viewport A 0-103, HUD strip 104-119
+(two BG1 rows, back to back), viewport B 120-223. Renders correctly in
+Mesen (clean horizons, both skis, buoys and racers in both halves).

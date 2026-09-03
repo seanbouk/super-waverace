@@ -9,5 +9,10 @@
   "phases": 32,
   "framesPerPhase": 2,
   "crestGlow": 12,
-  "glowGamma": 2
+  "glowGamma": 2,
+  "cam2": {
+    "pitch": -14.0,
+    "fovV": 24.0,
+    "lines": 104
+  }
 }
