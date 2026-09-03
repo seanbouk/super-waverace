@@ -97,6 +97,10 @@ u16 winTopA, winBotA, winTopB, winBotB, winSkyB;
 // the last); eV = projected depth (0xFFFF = culled), eC/eR column/row;
 // eOrdA/B = each view's slot order from the last tick (insertion-sorted
 // again each tick: ~n compares). OAM ids are handed out in that order
+// view A's sea stops VP_A_END lines above the HUD strip: emulators with a
+// late mid-frame mode switch (the web player) drew the last sea lines
+// over the strip's first HUD row; the gap shows the blank tile (zenith)
+#define VP_A_END (WAVE_LINES2 - 4)
 #define E_SKI 0
 #define E_BUOY 1
 #define E_RACER (1 + WAVE_MAX_BUOYS)
@@ -483,8 +487,8 @@ static void buildWinTab2(u16 topA, u16 botA, u16 topB, u16 botB, u16 skyB)
 {
     u8 *w = winTab;
     u16 gapEnd = WAVE_VP_B_TOP + skyB; // first unmasked line of B
-    if (botA > WAVE_LINES2 - 1)
-        botA = WAVE_LINES2 - 1;
+    if (botA > VP_A_END - 1)
+        botA = VP_A_END - 1;
     if (botB > 223)
         botB = 223;
     if (topB < gapEnd)
@@ -492,8 +496,8 @@ static void buildWinTab2(u16 topA, u16 botA, u16 topB, u16 botB, u16 skyB)
     w = winPut(w, topA, 0xFF, 0x00);
     if (botA >= topA)
         w = winPut(w, botA - topA + 1, 0x00, 0xFF);
-    w = winPut(w, WAVE_LINES2 - botA - 1, 0xFF, 0x00);
-    w = winPut(w, gapEnd - WAVE_LINES2, 0x00, 0xFF); // strip + B's sky
+    w = winPut(w, VP_A_END - botA - 1, 0xFF, 0x00);
+    w = winPut(w, gapEnd - VP_A_END, 0x00, 0xFF); // gap + strip + B's sky
     if (topB > gapEnd)
         w = winPut(w, topB - gapEnd, 0xFF, 0x00);
     if (botB >= topB)
@@ -935,7 +939,7 @@ static void layoutSet(void)
     {
     irqLine[0] = WAVE_SKY_SWITCH2 - 1; // viewport A: mode 7 at its switch
     irqAct[0] = 1;
-    irqLine[1] = WAVE_LINES2 - 1;      // the HUD strip: mode 1
+    irqLine[1] = VP_A_END - 1;         // mode 1 for the gap + HUD strip
     irqAct[1] = 2;
     irqLine[2] = WAVE_VP_B_TOP + WAVE_SKY_SWITCH2 - 1; // viewport B
     irqAct[2] = 1;
@@ -1162,6 +1166,21 @@ static void raceInit(void)
     lastLap = 0;
     skiWX = initX; // autopilot reads these before the first pass
     skiWY = initY;
+    if (!split)
+    {
+        // a 2P race built lines 8-99 into the HOFS stream, and in the 1P
+        // layout lines 0-87 are mode 1 with BG1 shown: the band and the
+        // sky would scroll by that stale sea (the garbled menu after a 2P
+        // race). Zero them, both buffers - here in raceInit so the ATTRACT
+        // race gets it too, not only raceStart's races
+        for (bi = 0; bi < WAVE_SKY_SWITCH; bi++)
+        {
+            camTabs[5400 + 1 + 4 * bi] = 0;
+            camTabs[5400 + 2 + 4 * bi] = 0;
+            camTabs[5400 + 900 + 1 + 4 * bi] = 0;
+            camTabs[5400 + 900 + 2 + 4 * bi] = 0;
+        }
+    }
     pFin = 0;
     finMin = 0;
     finSecT = 0;
@@ -2029,19 +2048,6 @@ static void raceStart(void)
     raceInit();
     ctxCur = 0;
     cd2Last = 255;
-    if (!split)
-    {
-        // a 2P race built lines 8-103 into the HOFS stream, and in the 1P
-        // layout lines 0-87 are mode 1 with BG1 shown: the band and the
-        // sky would scroll by that stale sea. Zero them (both buffers)
-        for (bi = 0; bi < WAVE_SKY_SWITCH; bi++)
-        {
-            camTabs[5400 + 1 + 4 * bi] = 0;
-            camTabs[5400 + 2 + 4 * bi] = 0;
-            camTabs[5400 + 900 + 1 + 4 * bi] = 0;
-            camTabs[5400 + 900 + 2 + 4 * bi] = 0;
-        }
-    }
     if (split)
     {
         // the strip's two HUD rows start blank (menus wrote there)
@@ -2053,7 +2059,7 @@ static void raceStart(void)
         // HOFS entries still hold the last 1P race's sea scroll - and
         // $210D is BG1's scroll in mode 1: the HUD rows came out shifted.
         // Zero them in both table buffers (VOFS words are never written)
-        for (bi = WAVE_LINES2; bi < WAVE_VP_B_TOP; bi++)
+        for (bi = VP_A_END; bi < WAVE_VP_B_TOP; bi++)
         {
             camTabs[5400 + 1 + 4 * bi] = 0;
             camTabs[5400 + 2 + 4 * bi] = 0;
@@ -2154,15 +2160,13 @@ int main(void)
     {
         // a 2P split race just ended: its results page (unless quit from
         // pause), then back to the 1P layout for the title's attract race
+        mosaicSweep(0, 1);
+        REG_HDMAEN = 0;
         if (raceState == 2)
-        {
-            mosaicSweep(0, 1);
-            REG_HDMAEN = 0;
             champPage(PAGE_2P);
-            menuGo = 1; // straight back to the rider select, both riders
-            menuSel = 2; // still picked and P2 still in (the page swept out)
-            p2Keep = 1;
-        }
+        menuGo = 1; // straight back to the rider select, both riders still
+        menuSel = 2; // picked and P2 still in - after the results page, or
+        p2Keep = 1;  // after B on the pause (the sweep above did the exit)
         split = 0;
     }
     if (menuGo && menuSel == 0)
@@ -2438,8 +2442,9 @@ int main(void)
             {
                 uiHudRowClear(hud2Row[0]);
                 uiHudRowClear(hud2Row[1]);
-                uiHudSmallTo(hud2Row[0], 13, HUD_PAL_TITLE, "PAUSED");
-                uiHudSmallTo(hud2Row[1], 5, HUD_PAL_BOT, "START RESUME  B TO QUIT");
+                // (the HUD font has no Q/U/G/Y: words from its letter set)
+                uiHudSmallTo(hud2Row[0], 12, HUD_PAL_TITLE, "STOPPED");
+                uiHudSmallTo(hud2Row[1], 4, HUD_PAL_BOT, "START RIDE ON   B ABANDON");
                 WaitForVBlank();
                 uiMenuRowDma(hud2Row[0], 13);
                 uiMenuRowDma(hud2Row[1], 14);
@@ -3299,13 +3304,13 @@ int main(void)
             bi = pl ? 6 : 0;
             tmBuf[bi] = (u8)skip;
             tmBuf[bi + 1] = 0x10;
-            tmBuf[bi + 2] = (u8)(WAVE_LINES2 - skip);
+            tmBuf[bi + 2] = (u8)((pl ? WAVE_LINES2 : VP_A_END) - skip);
             tmBuf[bi + 3] = 0x13;
-            tmBuf[4] = 16;
+            tmBuf[4] = 16 + (WAVE_LINES2 - VP_A_END); // gap + the strip: BG1
             tmBuf[5] = 0x11;
             tmBuf[10] = 0;
-            ox = vTop + skip;        // first built line
-            oy = WAVE_LINES2 - skip; // lines to build
+            ox = vTop + skip;                      // first built line
+            oy = (pl ? WAVE_LINES2 : VP_A_END) - skip; // lines to build
         }
         else
         {

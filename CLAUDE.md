@@ -317,13 +317,21 @@ Mesen.exe --testrunner --timeout=30 <rom> <script.lua>   # arg order-free
   strip (uiHudBigTo: 3, 2, 1 as ltRed lights; the sprite tree is 1P-only -
   in 2P it sat inside A's hull window and vanished); the HUD rows appear
   at GO (hud2's caches start at 255). PAUSE in 2P writes its text into
-  the strip rows and resets both players' HUD caches on resume. After a
-  2P race the results page leads BACK TO THE RIDER SELECT with P2 still
+  the strip rows (words from the HUD font's letter set - it has no Q, U,
+  G or Y: "STOPPED" / "START RIDE ON  B ABANDON") and resets both
+  players' HUD caches on resume. After a 2P race - the results page, or B
+  on the pause - the flow leads BACK TO THE RIDER SELECT with P2 still
   joined on the same riders (p2Keep; the arcade branch skips its mosaic
-  since the page swept out) - and both cursors skip the other's rider.
-  The 1P layout's raceStart zeroes the HOFS entries of lines 0-87: a 2P
-  race builds lines 8-103 and the 1P band/sky (mode 1, BG1 shown) would
-  scroll by that stale sea (the "borked" title after a 2P race). The 2P HUD
+  since the exit swept out) - and both cursors skip the other's rider.
+  raceInit (EVERY 1P race, the attract one included - raceStart alone
+  missed the title) zeroes the HOFS entries of lines 0-87: a 2P race
+  builds lines 8-99 and the 1P band/sky (mode 1, BG1 shown) would scroll
+  by that stale sea (the garbled menu after a 2P race). View A's sea ends
+  at VP_A_END = LINES2-4 (line 99; mode 1 from 100, TM BG1 for the gap +
+  strip, the gap shows the zenith blank tile): the web player's mid-frame
+  mode switch lands a few lines late and drew sea over the HUD's first
+  row - Mesen and the CRT were clean, but the web build is what most
+  people see. The 2P HUD
   = one small-font row per player in BG1 rows 13/14 (the strip) composed
   by hud2() on change into hud2Row[] and DMA'd in the vblank tail: "P1
   1'23 2ND L2/3 **...". P2 joins on ARCADE's rider select: START on pad

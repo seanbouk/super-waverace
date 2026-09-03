@@ -23,6 +23,8 @@ local presses = {
                            -- = P2's START; Mesen's Lua cannot drive pad 2)
   {860, 868, "start", 0},  -- P1 confirms both -> course select
   {1020, 1028, "start", 0}, -- SUNNY ISLAND -> the 2P race
+  {16500, 16508, "b", 0},   -- (after the race: rider select -> menu, to see
+                            -- the band's text over the attract race)
 }
 local shots = { [700]=1, [800]=1, [900]=1, [1100]=1, [1500]=1, [2500]=1,
   [4000]=1, [6000]=1, [8000]=1, [10000]=1, [12000]=1, [14000]=1, [16000]=1,
