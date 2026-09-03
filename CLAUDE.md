@@ -73,7 +73,8 @@ Machines: `seanb` (original) and `Sean` (Aug-28 clone, `C:\Users\Sean\Downloads\
    are the remaining authoring work. The game-flow plan is COMPLETE
    through phase 3 (title/attract, menu, rider + course select, time
    trials, arcade, championship with flyover intros and the in-race
-   results table); 2P split screen is post-jam.
+   results table) AND the 2P split screen (ARCADE, in the jam, 12 Hz
+   accepted).
 
 Lessons from the Aug-28 machine (`Sean`), all of which bit:
 - `winget install Git.Git`, `Python.Python.3.12`, `ezwinports.make` all need
@@ -326,7 +327,8 @@ Mesen.exe --testrunner --timeout=30 <rom> <script.lua>   # arg order-free
   per-tick 2P surcharge is therefore ~4.8k C (second physics pass + 2
   swaps ~1.6k) + ~6.6k asm (the second build ~4k, ~17 more projections)
   + ~3k sprite calls. Reaching a locked 4 frames needs ~13% off; the
-  levers are the builds (line doubling ~4k) and the CPU count. Ticks quantise to whole frames at WaitForVBlank, so small
+  levers are the builds (line doubling ~4k) and the CPU count. DECIDED
+  (Sep 3): 12 Hz is accepted for 2P - do not spend on cuts unasked. Ticks quantise to whole frames at WaitForVBlank, so small
   savings show as big tick swings near a boundary - measure over 6000
   frames, and mind that a 900-frame window is half countdown.
 - **make skips a source touched in the SAME SECOND its object was

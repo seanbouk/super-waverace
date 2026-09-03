@@ -462,11 +462,14 @@ the leading human, per-player positions/finish, 2P HUD strip, join on
 the rider select, PAGE_2P results). Verified end to end in Mesen with
 the SPLIT_AUTO/CHAMP_AUTO harness build (p2nav.lua): join, split race,
 both finishes, results, title. Ticks in 6000 frames: 1P 1779, 2P 1211 (pre-2P
-1P build 1853) = 2P ~12 Hz. Step 5 (cuts) options, unmeasured: line-
-doubled table builds in the split (~-11% of the tick, coarser sea), one
-CPU racer instead of two (~-4%), a 96-line viewport with a 32-line strip
-(~-2%). Note the physics step is per tick, so a slower loop is a slower
-race in real time; a fixed-rate loop is a backlog item.
+1P build 1853) = 2P ~12 Hz. DECISION (Sep 3): 12 Hz is accepted for
+2P - it reads as an honest story about the hardware's limits for the jam
+- so step 5 (cuts) is NOT taken: two CPU racers stay, no line doubling.
+The options, unmeasured, for the record: line-doubled table builds in the
+split (~-7% of the tick, coarser sea), one CPU racer instead of two
+(~-4%), a 96-line viewport with a 32-line strip (~-2%). Note the physics
+step is per tick, so a slower loop is a slower race in real time; a
+fixed-rate loop is a backlog item.
 Sprites pop at the seam (no per-sprite clipping) - accepted, as in Mario
 Kart.
 

@@ -9,7 +9,11 @@ fake a sinusoidal ocean on hardware that can only rotate and scale a flat plane.
 (a chaser-driven race on SUNNY ISLAND under the sliding sprite logo);
 START opens a menu of **CHAMPIONSHIP** (all six courses in order, points
 9/6/3/1, a "… IS CHAMPION" page at the end), **TIME TRIALS** (solo, endless
-laps, best-lap HUD) and **ARCADE** (one 3-lap race). Each picks a rider —
+laps, best-lap HUD) and **ARCADE** (one 3-lap race — and the door to **two
+players**: START on pad 2 at the rider select joins P2 for a top/bottom
+split-screen race against two CPU riders, each half a full Mode 7 view
+with its own camera, wave phase and HUD row; it runs at ~12 Hz on stock
+hardware, which is the honest price of two rolling seas). Each picks a rider —
 Magnus, Callista, Milo, Dafydd, palette-only — then a course from a list
 with a baked minimap. Championship races open with a flyover: the camera
 cruises the racing line at constant speed under the race number and
@@ -228,6 +232,15 @@ mode 1 (+ BG3 priority, `0x09`) and BG3 scroll 0 at the top of every
 frame. All eight HDMA channels are spoken for: ch0 CGRAM (sand fade), ch1
 TM (the band/sky/strip/sea split above), ch2 COLDATA (glow + sky ramp),
 ch3–6 the Mode 7 matrix/centre/scroll pairs, ch7 the OBJ window edges.
+
+**The 2P split** is the race screen twice: viewport A on lines 0–103, both
+HUD rows back to back on 104–119 as the divider, viewport B from 120. Each
+half is sky (backdrop + COLDATA ramp, no clouds), a mode 7 sea with its own
+camera (pitched down, a 24° vertical field, the same far distance as 1P)
+and its own wave phase; the scanline IRQ fires three times a frame (mode 7,
+mode 1 for the strip, mode 7 again) and the per-line layer mask is composed
+each tick from both horizons. The two players' states swap in and out of
+the one set of race globals; each view draws the other player as a racer.
 
 **Full-screen mode 1 pages** — rider select, course select, the champion
 page (and the old placeholder page) — park the timer IRQ, switch HDMA off
