@@ -312,8 +312,15 @@ Mesen.exe --testrunner --timeout=30 <rom> <script.lua>   # arg order-free
   select and mirror P1's pad onto P2 in the race - tools/mesen/p2nav.lua
   walks the whole 2P flow with a CHAMP_AUTO 1 + SPLIT_AUTO 1 build (both
   ALWAYS 0 for release). Real pad 2 = hardware. Measured (AllZeros, 6000
-  frames from power-on, autopilot): 1P 1701 ticks (the pre-2P build 1853),
-  2P 1194.
+  frames from power-on, autopilot): 1P 1779 ticks (the pre-2P build 1853),
+  2P 1211 (~12 Hz). Culled buoys/racers are hidden ONLY if their OAM y
+  is not already 240 (a lib call per culled sprite per view per tick had
+  added up - it was most of 1P's dip too). The 2P tick by instruction
+  count (exec-callback profile, tools/mesen/mainexec pattern): camera.asm
+  ~47% (two builds + ~34 projections), C ~27%, lib ~26% (inflated by the
+  vblank spin). Ticks quantise to whole frames at WaitForVBlank, so small
+  savings show as big tick swings near a boundary - measure over 6000
+  frames, and mind that a 900-frame window is half countdown.
 - **make skips a source touched in the SAME SECOND its object was
   built** (mtime granularity): a `sed` flip + `touch` + `make` right after
   a build silently rebuilds NOTHING and you copy a stale ROM. `sleep 2`

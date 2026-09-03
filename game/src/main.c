@@ -2753,7 +2753,8 @@ int main(void)
 #if SPLIT_AUTO
         pad1 = pad0; // harness: P2 mirrors P1 (the chaser)
 #else
-        pad1 = padsCurrent(1);
+        if (split)
+            pad1 = padsCurrent(1);
 #endif
         for (pl = 0; pl < nPl; pl++)
         {
@@ -3289,11 +3290,14 @@ int main(void)
         oamSet(sprSki << 2, SKI_X, (u16)(sprTop + vTop), 3, skiFlip, 0,
                skiLean ? 68 : 64, myPal);
         OAM_TALL(sprSki << 2);
-        oamSetEx(sprSki << 2, OBJ_LARGE, OBJ_SHOW);
         oamSet((sprSki + 1) << 2, SKI_X, (u16)(sprTop + vTop - 32), 3,
                skiFlip, 0, skiLean ? 4 : 0, myPal);
         OAM_TALL((sprSki + 1) << 2);
-        oamSetEx((sprSki + 1) << 2, OBJ_LARGE, OBJ_SHOW);
+        if (split) // view B's pair was never shown by raceInit
+        {
+            oamSetEx(sprSki << 2, OBJ_LARGE, OBJ_SHOW);
+            oamSetEx((sprSki + 1) << 2, OBJ_LARGE, OBJ_SHOW);
+        }
         if (raceMode == RM_INTRO) // flyover: the course alone, no racers
         {
             oamSetVisible(sprSki << 2, OBJ_HIDE);
@@ -3313,8 +3317,9 @@ int main(void)
             projectPoint();
             if (pjOk)
                 drawLadder((sprBuoy + bi) << 2, buoyType[bi]);
-            else
-                oamSetVisible((sprBuoy + bi) << 2, OBJ_HIDE);
+            else if (oamMemory[((sprBuoy + bi) << 2) + 1] != 240)
+                oamSetVisible((sprBuoy + bi) << 2, OBJ_HIDE); // only if shown:
+                // a lib call per culled buoy per view per tick added up
         }
 #endif
 #if WAVE_MAX_PATH > 0
@@ -3413,7 +3418,7 @@ int main(void)
                         (sprRacer + (ns << 1) + 1) << 2,
                         bi < npcN ? npcPalTab[bi] : sv_myPal);
             }
-            else
+            else if (oamMemory[((sprRacer + (ns << 1)) << 2) + 1] != 240)
             {
                 oamSetVisible((sprRacer + (ns << 1)) << 2, OBJ_HIDE);
                 oamSetVisible((sprRacer + (ns << 1) + 1) << 2, OBJ_HIDE);

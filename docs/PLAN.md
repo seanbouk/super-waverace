@@ -461,8 +461,12 @@ Steps 2-4 DONE (Sep 3): see CLAUDE.md "TWO PLAYERS" for the mechanism
 the leading human, per-player positions/finish, 2P HUD strip, join on
 the rider select, PAGE_2P results). Verified end to end in Mesen with
 the SPLIT_AUTO/CHAMP_AUTO harness build (p2nav.lua): join, split race,
-both finishes, results, title. Ticks in 6000 frames: 1P 1701, 2P 1194 (pre-2P
-1P build 1853). Step 5 (cuts) is next if the 2P rate wants it.
+both finishes, results, title. Ticks in 6000 frames: 1P 1779, 2P 1211 (pre-2P
+1P build 1853) = 2P ~12 Hz. Step 5 (cuts) options, unmeasured: line-
+doubled table builds in the split (~-11% of the tick, coarser sea), one
+CPU racer instead of two (~-4%), a 96-line viewport with a 32-line strip
+(~-2%). Note the physics step is per tick, so a slower loop is a slower
+race in real time; a fixed-rate loop is a backlog item.
 Sprites pop at the seam (no per-sprite clipping) - accepted, as in Mario
 Kart.
 
