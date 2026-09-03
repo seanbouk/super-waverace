@@ -8,9 +8,9 @@
 -- WRAM addresses from superwaverace.sym - they MOVE between builds.
 local out = os.getenv("OUTDIR") or "./"
 local A = {
-  split = 0x7E2026, p2Join = 0x7E202B, pFin = 0x7E202D, svpFin = 0x7E2102,
-  raceState = 0x7E3E33, raceMode = 0x7E3E81, champStage = 0x7E3E90,
-  finCount = 0x7E3EBC,
+  split = 0x7E2026, p2Join = 0x7E202B, pFin = 0x7E202D, svpFin = 0x7E21A0,
+  raceState = 0x7E3ED1, raceMode = 0x7E3F1F, champStage = 0x7E3F2E,
+  finCount = 0x7E3F5A,
 }
 local frames = 0
 -- {from, to, button, port}
@@ -25,7 +25,8 @@ local presses = {
   {1020, 1028, "start", 0}, -- SUNNY ISLAND -> the 2P race
 }
 local shots = { [700]=1, [800]=1, [900]=1, [1100]=1, [1500]=1, [2500]=1,
-  [4000]=1, [6000]=1, [8000]=1, [10000]=1, [12000]=1 }
+  [4000]=1, [6000]=1, [8000]=1, [10000]=1, [12000]=1, [14000]=1, [16000]=1,
+  [18000]=1, [20000]=1 }
 local prev = ""
 local function rd(a) return emu.read(a, emu.memType.snesMemory) end
 local function onPoll()

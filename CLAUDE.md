@@ -300,9 +300,30 @@ Mesen.exe --testrunner --timeout=30 <rom> <script.lua>   # arg order-free
   points. raceStart(): layoutSet, courseLoad, then raceInit for P2 (myPal
   = p2Pal, initX/Y = npcGrid slot 3), ctxSwap, raceInit for P1 - the
   globals hold player 0; npcN = 2 (npcPalTab = the two unpicked riders).
-  Sprites per view: A ski 0-1, buoys 2-17, racers 18-23; B ski 24-25,
-  buoys 26-41, racers 42-47; the start tree at 54+ (view A only). vTop
-  (the view's first line) is added inside drawSki/drawLadder. The 2P HUD
+  SPRITES ARE DEPTH-ORDERED PER VIEW (Sep 3 review): every entity - the
+  ski at skiDist, each buoy, each racer (2P: the other player too) - is
+  projected into a SLOT (E_SKI 0, E_BUOY 1-16, E_RACER 17-20; eV depth,
+  0xFFFF = culled; eC/eR), the slots are insertion-sorted by depth from
+  LAST tick's order (eOrdA/eOrdB, ~n compares), and OAM ids are handed
+  out nearest-first from the view's base (sprBase/sprCnt: 1P 0/24; 2P A
+  0/26, B 26/26; the start tree at 54+ is 1P-only). The old fixed
+  per-kind ids had buoys beating racers and the player beating everything
+  whatever the depth - visible in attract too. Unused ids past the last
+  handed out are hidden (only if their OAM y is not already 240). vTop
+  (the view's first line) is added inside drawSki/drawLadder. The 2P OBJ
+  window masks A's hull rows, then EVERYTHING from the strip (104) to B's
+  horizon (buildWinTab2's skyB: A's sprites hung 30 lines into the strip
+  and B's sky), then B's hull rows. The 2P countdown is TILES in the
+  strip (uiHudBigTo: 3, 2, 1 as ltRed lights; the sprite tree is 1P-only -
+  in 2P it sat inside A's hull window and vanished); the HUD rows appear
+  at GO (hud2's caches start at 255). PAUSE in 2P writes its text into
+  the strip rows and resets both players' HUD caches on resume. After a
+  2P race the results page leads BACK TO THE RIDER SELECT with P2 still
+  joined on the same riders (p2Keep; the arcade branch skips its mosaic
+  since the page swept out) - and both cursors skip the other's rider.
+  The 1P layout's raceStart zeroes the HOFS entries of lines 0-87: a 2P
+  race builds lines 8-103 and the 1P band/sky (mode 1, BG1 shown) would
+  scroll by that stale sea (the "borked" title after a 2P race). The 2P HUD
   = one small-font row per player in BG1 rows 13/14 (the strip) composed
   by hud2() on change into hud2Row[] and DMA'd in the vblank tail: "P1
   1'23 2ND L2/3 **...". P2 joins on ARCADE's rider select: START on pad
@@ -313,8 +334,8 @@ Mesen.exe --testrunner --timeout=30 <rom> <script.lua>   # arg order-free
   select and mirror P1's pad onto P2 in the race - tools/mesen/p2nav.lua
   walks the whole 2P flow with a CHAMP_AUTO 1 + SPLIT_AUTO 1 build (both
   ALWAYS 0 for release). Real pad 2 = hardware. Measured (AllZeros, 6000
-  frames from power-on, autopilot): 1P 1779 ticks (the pre-2P build 1853),
-  2P 1211 (~12 Hz). Culled buoys/racers are hidden ONLY if their OAM y
+  frames from power-on, autopilot): 1P 1701 ticks (the pre-2P build 1853),
+  2P 1259 (~12 Hz; 12 Hz is ACCEPTED for 2P). Culled buoys/racers are hidden ONLY if their OAM y
   is not already 240 (a lib call per culled sprite per view per tick had
   added up - it was most of 1P's dip too). The 2P tick by instruction
   count (exec-callback profile over ROM ranges, 900 frames from power-on

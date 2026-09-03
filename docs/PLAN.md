@@ -469,7 +469,13 @@ The options, unmeasured, for the record: line-doubled table builds in the
 split (~-7% of the tick, coarser sea), one CPU racer instead of two
 (~-4%), a 96-line viewport with a 32-line strip (~-2%). Note the physics
 step is per tick, so a slower loop is a slower race in real time; a
-fixed-rate loop is a backlog item.
+fixed-rate loop is a backlog item. Review round (Sep 3, hardware + Mesen):
+sprites are depth-ordered per view (fixed per-kind OAM ids had wrong
+z in attract too), the OBJ window masks the strip + B's sky (A's sprites
+overhung the HUD), the 2P countdown is strip tiles, pause text in the
+strip, both rider-select cursors skip each other, and a 2P race returns
+to the rider select with P2 kept; the 1P layout zeroes stale scroll
+entries left by a 2P race. Ticks/6000: 1P 1701, 2P 1259.
 Sprites pop at the seam (no per-sprite clipping) - accepted, as in Mario
 Kart.
 

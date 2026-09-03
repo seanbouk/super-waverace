@@ -89,8 +89,22 @@ u8 pFin, myPal, finMin, finSecT, finSecU; // per player: finished, rider,
 u8 h2S, h2P, h2L, h2W; // per player: the 2P HUD row's cached values
 u16 initX, initY;      // raceInit's grid slot for the player it sets up
 u16 pad1, vTop;        // pad 2; the active viewport's first line
-u8 sprSki, sprBuoy, sprRacer, ltSpr, nRc, hud2Dirty;
-u16 winTopA, winBotA, winTopB, winBotB;
+u8 ltSpr, hud2Dirty;
+u8 sprBase, sprCnt;     // this view's OAM ids: first, count (1P 0/24; 2P 0/26, 26/26)
+u16 winTopA, winBotA, winTopB, winBotB, winSkyB;
+// per view, every sprite entity in DEPTH order: slot 0 = the ski (at
+// skiDist), 1..16 the buoys, 17..20 the racers (2P: the other player is
+// the last); eV = projected depth (0xFFFF = culled), eC/eR column/row;
+// eOrdA/B = each view's slot order from the last tick (insertion-sorted
+// again each tick: ~n compares). OAM ids are handed out in that order
+#define E_SKI 0
+#define E_BUOY 1
+#define E_RACER (1 + WAVE_MAX_BUOYS)
+#define E_N (E_RACER + 4) /* NPC_COUNT (3, defined below) + the other player */
+u16 eV[E_N], eC[E_N], eR[E_N];
+u8 vS[E_N], nVis; // this tick's VISIBLE slots, gathered as they project
+u8 cd2Last, p2Keep; // the strip countdown's last digit; keep P2 joined
+u16 oid;            // the next OAM id to hand out
 u16 refProg, refDist; // the CPU racers' schedule reference (the leading
 u8 refLap, refWp;     // human's progress / distance / lap / waypoint)
 static u16 hud2Row[2][UI_COLS];
@@ -462,18 +476,26 @@ static void buildWinTab(u16 top, u16 bot)
 }
 
 // the 2P split: two hulls, two masked spans (viewport A's, then B's)
-static void buildWinTab2(u16 topA, u16 botA, u16 topB, u16 botB)
+// the 2P split: A's hull rows, then EVERYTHING from the HUD strip down to
+// B's horizon (view A's sprites hang over the strip and B's sky otherwise:
+// a 32-tall racer at A's last line reaches 30 lines into B), then B's hull
+static void buildWinTab2(u16 topA, u16 botA, u16 topB, u16 botB, u16 skyB)
 {
     u8 *w = winTab;
-    if (botA > 223)
-        botA = 223;
+    u16 gapEnd = WAVE_VP_B_TOP + skyB; // first unmasked line of B
+    if (botA > WAVE_LINES2 - 1)
+        botA = WAVE_LINES2 - 1;
     if (botB > 223)
         botB = 223;
+    if (topB < gapEnd)
+        topB = gapEnd;
     w = winPut(w, topA, 0xFF, 0x00);
     if (botA >= topA)
         w = winPut(w, botA - topA + 1, 0x00, 0xFF);
-    if (topB > botA + 1)
-        w = winPut(w, topB - botA - 1, 0xFF, 0x00);
+    w = winPut(w, WAVE_LINES2 - botA - 1, 0xFF, 0x00);
+    w = winPut(w, gapEnd - WAVE_LINES2, 0x00, 0xFF); // strip + B's sky
+    if (topB > gapEnd)
+        w = winPut(w, topB - gapEnd, 0xFF, 0x00);
     if (botB >= topB)
         w = winPut(w, botB - topB + 1, 0x00, 0xFF);
     w = winPut(w, 1, 0xFF, 0x00);
@@ -905,10 +927,9 @@ static void ctxSet(u8 p) // bring player p's state into the globals
 // parameters, for the 1P screen or the 2P split
 static void layoutSet(void)
 {
-    vTop = 0; // the 1P screen's sprite layout; 2P sets these per view
-    sprSki = 0;
-    sprBuoy = 2;
-    sprRacer = NPC_SPR;
+    vTop = 0; // the 1P screen's sprite ids: 0-23 (2P sets its views')
+    sprBase = 0;
+    sprCnt = 24;
     ltSpr = split ? 54 : LIGHT_SPR; // 2P: past both views' sprites
     if (split)
     {
@@ -1486,11 +1507,13 @@ static u8 riderSelect(void)
     // ARCADE: a second player joins with START on pad 2 - a P2 tag rides
     // their pick (pad 2 left/right, never P1's rider), B on pad 2 leaves;
     // P1's START confirms both
-    p2Join = 0;
-    if (menuSel == 2)
+    if (!p2Keep)
+        p2Join = 0; // (kept joined after a 2P race, on the same riders)
+    if (menuSel == 2 && !p2Join)
         uiMenuRow(26, 8, "P2 PRESS START");
     sel = playerPal;
-    sel2 = sel == 0 ? 1 : 0;
+    sel2 = p2Join ? p2Pal : (sel == 0 ? 1 : 0);
+    p2Keep = 0;
     dirty = 1;
     menuPrev = 0xFFFF; // held keys must release before they count
     prev2 = 0xFFFF;
@@ -1579,12 +1602,16 @@ static u8 riderSelect(void)
             armed = 1;
         if ((pad0 & KEY_LEFT) && !(menuPrev & KEY_LEFT) && sel)
         {
-            sel--;
+            sel--; // never onto P2's rider
+            if (p2Join && sel == sel2)
+                sel = sel ? sel - 1 : sel2 + 1;
             dirty = 1;
         }
         if ((pad0 & KEY_RIGHT) && !(menuPrev & KEY_RIGHT) && sel < 3)
         {
             sel++;
+            if (p2Join && sel == sel2)
+                sel = sel < 3 ? sel + 1 : sel2 - 1;
             dirty = 1;
         }
         menuPrev = pad0;
@@ -2001,6 +2028,20 @@ static void raceStart(void)
     initY = startY;
     raceInit();
     ctxCur = 0;
+    cd2Last = 255;
+    if (!split)
+    {
+        // a 2P race built lines 8-103 into the HOFS stream, and in the 1P
+        // layout lines 0-87 are mode 1 with BG1 shown: the band and the
+        // sky would scroll by that stale sea. Zero them (both buffers)
+        for (bi = 0; bi < WAVE_SKY_SWITCH; bi++)
+        {
+            camTabs[5400 + 1 + 4 * bi] = 0;
+            camTabs[5400 + 2 + 4 * bi] = 0;
+            camTabs[5400 + 900 + 1 + 4 * bi] = 0;
+            camTabs[5400 + 900 + 2 + 4 * bi] = 0;
+        }
+    }
     if (split)
     {
         // the strip's two HUD rows start blank (menus wrote there)
@@ -2049,6 +2090,7 @@ int main(void)
     ctxCur = 0;
     p2Join = 0;
     p2Pal = 1;
+    p2Keep = 0;
 
     setMode7(0);
     // EXTBG spike: BG2 duplicates the mode 7 image with pixel bit 7 as a
@@ -2117,6 +2159,9 @@ int main(void)
             mosaicSweep(0, 1);
             REG_HDMAEN = 0;
             champPage(PAGE_2P);
+            menuGo = 1; // straight back to the rider select, both riders
+            menuSel = 2; // still picked and P2 still in (the page swept out)
+            p2Keep = 1;
         }
         split = 0;
     }
@@ -2227,7 +2272,8 @@ int main(void)
         // race. B at rider select backs out to the menu (the continue
         // falls into the attract branch below).
         menuGo = 0;
-        mosaicSweep(0, 1);
+        if (!p2Keep) // (after a 2P race the results page already swept out)
+            mosaicSweep(0, 1);
         REG_HDMAEN = 0; // BEFORE any loader: waveRawLoad borrows the PPU
                         // multiplier and ch0 keeps repainting CGRAM
         titleBg3(0);
@@ -2388,9 +2434,22 @@ int main(void)
             // this loop does. HDMA replays the last tables, but the
             // ISR's OAM DMA clobbers ch7's registers every frame, so
             // waveHdma is re-kicked per frame like the main loop's tail
-            uiClear(); // the pause menu owns the band; HUD redraws after
-            uiPrint(13, 1, "PAUSED");
-            uiPrint(6, 3, "START RESUME     B QUIT");
+            if (split) // the strip carries the pause text in 2P
+            {
+                uiHudRowClear(hud2Row[0]);
+                uiHudRowClear(hud2Row[1]);
+                uiHudSmallTo(hud2Row[0], 13, HUD_PAL_TITLE, "PAUSED");
+                uiHudSmallTo(hud2Row[1], 5, HUD_PAL_BOT, "START RESUME  B TO QUIT");
+                WaitForVBlank();
+                uiMenuRowDma(hud2Row[0], 13);
+                uiMenuRowDma(hud2Row[1], 14);
+            }
+            else
+            {
+                uiClear(); // the pause menu owns the band; HUD redraws after
+                uiPrint(13, 1, "PAUSED");
+                uiPrint(6, 3, "START RESUME     B QUIT");
+            }
             ovlPrev = pad0;
             while (1)
             {
@@ -2408,6 +2467,8 @@ int main(void)
                 ovlPrev = pad0;
             }
             uiClear();     // wipe the pause text...
+            h2S = 255;     // 2P: both HUD rows recompose
+            sv_h2S = 255;
             hudInit = 0;   // ...and force the HUD to redraw everything
             pwDrawn = 255;
             hRank = 255;
@@ -2418,6 +2479,11 @@ int main(void)
         }
         ovlPrev = pad0;
 
+#if CHAMP_AUTO || SPLIT_AUTO
+        ctxSet(0); // harness: the chaser steers PLAYER 1 (after a 2P pass
+                   // P2's state is in the globals - it steered from there
+                   // once, and both players wedged on P2's line)
+#endif
         if (attract || (CHAMP_AUTO && raceMode == RM_RACE))
         {
 #if WAVE_MAX_PATH > 0
@@ -2489,7 +2555,7 @@ int main(void)
                 // the next waypoint so the six-race sweep completes.
                 // The ski sits skiDist ahead of the pivot; that is
                 // inside the waypoint's 200-unit capture radius
-                if (champOn && !attract)
+                if (!attract) // (any harness-driven race, 2P included)
                 {
                     camPX = pathX[nextWp];
                     camPY = pathY[nextWp];
@@ -3195,9 +3261,8 @@ int main(void)
         if (split)
         {
             vTop = pl ? WAVE_VP_B_TOP : 0;
-            sprSki = pl ? 24 : 0;   // view A: ski 0-1, buoys 2-17, racers
-            sprBuoy = pl ? 26 : 2;  // 18-23; view B: 24-25, 26-41, 42-47
-            sprRacer = pl ? 42 : 18;
+            sprBase = pl ? 26 : 0; // view A ids 0-25, view B 26-51
+            sprCnt = 26;
         }
         // split velocity into forward/side components along the heading
         skiSplit();
@@ -3283,32 +3348,25 @@ int main(void)
             sprTop = 24;
         if (sprTop > 190)
             sprTop = 190;
-        // sprite updates BEFORE WaitForVBlank: the ISR's OAM DMA (ch7 regs)
-        // fires on that vblank, and waveHdma restores ch7 right after.
-        // Two stacked sprites: the bottom keeps the old geometry (all the
-        // waterline maths anchor to it), the rider's top half sits above
-        oamSet(sprSki << 2, SKI_X, (u16)(sprTop + vTop), 3, skiFlip, 0,
-               skiLean ? 68 : 64, myPal);
-        OAM_TALL(sprSki << 2);
-        oamSet((sprSki + 1) << 2, SKI_X, (u16)(sprTop + vTop - 32), 3,
-               skiFlip, 0, skiLean ? 4 : 0, myPal);
-        OAM_TALL((sprSki + 1) << 2);
-        if (split) // view B's pair was never shown by raceInit
-        {
-            oamSetEx(sprSki << 2, OBJ_LARGE, OBJ_SHOW);
-            oamSetEx((sprSki + 1) << 2, OBJ_LARGE, OBJ_SHOW);
-        }
-        if (raceMode == RM_INTRO) // flyover: the course alone, no racers
-        {
-            oamSetVisible(sprSki << 2, OBJ_HIDE);
-            oamSetVisible((sprSki + 1) << 2, OBJ_HIDE);
-        }
-
-        // ---- buoys: project into view space, pick scale, ride the water ----
 #if DEBUG_UI
         pjPfA = scanline(); // profile the projection block (buoys + NPCs)
         pjPfV = snes_vblank_count;
 #endif
+        // ---- this view's sprites, NEAREST FIRST. Every entity - the ski
+        // at skiDist, each buoy, each racer (2P: the other player too) -
+        // is projected into its SLOT, the slots are insertion-sorted by
+        // depth from last tick's order (~n compares), and OAM ids are
+        // handed out in that order from the view's base. Sprite-vs-sprite
+        // priority is OAM order and nothing else: this is the only way a
+        // near buoy draws over a far racer, or a passing racer over your
+        // own ski (fixed per-kind ids had buoys beating racers, and the
+        // player beating everything, whatever the depth) ----
+        nVis = 0;
+        if (raceMode != RM_INTRO)
+        {
+            eV[E_SKI] = WAVE_SKI_DIST;
+            vS[nVis++] = E_SKI;
+        }
 #if WAVE_MAX_BUOYS > 0
         for (bi = 0; bi < buoyCount; bi++)
         {
@@ -3316,17 +3374,120 @@ int main(void)
             pjY = buoyY[bi];
             projectPoint();
             if (pjOk)
-                drawLadder((sprBuoy + bi) << 2, buoyType[bi]);
-            else if (oamMemory[((sprBuoy + bi) << 2) + 1] != 240)
-                oamSetVisible((sprBuoy + bi) << 2, OBJ_HIDE); // only if shown:
-                // a lib call per culled buoy per view per tick added up
+            {
+                eV[E_BUOY + bi] = pjV;
+                eC[E_BUOY + bi] = pjCol;
+                eR[E_BUOY + bi] = rdRow;
+                vS[nVis++] = (u8)(E_BUOY + bi);
+            }
         }
 #endif
 #if WAVE_MAX_PATH > 0
+        if (!raceTT && raceMode != RM_INTRO) // TT / flyover: no racers
+        {
+            for (bi = 0; bi < npcN; bi++)
+            {
+                pjX = npcX[bi];
+                pjY = npcY[bi];
+                projectPoint();
+                if (pjOk)
+                {
+                    eV[E_RACER + bi] = pjV;
+                    eC[E_RACER + bi] = pjCol;
+                    eR[E_RACER + bi] = rdRow;
+                    vS[nVis++] = (u8)(E_RACER + bi);
+                }
+            }
+            if (split) // the other player, at their last-tick position
+            {
+                pjX = sv_skiWX;
+                pjY = sv_skiWY;
+                projectPoint();
+                if (pjOk)
+                {
+                    eV[E_RACER + npcN] = pjV;
+                    eC[E_RACER + npcN] = pjCol;
+                    eR[E_RACER + npcN] = rdRow;
+                    vS[nVis++] = (u8)(E_RACER + npcN);
+                }
+            }
+        }
+#endif
+        // insertion sort of the visible slots by depth (typically 4-8 of
+        // them; one indexed read per compare - a 21-slot sort with double
+        // indexing cost 17% of the loop)
+        for (ns = 1; ns < nVis; ns++)
+        {
+            bi = vS[ns];
+            pjV = eV[bi];
+            for (nt = ns; nt > 0 && eV[vS[nt - 1]] > pjV; nt--)
+                vS[nt] = vS[nt - 1];
+            vS[nt] = bi;
+        }
+        oid = sprBase;
+        for (ns = 0; ns < nVis; ns++)
+        {
+            bi = vS[ns];
+            if (bi == E_SKI)
+            {
+                // two stacked sprites: the bottom keeps the old geometry
+                // (all the waterline maths anchor to it), the rider's top
+                // half sits above. OAM writes happen BEFORE WaitForVBlank:
+                // the ISR's OAM DMA fires on that vblank
+                oamSet(oid << 2, SKI_X, (u16)(sprTop + vTop), 3, skiFlip, 0,
+                       skiLean ? 68 : 64, myPal);
+                OAM_TALL(oid << 2);
+                oamSetEx(oid << 2, OBJ_LARGE, OBJ_SHOW);
+                oamSet((oid + 1) << 2, SKI_X, (u16)(sprTop + vTop - 32), 3,
+                       skiFlip, 0, skiLean ? 4 : 0, myPal);
+                OAM_TALL((oid + 1) << 2);
+                oamSetEx((oid + 1) << 2, OBJ_LARGE, OBJ_SHOW);
+                oid += 2;
+            }
+            else if (bi < E_RACER)
+            {
+                pjV = eV[bi];
+                pjCol = eC[bi];
+                rdRow = eR[bi];
+                drawLadder(oid << 2, buoyType[bi - E_BUOY]);
+                oid++;
+            }
+            else
+            {
+                pjV = eV[bi];
+                pjCol = eC[bi];
+                rdRow = eR[bi];
+                drawSki(oid << 2, (oid + 1) << 2,
+                        bi - E_RACER < npcN ? npcPalTab[bi - E_RACER]
+                                            : sv_myPal);
+                oid += 2;
+            }
+        }
+        for (; oid < sprBase + sprCnt; oid++) // the view's unused ids
+            if (oamMemory[(oid << 2) + 1] != 240) // (only if still shown)
+                oamSetVisible(oid << 2, OBJ_HIDE);
+#if DEBUG_UI
+        pjPfLines = (snes_vblank_count - pjPfV) * 262 + scanline() - pjPfA;
+#endif
+        // this view's hull window rows (+ B's sky top); the 2P HUD row
+        if (pl == 0)
+        {
+            winTopA = waterRow;
+            winBotA = (u16)(sprTop + 31);
+        }
+        else
+        {
+            winTopB = (u16)(waterRow + WAVE_VP_B_TOP);
+            winBotB = (u16)(sprTop + 31 + WAVE_VP_B_TOP);
+            winSkyB = skip;
+        }
         // ---- start-light tree: reds count the gun down one at a time,
         // greens light together at GO, and a couple of seconds later the
         // whole tree floats up, each row hiding as it meets the HUD ----
-        if (ltState < 3 && (!split || pl == 0)) // 2P: the top half's
+        if (split && raceState == 0) // the strip countdown's lit rows
+            ltRed = rTick >= 180 ? 3 : rTick >= 120 ? 2
+                : rTick >= 60 ? 1 : 0;
+        if (ltState < 3 && !split) // 2P counts down in the HUD strip
         {
             if (raceState == 0)
                 ltRed = rTick >= 180 ? 3 : rTick >= 120 ? 2
@@ -3367,84 +3528,27 @@ int main(void)
             }
         }
 
-        if (!raceTT && raceMode != RM_INTRO) // TT / flyover: no NPCs at
-                                             // all (hidden at raceInit)
-        {
-        // NPC racers ride the exact same pipeline: rear-view ski art,
-        // one recolour palette per racer
-        // project all three first, then hand out the OAM pairs NEAREST
-        // FIRST: sprite-vs-sprite priority is OAM order, so a passing
-        // racer must take the earlier pair or its halves layer wrongly
-        for (bi = 0; bi < npcN; bi++)
-        {
-            pjX = npcX[bi];
-            pjY = npcY[bi];
-            projectPoint();
-            npjOk[bi] = pjOk;
-            npjV[bi] = pjOk ? pjV : 0xFFFF; // culled: sorts last, hidden
-            npjC[bi] = pjCol;
-            npjR[bi] = rdRow;
-            nord[bi] = bi;
-        }
-        nRc = npcN;
-        if (split) // the other player: entry npcN, drawn in their colours
-        {
-            pjX = sv_skiWX;
-            pjY = sv_skiWY;
-            projectPoint();
-            npjOk[npcN] = pjOk;
-            npjV[npcN] = pjOk ? pjV : 0xFFFF;
-            npjC[npcN] = pjCol;
-            npjR[npcN] = rdRow;
-            nord[npcN] = npcN;
-            nRc++;
-        }
-        for (ns = 1; ns < nRc; ns++) // insertion sort, nearest first
-            for (nt = ns; nt > 0 && npjV[nord[nt]] > npjV[nord[nt - 1]]; nt--)
-            {
-                bi = nord[nt];
-                nord[nt] = nord[nt - 1];
-                nord[nt - 1] = bi;
-            }
-        for (ns = 0; ns < nRc; ns++)
-        {
-            bi = nord[ns];
-            if (npjOk[bi])
-            {
-                pjV = npjV[bi];
-                pjCol = npjC[bi];
-                rdRow = npjR[bi];
-                drawSki((sprRacer + (ns << 1)) << 2,
-                        (sprRacer + (ns << 1) + 1) << 2,
-                        bi < npcN ? npcPalTab[bi] : sv_myPal);
-            }
-            else if (oamMemory[((sprRacer + (ns << 1)) << 2) + 1] != 240)
-            {
-                oamSetVisible((sprRacer + (ns << 1)) << 2, OBJ_HIDE);
-                oamSetVisible((sprRacer + (ns << 1) + 1) << 2, OBJ_HIDE);
-            }
-        }
-        } // !raceTT
-#endif
-        // this view's hull window rows; the 2P HUD row
-        if (pl == 0)
-        {
-            winTopA = waterRow;
-            winBotA = (u16)(sprTop + 31);
-        }
-        else
-        {
-            winTopB = (u16)(waterRow + WAVE_VP_B_TOP);
-            winBotB = (u16)(sprTop + 31 + WAVE_VP_B_TOP);
-        }
         if (split)
-            hud2();
+        {
+            if (raceState == 0) // the countdown, as tiles in the strip
+            {
+                if (pl == 0 && ltRed != cd2Last)
+                {
+                    cd2Last = ltRed;
+                    uiHudRowClear(hud2Row[0]);
+                    uiHudRowClear(hud2Row[1]);
+                    if (ltRed)
+                        uiHudBigTo(hud2Row[0], hud2Row[1], 15,
+                                   ltRed == 1 ? "3" : ltRed == 2 ? "2" : "1");
+                    hud2Dirty = 3;
+                }
+            }
+            else
+                hud2(); // (its caches start at 255: the rows appear at GO)
+        }
         } // ==== the per-player pass ====
-#if DEBUG_UI
-        pjPfLines = (snes_vblank_count - pjPfV) * 262 + scanline() - pjPfA;
-#endif
         if (split) // no spray in 2P; both hulls' waterline windows
-            buildWinTab2(winTopA, winBotA, winTopB, winBotB);
+            buildWinTab2(winTopA, winBotA, winTopB, winBotB, winSkyB);
         else
         {
         // ---- wake conveyor: scroll, then re-fill the top cell ----

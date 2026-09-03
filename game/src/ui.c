@@ -149,6 +149,28 @@ void uiHudSmallTo(u16 *dst, u16 x, u16 pal, char *s)
     }
 }
 
+void uiHudBigTo(u16 *top, u16 *bot, u16 x, char *s)
+{
+    u16 *t = top + x;
+    u16 *b = bot + x;
+    u16 i;
+    while (*s)
+    {
+        if (*s == ' ')
+        {
+            *t++ = UI_ATTR;
+            *b++ = UI_ATTR;
+        }
+        else
+        {
+            i = hudIdx(*s);
+            *t++ = HUD_PAL_TOP | (WAVE_HUD_CHAR0 + WAVE_HUD_GLYPHS + i);
+            *b++ = HUD_PAL_BOT | (WAVE_HUD_CHAR0 + 2 * WAVE_HUD_GLYPHS + i);
+        }
+        s++;
+    }
+}
+
 void uiHudRowClear(u16 *dst)
 {
     u16 i;

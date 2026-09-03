@@ -31,6 +31,7 @@ void uiHudSmall(u16 x, u16 y, u16 pal, char *s);
 // the same glyphs into a caller's 32-entry map row (the 2P HUD strip rows
 // live outside the band buffer); uiHudRowClear blanks such a row
 void uiHudSmallTo(u16 *dst, u16 x, u16 pal, char *s);
+void uiHudBigTo(u16 *top, u16 *bot, u16 x, char *s); // double-height, 2 rows
 void uiHudRowClear(u16 *dst);
 void uiHudBig(u16 x, char *s);
 void uiHudBigDigit(u16 x, u16 d);
