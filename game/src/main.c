@@ -609,8 +609,15 @@ static void waveHdma(u16 ph, u16 bufOff)
 
     REG_HDMAEN = 0;
 
-    // ch0: BG mode split for the text UI band
+    // ch0: the sand distance fade (CGRAM entry 8 down the frame)
+#if SPLIT
+    REG_DMAP0 = 0x03; // the 2P table: one ramp per half
+    REG_BBAD0 = 0x21;
+    REG_A1T0LH = csFade2.mem.c.addr;
+    REG_A1B0 = csFade2.mem.c.bank;
+#else
     uiHdma();
+#endif
 
     // ch1: TM UI/sky/sea split
     REG_DMAP1 = 0x00;
@@ -814,7 +821,7 @@ static void raceInit(void)
     oamSet(4, SKI_X, 108, 3, 0, 0, 0, playerPal); // player top: id 1, right
     oamSetEx(4, OBJ_LARGE, OBJ_SHOW);     // behind the bottom half
     OAM_TALL(4);
-    for (bi = 2; bi < TITLE_SPR + 8; bi++)
+    for (bi = 2; bi < TITLE_SPR + 10; bi++)
         oamSetVisible(bi << 2, OBJ_HIDE); // NB: ids are byte offsets (x4)
 
     tick = 0;
@@ -1021,7 +1028,7 @@ static void courseSelect(void)
     REG_NMITIMEN = 0x81; // NMI + auto-joypad; no timer IRQ during the menu
     REG_HDMAEN = 0;      // all eight streams off: TM/scroll/COLDATA are ours
     setScreenOff();
-    for (bi = 0; bi < TITLE_SPR + 8; bi++)
+    for (bi = 0; bi < TITLE_SPR + 10; bi++)
         oamSetVisible(bi << 2, OBJ_HIDE); // everything, player included
     REG_BG1HOFS = 0; // write-twice pairs, back-to-back (shared prev-latch)
     REG_BG1HOFS = 0;
@@ -1147,7 +1154,7 @@ static void textScreen(char *name)
     REG_NMITIMEN = 0x81; // NMI + auto-joypad; timer IRQ parked
     REG_HDMAEN = 0;
     setScreenOff();
-    for (bi = 0; bi < TITLE_SPR + 8; bi++)
+    for (bi = 0; bi < TITLE_SPR + 10; bi++)
         oamSetVisible(bi << 2, OBJ_HIDE);
     REG_BG1HOFS = 0; // write-twice pairs (shared prev-latch)
     REG_BG1HOFS = 0;
@@ -1219,7 +1226,7 @@ static u8 riderSelect(void)
     REG_NMITIMEN = 0x81; // NMI + auto-joypad; timer IRQ parked
     REG_HDMAEN = 0;
     setScreenOff();
-    for (bi = 0; bi < TITLE_SPR + 8; bi++)
+    for (bi = 0; bi < TITLE_SPR + 10; bi++)
         oamSetVisible(bi << 2, OBJ_HIDE);
     REG_BG1HOFS = 0; // write-twice pairs (shared prev-latch)
     REG_BG1HOFS = 0;
@@ -1515,7 +1522,7 @@ static void champPage(u8 mode)
     REG_NMITIMEN = 0x81; // NMI + auto-joypad; timer IRQ parked
     REG_HDMAEN = 0;
     setScreenOff();
-    for (bi = 0; bi < TITLE_SPR + 8; bi++)
+    for (bi = 0; bi < TITLE_SPR + 10; bi++)
         oamSetVisible(bi << 2, OBJ_HIDE);
     REG_BG1HOFS = 0; // write-twice pairs (shared prev-latch)
     REG_BG1HOFS = 0;

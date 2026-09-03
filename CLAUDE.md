@@ -266,7 +266,9 @@ Mesen.exe --testrunner --timeout=30 <rom> <script.lua>   # arg order-free
   COMPOSED PER TICK in tmBuf (12 bytes: backdrop above each half's
   horizon, sea below, BG1 for the HUD strip) - the halves run different
   phases, so no baked per-phase table can serve them; COLDATA is a fixed
-  ramp (no crest glow in 2P). `#define SPLIT 1` (main.c, ALWAYS 0 for the
+  ramp (no crest glow in 2P) that must END on add 0 - HDMA holds the last
+  entry (the bottom sea went pale once); the sand fade is csFade2 (one
+  ramp per half, sand_fade_table's `spans`). `#define SPLIT 1` (main.c, ALWAYS 0 for the
   game) is the measurement spike: same camera into both halves - see
   PLAN.md "Two-player split screen". Screenshots showed the trap of a
   FIXED sky switch: sea rows above the true horizon render the far-cap

@@ -471,4 +471,10 @@ the estimate. Camera: CAM2 pitch -14, fovV 24, 104 lines (camH/fovH/
 skiDist shared): far distance ~556 texels like 1P, horizon 20-24 lines
 down, ski row 74-85 of 104. Layout: viewport A 0-103, HUD strip 104-119
 (two BG1 rows, back to back), viewport B 120-223. Renders correctly in
-Mesen (clean horizons, both skis, buoys and racers in both halves).
+Mesen (clean horizons, both skis, buoys and racers in both halves) AND ON
+REAL HARDWARE (Sep 3, the `splittest.sfc` build: identical to Mesen -
+three PPU mode switches a frame are fine). Review fixes: the split's
+COLDATA table now ends on add 0 (HDMA held the ramp's top over the whole
+bottom sea - pale water), a per-half sand-fade table (csFade2), and the
+pages' sprite hide loops reach viewport B's ski. Racer z-order in the
+bottom half looked off once but matched Mesen - check again in 2P proper.

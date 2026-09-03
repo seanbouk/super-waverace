@@ -103,6 +103,7 @@ TAN_HALF_H = math.tan(math.radians(P["fovH"]) / 2)
 CAM2 = dict(pitch=-14.0, fovV=24.0, lines=104)
 CAM2.update(P.get("cam2", {}))
 LINES2 = int(CAM2["lines"])
+SPLIT_SWITCH = 8  # set from the profiles' horizons in the main flow
 HUD2_TOP = LINES2          # the divider strip: two 8-line HUD rows
 VP_B_TOP = LINES2 + 16
 assert VP_B_TOP + LINES2 == SCANLINES, "2P layout must tile 224 lines"
@@ -189,7 +190,9 @@ def split_tables(switch2, sky_top, max_sky):
     tm_b, g_b = half(VP_B_TOP)
     tab_tm = bytes(tm_a + repeat_blocks(16, 0x11) + tm_b
                    + bytearray((0x00,)))
-    g_entries = g_a + [(0xE0,)] * (LINES2 - max_sky + 16) + g_b
+    g_entries = g_a + [(0xE0,)] * (LINES2 - max_sky + 16) + g_b \
+        + [(0xE0,)]  # HDMA holds the LAST entry: end on add 0, or the
+                     # whole bottom sea gets the ramp's top value (pale)
     tab_g = hdma_table(0, (0xE0,), g_entries)
     return tab_tm, tab_g
 
@@ -1914,6 +1917,11 @@ def bake_course(cdir, sky_switch, sky_ref):
     c["fade"] = sand_fade_table(sky_switch, palette[SAND],
                                 tint(fade["sand_far"], amb),
                                 tint(fade["sand_deep"], amb))
+    c["fade2"] = sand_fade_table(sky_switch, palette[SAND],  # the 2P split:
+                                 tint(fade["sand_far"], amb),  # a ramp per half
+                                 tint(fade["sand_deep"], amb),
+                                 [(SPLIT_SWITCH, LINES2 - 1),
+                                  (VP_B_TOP + SPLIT_SWITCH, 223)])
     # sky: the zenith colour is authored directly (NOT ambient-multiplied -
     # the sky is the light source); the clouds ARE lit by the ambient
     c["sky_pal"], c["sky0"] = sky_palette(sky_switch, sky_ref, sky["sky"],
@@ -2019,21 +2027,27 @@ def build_minimap(course, palette):
     return encode_4bpp(m, 6, 6), pal_bytes(pal16)
 
 
-def sand_fade_table(sky_switch, sand, sand_far, sand_deep):
+def sand_fade_table(sky_switch, sand, sand_far, sand_deep, spans=None):
     """HDMA ch0 hold-run table: CGRAM entry 8 (dry sand) repainted down the
     frame - paler/washed far, richer/darker near; wave-phase independent BY
     DESIGN (divorces the land's light from the breathing sea). Per course:
-    the three colours arrive already under the course's ambient."""
+    the three colours arrive already under the course's ambient. `spans` =
+    the sea line ranges the ramp runs over ((first, last) each; default the
+    1P screen from the sky switch); the 2P layout passes one per half."""
+    if spans is None:
+        spans = [(sky_switch, 223)]
     fade = []
-    sand_mid = (sky_switch + 224) // 2
     for y in range(224):
-        if y <= sand_mid:
-            t = 0.0 if y <= sky_switch else \
-                (y - sky_switch) / float(sand_mid - sky_switch)
-            a, b = sand_far, sand
-        else:
-            t = (y - sand_mid) / float(223 - sand_mid)
-            a, b = sand, sand_deep
+        a, b, t = sand_far, sand, 0.0
+        for y0, y1 in spans:
+            if y0 <= y <= y1:
+                mid = (y0 + y1) // 2
+                if y <= mid:
+                    t = (y - y0) / float(max(1, mid - y0))
+                    a, b = sand_far, sand
+                else:
+                    t = (y - mid) / float(max(1, y1 - mid))
+                    a, b = sand, sand_deep
         c5 = [round(f + (n - f) * t) >> 3 for f, n in zip(a, b)]
         fade.append((c5[2] << 10) | (c5[1] << 5) | c5[0])
     tab = bytearray()
@@ -2101,8 +2115,10 @@ def main():
     baked_profs = [bake_profile(pp, sky_switch, sky_ref) for pp in profiles]
     # ---- 2P split layout: one fixed switch per half (the deepest horizon
     # of every profile under CAM2, less the safe margin, to a tile row)
+    global SPLIT_SWITCH
     switch2 = ((min(min(bp["sky2"]) for bp in baked_profs) - SKY_SAFE)
                // 8) * 8
+    SPLIT_SWITCH = switch2
     assert 8 <= switch2 <= 40, "2P switch out of range: {0}".format(switch2)
     max_sky2 = max(max(bp["sky2"]) for bp in baked_profs)
     tm2, g2 = split_tables(switch2, round(sky_add_at(sky_switch, sky_ref)),
@@ -2223,6 +2239,7 @@ def main():
         refs["obj"] = blob_ref(ci, "obj", bc["obj_pal"])
         refs["buoy"] = blob_ref(ci, "buoy", bc["buoy_pal"])
         refs["fade"] = blob_ref(ci, "fade", bc["fade"])
+        refs["fade2"] = blob_ref(ci, "fade2", bc["fade2"])
         # sky band anchors (CGRAM 32-47) + the ambient-lit cloud pair (29-30)
         refs["sky"] = blob_ref(ci, "sky", bc["sky_pal"])
         refs["cloud"] = blob_ref(ci, "cloud", bc["cloud_pal"])
@@ -2381,6 +2398,7 @@ extern u8 gateWp[WAVE_MAX_BUOYS + 1];
    512 bytes), tpSrc = the shared tile pool: tilesTo7F (camera.asm) builds
    the 16K tile set from them in the $7F8000 buffer */
 extern dmaMemory csTiles, csMap, csPal1, csPal48, csObj, csBuoy, csColl, csFade;
+extern dmaMemory csFade2; /* the sand fade for the 2P split layout */
 extern dmaMemory tpSrc;
 /* csMapDef = the map codec's 256-byte default block (the water pattern's
    16x16 tile ids): copyTo7F it to $7FC200 before mapTo7F */
@@ -2457,7 +2475,7 @@ void courseNameTo(u8 c, char *out);
         f.write("s8 gateNx[WAVE_MAX_BUOYS + 1];\ns8 gateNy[WAVE_MAX_BUOYS + 1];\n")
         f.write("u8 gateWp[WAVE_MAX_BUOYS + 1];\n")
         f.write("dmaMemory csTiles, csMap, csMapDef, csPal1, csPal48, csObj, "
-                "csBuoy, csColl, csFade, csSky, csCloud, tpSrc, csMini, csMiniPal;\nu16 csSky0, csZen;\n")
+                "csBuoy, csColl, csFade, csFade2, csSky, csCloud, tpSrc, csMini, csMiniPal;\nu16 csSky0, csZen;\n")
         f.write("u8 wvRotStart, wvRotCount, wvRotFrames;\nu16 rotCols[8];\n\n")
 
         f.write("void waveProfLoad(u8 pf)\n{\n    switch (pf)\n    {\n")
@@ -2548,6 +2566,7 @@ void courseNameTo(u8 c, char *out);
             f.write("        csBuoy.mem.p = (u8 *)&{0};\n".format(r["buoy"]))
             f.write("        csColl.mem.p = (u8 *)&{0};\n".format(r["coll"]))
             f.write("        csFade.mem.p = (u8 *)&{0};\n".format(r["fade"]))
+            f.write("        csFade2.mem.p = (u8 *)&{0};\n".format(r["fade2"]))
             f.write("        csSky.mem.p = (u8 *)&{0};\n".format(r["sky"]))
             f.write("        csCloud.mem.p = (u8 *)&{0};\n".format(r["cloud"]))
             f.write("        csMini.mem.p = (u8 *)&{0};\n".format(r["mini"]))
@@ -2593,6 +2612,7 @@ void courseNameTo(u8 c, char *out);
         for lbl, data in (("tix", bc["tix"]), ("map", bc["mp7_rle"]),
                           ("mdef", bc["mdef"]),
                           ("coll", bc["coll"]), ("fade", bc["fade"]),
+                          ("fade2", bc["fade2"]),
                           ("obj", bc["obj_pal"]), ("sky", bc["sky_pal"])):
             if bc["refs"][lbl].startswith("crs{0}_".format(ci)):
                 own += len(data)
