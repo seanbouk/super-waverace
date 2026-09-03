@@ -316,9 +316,17 @@ Mesen.exe --testrunner --timeout=30 <rom> <script.lua>   # arg order-free
   2P 1211 (~12 Hz). Culled buoys/racers are hidden ONLY if their OAM y
   is not already 240 (a lib call per culled sprite per view per tick had
   added up - it was most of 1P's dip too). The 2P tick by instruction
-  count (exec-callback profile, tools/mesen/mainexec pattern): camera.asm
-  ~47% (two builds + ~34 projections), C ~27%, lib ~26% (inflated by the
-  vblank spin). Ticks quantise to whole frames at WaitForVBlank, so small
+  count (exec-callback profile over ROM ranges, 900 frames from power-on
+  - half of it countdown; instructions/tick): 1P -> 2P: C (banks 0-3)
+  10.8k -> 15.6k, camera.asm (bank 4) 20.5k -> 27.1k, lib (banks 5-6)
+  6.2k -> 14.6k. WaitForVBlank is a WAI, not a spin (22 instr/tick), so
+  the lib bucket is real work: PVSnesLib's per-FRAME NMI handler (OAM
+  DMA, pads - it scales with frames per tick, ~1.8k/frame) plus the
+  sprite calls (oamSet/oamSetEx ~150 instr each; 2P doubles them). The
+  per-tick 2P surcharge is therefore ~4.8k C (second physics pass + 2
+  swaps ~1.6k) + ~6.6k asm (the second build ~4k, ~17 more projections)
+  + ~3k sprite calls. Reaching a locked 4 frames needs ~13% off; the
+  levers are the builds (line doubling ~4k) and the CPU count. Ticks quantise to whole frames at WaitForVBlank, so small
   savings show as big tick swings near a boundary - measure over 6000
   frames, and mind that a 900-frame window is half countdown.
 - **make skips a source touched in the SAME SECOND its object was
