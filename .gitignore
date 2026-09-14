@@ -36,3 +36,9 @@ game/ski.png
 game/soundbank.asm
 game/soundbank.h
 game/soundbank.bnk
+
+# Suno stems/zips are LOCAL ONLY (hundreds of MB; GitHub rejects >100MB)
+# - only derived artifacts (MIDI, .it) are committed
+assets/music/*/*.wav
+assets/music/*/*.zip
+assets/music/*/*.mp3

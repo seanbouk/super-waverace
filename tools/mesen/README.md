@@ -69,3 +69,12 @@ Dual-build equivalence runs need `Snes.RamPowerOnState: "AllZeros"` in
 Mesen's settings.json for the duration (there are latent read-before-write
 reads; with Random they make same-ROM runs diverge). RESTORE "Random" after
 — zeros hide init bugs that hardware shows.
+
+`dspdump.lua` — the SPC/DSP truth serum: dumps per-voice DSP registers
+(VOL/PITCH/SRCN/GAIN/ENVX/OUTX) + globals + the BRR directory every 40
+frames. ENVX/OUTX nonzero = a voice is genuinely sounding. USE THIS to
+verify music playback — checksumming SPC RAM regions is NOT a liveness
+signal (a module with echo off never touches them; a whole "driver hang"
+was chased that was actually playing fine). Drum one-shots are ~90ms:
+easy to miss at 40-frame sampling, so silent drums in one dump prove
+nothing.

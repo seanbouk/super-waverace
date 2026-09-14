@@ -534,11 +534,19 @@ Phases:
    course-select cursor. Placeholder .it files are PVSnesLib example
    content (assets/music/spike*.it) — MUST be replaced before release.
    Measured cost: nil (1258 vs 1260 ticks over frames 2000-6000).
-2. tools/midi2it.py — Suno MIDI -> SNESMod-legal .it: quantise to rows,
-   merge/pick down to 6 channels, house instrument kit of ~10
-   procedurally synthesised samples (bass pluck, brass stab, square/saw
-   leads, noise drums — same spirit as the procedural spray art, and
-   licence-clean). Iterate by ear with the user, wave-lab style.
+2. DONE first cut (Sep 14) — tools/midi2it.py: fits the 16th grid to
+   the drum stem's onsets (Sunny Island: 131.05 BPM, zero drift over
+   3min, median swing 17ms), classifies drum onsets kick/snare/hat by
+   band energy, reduces Basic Pitch MIDIs to mono/2-voice streams
+   (bass=low, lead=high, keys=chord2, brass overlays keys B), and
+   writes the .it against a 7-sample procedural kit. Sunny Island:
+   29.7K module, 17.7K ARAM spare with the SFX bank, whole 3min track.
+   Playing in the ROM (verified at DSP level: tools/mesen/dspdump.lua).
+   NEXT: the user listens (preview.wav + web player) and we iterate the
+   kit/mix by ear, wave-lab style. Known dials: velocity quantisation +
+   32-row patterns if ARAM ever pinches (dedupe currently finds no
+   repeats); swing via 32nd rows if the straight grid sounds stiff;
+   16-bit samples if 8-bit sounds grainy (BRR gets more data).
 3. Content + SFX: track slots (title/menu, 2-3 race tracks rotated
    across courses, results jingle), spcLoad per state (force blank,
    effects RELOAD after every spcLoad — module load resets ARAM),

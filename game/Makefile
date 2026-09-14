@@ -10,7 +10,7 @@ export ROMTITLE := SUPER WAVERACE
 # .asm/.h/.bnk in game/ (all gitignored). The EFFECTS bank lists FIRST
 # (MOD 0; -f sizes the effect set against it, per the lib's example).
 # -b 12: high banks are empty, and the profiler's code-bank map survives.
-AUDIOFILES := ../assets/music/spikesfx.it ../assets/music/spikemusic.it
+AUDIOFILES := ../assets/music/spikesfx.it ../assets/music/sunny_island.it
 export SOUNDBANK := soundbank
 SMCONVFLAGS := -s -o $(SOUNDBANK) -V -b 12 -f
 
@@ -18,6 +18,13 @@ SMCONVFLAGS := -s -o $(SOUNDBANK) -V -b 12 -f
 AUTOHDR := 0
 
 include ${PVSNESLIB_HOME}/devkitsnes/snes_rules
+
+# snes_rules adds $(SOUNDBANK).asm to SFILES explicitly AND its *.asm
+# wildcard picks the generated file up once it exists on disk - the
+# duplicate soundbank.obj in the linkfile made wlalink drop the section
+# ("Unresolved reference to SOUNDBANK__"). sort dedupes; object order in
+# the linkfile is irrelevant (placement is section/bank-driven).
+export OFILES := $(sort $(OFILES))
 
 # prefer python3 only if it RUNS: on Windows the Store's App Execution Alias
 # stub is named python3 (and comes back after being deleted) and exits 49
@@ -34,8 +41,11 @@ all: gen buildWithSummary
 gen: bake.stamp $(SOUNDBANK).asm
 
 # nested wildcards: courses live in assets/courses/<nn>_<name>/ and wave
-# profiles in assets/waves/ - edits there must retrigger the bake
-bake.stamp: ../tools/bake_tables.py ../tools/wave_params.json $(wildcard ../assets/*) $(wildcard ../assets/*/*) $(wildcard ../assets/*/*/*)
+# profiles in assets/waves/ - edits there must retrigger the bake.
+# assets/music is EXCLUDED on purpose: the bake never reads it, and the
+# local-only Suno stems have SPACES in their names, which break make's
+# space-separated prerequisite list ("No rule to make target .../0")
+bake.stamp: ../tools/bake_tables.py ../tools/wave_params.json $(wildcard ../assets/*.png) $(wildcard ../assets/*.act) $(wildcard ../assets/*.json) $(wildcard ../assets/courses/*/*) $(wildcard ../assets/waves/*)
 	@echo baking wave tables + sea texture ...
 	$(PYTHON) ../tools/bake_tables.py
 	@touch bake.stamp

@@ -586,9 +586,37 @@ are baked PER COURSE under its ambient (crs<n>_obj / crs<n>_buoy).
   tune's echo config eats 28K, ours should keep echo ~4-8K - minus
   ~8-12K for the SFX set. Instrument mode, no NNAs/filters/pattern
   loops, linear frequency, one sample per instrument.
-- assets/music/spike*.it are PVSnesLib EXAMPLE content - placeholder
-  ONLY, must be replaced before any release (jam rule: "no ripped
-  musics"; the plan is Suno-seeded originals via tools/midi2it.py).
+- assets/music/spikesfx.it is PVSnesLib EXAMPLE content - placeholder
+  SFX bank ONLY, replaced in phase 3 (jam rule: "no ripped musics").
+  Music is generated: tools/midi2it.py (run under toolchain/py311-audio)
+  turns a song folder (Basic Pitch MIDIs in midi/ + the drum stem WAV)
+  into a 6-channel SNESMod .it with a procedurally synthesised
+  instrument kit, plus <songdir>/preview.wav for ear checks. Suno STEMS
+  and zips are LOCAL-ONLY (gitignored - hundreds of MB, GitHub rejects
+  >100MB); the small MIDIs are committed so the .it can regenerate
+  anywhere. midi2it emits 8-BIT samples (every known-working module is
+  8-bit) and folds notes above 95 down an octave (the 128kHz ceiling).
+- A soundbank >32K is SPLIT by smconv into per-bank sections named
+  SOUNDBANK__0/1/... - main.c must extern EACH and spcSetBank them in
+  REVERSE order (<=32K goes back to a single SOUNDBANK__; the link
+  error is "Unresolved reference to SOUNDBANK__" + DISCARDed
+  SOUNDBANK0/1 sections in the .log). Related: once soundbank.asm
+  exists on disk, snes_rules picks it up TWICE (SFILES + the *.asm
+  wildcard) - the duplicate obj in the linkfile makes wlalink drop the
+  section; the Makefile's `OFILES := $(sort $(OFILES))` dedupes.
+- make CANNOT have prerequisites with SPACES in their names: the stems'
+  "0 Lead Vocals.wav" in the bake's assets wildcard broke every build
+  ("No rule to make target '../assets/music/sunny_island/0'") - the
+  bake dep list is scoped to courses/waves/top-level files, music
+  excluded on purpose.
+- VERIFYING AUDIO: use tools/mesen/dspdump.lua (per-voice ENVX/OUTX =
+  ground truth). SPC RAM checksums are NOT a liveness signal - an
+  echo-off module never touches the regions a naive sum watches, and a
+  session was lost to a "driver hang" that was playing fine. The
+  sequencer state (mod_row/patt_addr, driver zero page) reads via
+  emu.memType.spcRam if needed - addresses in mukunda/snesmod's
+  sm_spc.asm, which with tools/smconv source answers any format
+  question (both fetched fresh from GitHub when needed).
 
 ## Tuning knobs (game feel — user-driven, ask before big changes)
 

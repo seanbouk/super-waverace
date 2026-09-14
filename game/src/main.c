@@ -28,7 +28,12 @@
 // runs on the SPC700 on its own clock; the 65816 side only queues
 // messages, drained by spcProcess() once per loop in EVERY sustained loop
 #include "soundbank.h"
-extern char SOUNDBANK__;
+// smconv splits a >32K soundbank into one section per LoROM bank and
+// names them SOUNDBANK__0/1/... - each is registered with spcSetBank in
+// REVERSE order (the lib example's pattern). Crossing the next 32K
+// boundary adds a SOUNDBANK__2 extern + spcSetBank line here, and a
+// soundbank <= 32K goes back to a single unsuffixed SOUNDBANK__.
+extern char SOUNDBANK__0, SOUNDBANK__1;
 
 // per-course loaders (camera.asm): straight copy / RLE decode into WRAM
 // bank $7F, source + destination via the globals below
@@ -2148,8 +2153,9 @@ int main(void)
     // spike track: load once at boot, plays under everything. Effects
     // must (re)load AFTER a module load - spcLoad resets ARAM - so any
     // future per-course spcLoad repeats the spcLoadEffect calls
-    spcSetBank(&SOUNDBANK__);
-    spcLoad(MOD_SPIKEMUSIC);
+    spcSetBank(&SOUNDBANK__1);
+    spcSetBank(&SOUNDBANK__0);
+    spcLoad(MOD_SUNNY_ISLAND);
     spcLoadEffect(0);
     spcPlay(0); // queued; the first loop's spcProcess() flushes it
 
