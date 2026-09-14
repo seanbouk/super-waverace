@@ -508,11 +508,19 @@ Decisions (Sep 14):
   will recognise the tunes, and the prize multicart is PHYSICAL
   distribution of Nintendo compositions. Nintendo's "blind eye" applies
   to Content-ID'd social video, not downloadable ROMs.
-- Source of truth: Suno (the user has a subscription; Studio-tier MIDI
-  export) -> original tracks in the WR64 style (upbeat 90s arcade funk,
-  slap bass, bright brass, ~125 BPM, instrumental, loop-friendly,
-  sparse). MIDI + reference MP3 land in assets/music/<name>/. Disclose
-  Suno on the game page ("arranged for SPC700 by hand").
+- Source of truth: Suno (the user's tier exports STEMS, not MIDI - and
+  Suno's MIDI export is itself audio-to-MIDI, so nothing is lost):
+  original tracks in the WR64 style (upbeat 90s arcade funk, slap bass,
+  bright brass, ~125 BPM, instrumental, loop-friendly, sparse). We
+  transcribe stems locally with Basic Pitch (Spotify's open-source
+  audio-to-MIDI; venv at toolchain/py311-audio - basic-pitch needs
+  Python <= 3.11; run with PYTHONUTF8=1, its banner crashes a cp1252
+  console; verified Sep 14: a synthesized C-E-G-C arpeggio came back
+  note-perfect). Per-stem transcription beats full-mix. Drums don't
+  transcribe as pitches - onset-detect the drum stem or hand-program
+  the pattern against the reference. Stems (WAV preferred) + full-mix
+  MP3 land in assets/music/<name>/. Disclose Suno on the game page
+  ("arranged for SPC700 by hand").
 - Channels: music composes on 6 of the 8 DSP voices; 7-8 are the SFX
   pair (SNESMod hard-steals ch8; whether PVSnesLib alternates 7/8 for
   overlap or we flip ourselves - find out in stage 3).
