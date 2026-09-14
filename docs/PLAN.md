@@ -498,3 +498,43 @@ COLDATA table now ends on add 0 (HDMA held the ramp's top over the whole
 bottom sea - pale water), a per-half sand-fade table (csFade2), and the
 pages' sprite hide loops reach viewport B's ski. Racer z-order in the
 bottom half looked off once but matched Mesen - check again in 2P proper.
+
+## Sound (Sep 2026) — agreed design
+
+Decisions (Sep 14):
+- Source: NOT Wave Race 64 MIDIs (rejected before any use). The jam page
+  is explicit — "Game is done by yourself (no hacks, ripped musics or
+  graphics)" — Music/Sound is a judged category, judges are the crowd who
+  will recognise the tunes, and the prize multicart is PHYSICAL
+  distribution of Nintendo compositions. Nintendo's "blind eye" applies
+  to Content-ID'd social video, not downloadable ROMs.
+- Source of truth: Suno (the user has a subscription; Studio-tier MIDI
+  export) -> original tracks in the WR64 style (upbeat 90s arcade funk,
+  slap bass, bright brass, ~125 BPM, instrumental, loop-friendly,
+  sparse). MIDI + reference MP3 land in assets/music/<name>/. Disclose
+  Suno on the game page ("arranged for SPC700 by hand").
+- Channels: music composes on 6 of the 8 DSP voices; 7-8 are the SFX
+  pair (SNESMod hard-steals ch8; whether PVSnesLib alternates 7/8 for
+  overlap or we flip ourselves - find out in stage 3).
+- ARAM budget: ~58K post-BRR for samples, minus 2K per echo-delay unit
+  (keep echo ~4-8K), minus ~8-12K reserved for the SFX set.
+
+Phases:
+1. DONE (Sep 14) — driver spike: smconv wired into the Makefile
+   (soundbank at ROM bank 12), spcBoot/spcSetBank/spcLoad/spcPlay at
+   boot, spcProcess in every sustained loop, a test spcEffect on the
+   course-select cursor. Placeholder .it files are PVSnesLib example
+   content (assets/music/spike*.it) — MUST be replaced before release.
+   Measured cost: nil (1258 vs 1260 ticks over frames 2000-6000).
+2. tools/midi2it.py — Suno MIDI -> SNESMod-legal .it: quantise to rows,
+   merge/pick down to 6 channels, house instrument kit of ~10
+   procedurally synthesised samples (bass pluck, brass stab, square/saw
+   leads, noise drums — same spirit as the procedural spray art, and
+   licence-clean). Iterate by ear with the user, wave-lab style.
+3. Content + SFX: track slots (title/menu, 2-3 race tracks rotated
+   across courses, results jingle), spcLoad per state (force blank,
+   effects RELOAD after every spcLoad — module load resets ARAM),
+   spcFadeModuleVolume over the mosaic transitions; real SFX set: menu
+   blip, countdown beeps, splash/landing, gate pass/fail, finish sting.
+   Maybe: a looped engine hum pitched by speed via spcEffect's pitch arg
+   (costs one of the two SFX channels permanently — decide by ear).

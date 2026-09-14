@@ -23,6 +23,12 @@
 #include <snes.h>
 #include "wavedata.h"
 #include "ui.h"
+// SNESMod soundbank (smconv, generated - see the Makefile): MOD_SPIKESFX
+// is the effects bank (MOD 0), MOD_SPIKEMUSIC the placeholder tune. Music
+// runs on the SPC700 on its own clock; the 65816 side only queues
+// messages, drained by spcProcess() once per loop in EVERY sustained loop
+#include "soundbank.h"
+extern char SOUNDBANK__;
 
 // per-course loaders (camera.asm): straight copy / RLE decode into WRAM
 // bank $7F, source + destination via the globals below
@@ -1340,6 +1346,7 @@ static void courseSelect(void)
     courseGeom(courseSel); // csMini for the initial minimap upload
     while (1)
     {
+        spcProcess();
         WaitForVBlank();
         if (menuDirty) // only the DMA kicks here: rows are pre-composed
         {
@@ -1360,6 +1367,8 @@ static void courseSelect(void)
             menuComposeList();
             courseGeom(courseSel); // repoints csMini for the vblank DMA
             menuDirty = 1;
+            spcEffect(4, 0, 15 * 16 + 8); // spike SFX: cursor blip
+
         }
         if ((pad0 & KEY_DOWN) && !(menuPrev & KEY_DOWN)
             && courseSel < WAVE_COURSES - 1)
@@ -1368,6 +1377,7 @@ static void courseSelect(void)
             menuComposeList();
             courseGeom(courseSel);
             menuDirty = 1;
+            spcEffect(4, 0, 15 * 16 + 8);
         }
         menuPrev = pad0;
         if (!(pad0 & KEY_START))
@@ -1393,6 +1403,7 @@ static void mosaicSweep(u8 dir, u8 live)
     for (s = 0; s < 16; s++)
     {
         v = dir ? (u8)(15 - s) : s;
+        spcProcess(); // transitions will queue volume fades later
         WaitForVBlank();
         REG_MOSAIC = (u8)((v << 4) | 0x07); // BG1+2+3: sea, EXTBG, clouds
         if (live) // in-race: the ISR's OAM DMA clobbered ch7's registers
@@ -1451,6 +1462,7 @@ static void textScreen(char *name)
     mosaicSweep(1, 0); // reveal
     while (1)
     {
+        spcProcess();
         WaitForVBlank();
         pad0 = padsCurrent(0);
         if (!(pad0 & (KEY_B | KEY_START | KEY_A)))
@@ -1561,6 +1573,7 @@ static u8 riderSelect(void)
             OAM_TALL((3 + 2 * i) << 2);
             oamSetEx((u16)((3 + 2 * i) << 2), OBJ_LARGE, OBJ_SHOW);
         }
+        spcProcess();
         WaitForVBlank();
         if (dirty)
         {
@@ -1962,6 +1975,7 @@ static void champPage(u8 mode)
     mosaicSweep(1, 0); // reveal
     while (1)
     {
+        spcProcess();
         WaitForVBlank();
         pad0 = padsCurrent(0);
         if (!(pad0 & (KEY_START | KEY_A)))
@@ -2079,6 +2093,7 @@ static void ovlMenuDraw(void)
 //---------------------------------------------------------------------------------
 int main(void)
 {
+    spcBoot(); // SPC700 driver upload; slow, once, before everything
     camTabsInitHeaders();
     courseSel = 0; // BSS; the menu cursor survives between races after this
     menuSel = 0;   // ditto every game-flow variable
@@ -2090,6 +2105,8 @@ int main(void)
     ovlPrev = 0;
     champOn = 0;
     raceState = 0; // BSS: a garbage 2 would show a results page at boot
+    skyUp = 0;     // BSS: the attract branch's skyRestore() reads it at
+                   // boot, before the first raceInit ever seeds it
     split = 0;
     nPl = 1;
     npcN = NPC_COUNT;
@@ -2127,6 +2144,14 @@ int main(void)
     // the region below the waterline swallows the sprite
     REG_WOBJSEL = 0x02;
     REG_TMW = 0x10;
+
+    // spike track: load once at boot, plays under everything. Effects
+    // must (re)load AFTER a module load - spcLoad resets ARAM - so any
+    // future per-course spcLoad repeats the spcLoadEffect calls
+    spcSetBank(&SOUNDBANK__);
+    spcLoad(MOD_SPIKEMUSIC);
+    spcLoadEffect(0);
+    spcPlay(0); // queued; the first loop's spcProcess() flushes it
 
     setScreenOn();
 
@@ -2458,6 +2483,7 @@ int main(void)
             ovlPrev = pad0;
             while (1)
             {
+                spcProcess(); // music plays on through the pause
                 WaitForVBlank();
                 uiFlush();
                 waveHdma(phase, camBufOff);
@@ -3822,6 +3848,7 @@ int main(void)
 #endif
         }
 
+        spcProcess(); // drain queued SPC messages (cheap when empty)
         WaitForVBlank();
         // cloud parallax: BG3 (the mode-1 sky overlay - BG2 belongs to
         // EXTBG, see ui.c) scrolls with the heading at 4px per binary

@@ -6,6 +6,14 @@ endif
 export ROMNAME := superwaverace
 export ROMTITLE := SUPER WAVERACE
 
+# SNESMod soundbank: .it modules in assets/music/ -> smconv -> soundbank
+# .asm/.h/.bnk in game/ (all gitignored). The EFFECTS bank lists FIRST
+# (MOD 0; -f sizes the effect set against it, per the lib's example).
+# -b 12: high banks are empty, and the profiler's code-bank map survives.
+AUDIOFILES := ../assets/music/spikesfx.it ../assets/music/spikemusic.it
+export SOUNDBANK := soundbank
+SMCONVFLAGS := -s -o $(SOUNDBANK) -V -b 12 -f
+
 # hand-maintained hdr.asm: the IRQ vector points at irqStub (camera.asm)
 AUTOHDR := 0
 
@@ -21,7 +29,9 @@ PYTHON := $(shell (python3 -c "pass" >/dev/null 2>&1 && echo python3) || (python
 # sources, so files generated here are picked up on a clean build.
 all: gen buildWithSummary
 
-gen: bake.stamp
+# soundbank.h must exist before the inner build compiles main.c (this
+# Makefile has no header deps - the bake gotcha applies to MOD_ ids too)
+gen: bake.stamp $(SOUNDBANK).asm
 
 # nested wildcards: courses live in assets/courses/<nn>_<name>/ and wave
 # profiles in assets/waves/ - edits there must retrigger the bake

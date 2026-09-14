@@ -159,7 +159,12 @@ Mesen.exe --testrunner --timeout=30 <rom> <script.lua>   # arg order-free
   vAlong/vSide, plus the trig quads and aim pipes camera.asm's 16-bit u8
   reads overrun - masked, seeded anyway so the Mesen log stays clean).
   The ONLY expected uninit flags now are $000016/17: tcc's own DP scratch,
-  a codegen artifact, benign. Anything else in the log is a NEW bug.
+  a codegen artifact, benign. Runs that reach ~6000 frames also flag
+  $7E9230 (the LIB's own oambuffer) and $7ED9D1 (unnamed lib BSS past
+  mirrorINIDISP) - pre-existing, lib-internal, benign (verified present
+  on the pre-sound baseline too). Anything else in the log is a NEW bug.
+  ($7E3F63/skyUp was one: the attract branch's skyRestore() read it at
+  boot before any raceInit - seeded in main() now, Sep 14.)
 
 ## Hardware/toolchain gotchas (each cost real debugging time)
 
@@ -556,6 +561,35 @@ BUOY_PALETTE = the player's slots 1/2/9-12 copied, so the buoy art's
 baked indices still work) - WAVE_BUOY_PAL in drawLadder. All of 0-3 + 5
 are baked PER COURSE under its ambient (crs<n>_obj / crs<n>_buoy).
 
+## Sound (SNESMod, wired Sep 14 — see PLAN.md "Sound" for the design)
+
+- Build: `AUDIOFILES` in game/Makefile lists the .it modules
+  (assets/music/), EFFECTS BANK FIRST (MOD 0, smconv -f sizes the effect
+  set against it); smconv emits soundbank.asm/.h/.bnk in game/ (all
+  gitignored) at ROM BANK 12 (-b 12: high banks are empty and the
+  profiler's code-bank map survives). `gen` builds soundbank.asm before
+  the inner make because this Makefile has NO HEADER DEPS - and the
+  rebake gotcha applies to MOD_ ids too: if they move, touch main.c.
+- Runtime: spcBoot() is the FIRST line of main(); spcSetBank ->
+  spcLoad(module) -> spcLoadEffect(each) -> spcPlay. Effects must RELOAD
+  after EVERY spcLoad (a module load resets ARAM) - any per-course
+  spcLoad repeats the spcLoadEffect calls. spcPlay/spcEffect/fades are
+  QUEUED messages: spcProcess() drains them, called once per loop in
+  EVERY sustained loop (race, menus, pause, mosaicSweep, pages). Music
+  clocks on the SPC700 itself - the 15-20Hz main loop never affects
+  tempo. Measured cost of the whole driver: nil (1258 vs 1260 ticks
+  over frames 2000-6000, AllZeros; boot is ~2s slower for the load).
+- Composition contract: ~/pvsneslib/pvsneslib/pvsneslib_snesmod.txt.
+  8 channels max and SNESMod STEALS ch8 for effects - compose on 6,
+  keep 7-8 clear (the SFX pair). All samples <= 58K post-BRR (16-bit
+  compresses to 9/32) MINUS 2K per echo-delay unit - the placeholder
+  tune's echo config eats 28K, ours should keep echo ~4-8K - minus
+  ~8-12K for the SFX set. Instrument mode, no NNAs/filters/pattern
+  loops, linear frequency, one sample per instrument.
+- assets/music/spike*.it are PVSnesLib EXAMPLE content - placeholder
+  ONLY, must be replaced before any release (jam rule: "no ripped
+  musics"; the plan is Suno-seeded originals via tools/midi2it.py).
+
 ## Tuning knobs (game feel — user-driven, ask before big changes)
 
 `game/src/main.c` top: TURN_SPEED, THRUST (drag >>4 sets top speed =
@@ -792,8 +826,9 @@ move waypoint 0/1 in the painter to move the grid.
   products fit. HUD power bar redraws ONLY on change - 7 uiPrint/tick cost
   a measured 4% of the loop (652 -> 624); guarded it's 645 (~1%, the gate
   math). NPC balance vs the power ladder not yet revisited.
-  No sound (jam judges music — PVSnesLib has an .it tracker driver, unused);
-  sand is collidable but there's no "run aground" state.
+  Sound: the SNESMod driver is WIRED (Sep 14, see the Sound section) but
+  plays PLACEHOLDER example music - real tracks are PLAN.md "Sound"
+  phases 2-3. Sand is collidable but there's no "run aground" state.
 - PAL: accepted trade = runs slower (30Hz loop becomes 25Hz); must still boot.
 - Real-hardware verified: EXTBG rendering, full HDMA stack, general play,
   BG3 clouds, power/HUD/start-tree (Aug-21 build). PENDING a CRT pass:
