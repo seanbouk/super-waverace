@@ -31,9 +31,17 @@ import sys
 import numpy as np
 import soundfile as sf
 
-C5 = 16744  # C5Speed for pitched samples: 64-sample loop = 261.6 Hz
-SAMPLE_BITS = 8  # the WORKING SNESMod modules all ship 8-bit samples
-NOTE_MAX = 95    # SNESMod: playback rate must stay under 128 kHz
+CYCN = 128        # samples per waveform cycle (multiple of 16)
+C5 = 33488        # C5Speed: CYCN-sample loop = 261.6 Hz; the doubled
+                  # rate keeps harmonics clear of the DSP's gaussian
+                  # filter (64/16744 sounded far duller than the preview)
+SAMPLE_BITS = 16  # doc-recommended; BRR from 8-bit gutted the guitar
+NOTE_MAX = 83     # SNESMod: playback rate must stay under 128 kHz
+
+# ONE mix table shared by the .it volumes and the preview render - the
+# in-game balance must be the balance the preview auditioned
+MIX = {"kick": 0.9, "snare": 0.7, "hat": 0.35, "bass": 0.8,
+       "keys": 0.4, "lead": 0.62, "brass": 0.55, "bell": 0.5}
 
 
 # ---------------------------------------------------------------- tempo fit
@@ -185,19 +193,21 @@ def score_channels(tracks, I):
     get gentle Hxy vibrato rows."""
     ch = {i: [] for i in range(6)}
 
-    def vol(v):
-        return int(np.clip(v // 2, 1, 64))
+    def vol(v, ins):
+        # the .it volume column CARRIES the mix (shared MIX table), so
+        # the game balances exactly like the preview
+        return int(np.clip(round(v / 2 * MIX[ins] / 0.9), 1, 64))
 
     for r, ln, p, v in tracks.get("Drums", []):
         if p == GM_KICK:
-            ch[0].append((r, 60, I["kick"], vol(v), None))
+            ch[0].append((r, 60, I["kick"], vol(v, "kick"), None))
         elif p == GM_SNARE:
-            ch[0].append((r, 60, I["snare"], vol(v), None))
+            ch[0].append((r, 60, I["snare"], vol(v, "snare"), None))
         elif p == GM_HAT:
-            ch[1].append((r, 60, I["hat"], vol(v), None))
+            ch[1].append((r, 60, I["hat"], vol(v, "hat"), None))
 
     for r, ln, p, v in tracks.get("Bass", []):
-        ch[2].append((r, p, I["bass"], vol(v), r + ln))
+        ch[2].append((r, p, I["bass"], vol(v, "bass"), r + ln))
 
     groups = {}
     for r, ln, p, v in tracks.get("Keys", []):
@@ -205,12 +215,12 @@ def score_channels(tracks, I):
     for r in sorted(groups):
         g = sorted(groups[r])
         p, ln, v = g[-1]
-        ch[3].append((r, p, I["keys"], vol(v), r + ln))
+        ch[3].append((r, p, I["keys"], vol(v, "keys"), r + ln))
         if len(g) > 1:
             p, ln, v = g[0]
-            ch[4].append((r, p, I["keys"], vol(v), r + ln))
+            ch[4].append((r, p, I["keys"], vol(v, "keys"), r + ln))
 
-    bre = [(r, p, I["brass"], vol(v), r + ln)
+    bre = [(r, p, I["brass"], vol(v, "brass"), r + ln)
            for r, ln, p, v in tracks.get("Brass", [])]
     if bre:
         occupied = set()
@@ -239,7 +249,7 @@ def score_channels(tracks, I):
                 cut = nxt
             else:
                 cut = r + ln + 2
-        ch[5].append((r, p, I[ins], vol(v), cut, cmd))
+        ch[5].append((r, p, I[ins], vol(v, ins), cut, cmd))
         if ins == "lead" and cut - r >= 5:
             for vr in range(r + 3, min(cut, r + 14)):
                 ch[5].append((vr, None, None, None, None, (CMD_H, 0x23)))
@@ -258,7 +268,7 @@ def synth_kit(rng):
     resamples anything else) designed for 261.6 Hz at C5Speed 16744."""
     kit = {}
 
-    def cyc(harm, n=64):
+    def cyc(harm, n=CYCN):
         t = np.arange(n) / n
         w = np.zeros(n)
         for k, a in harm:
@@ -273,10 +283,10 @@ def synth_kit(rng):
         att = []
         for i in range(attack_cycles):
             g = 1.0 - i / attack_cycles
-            n = rng.standard_normal(64) * 0.12 * g
+            n = rng.standard_normal(CYCN) * 0.12 * g
             att.append((loop + (ab - loop) * g + n) * (1 + attack_gain * g))
         data = np.concatenate(att + [loop])
-        return _norm(data), len(data) - 64, C5
+        return _norm(data), len(data) - CYCN, C5
 
     # slap-ish bass: strong fundamental, snappy bright attack
     kit["bass"] = pitched([(1, 1.0), (2, 0.35), (3, 0.18)],
@@ -295,10 +305,10 @@ def synth_kit(rng):
     gcyc = [np.tanh(3.2 * (gbase + 0.35 * np.cos(2 * np.pi * k / 16)
                            * gbright)) for k in range(16)]
     gatt = [np.tanh(3.2 * (gbase + 0.5 * gbright
-                           + rng.standard_normal(64) * 0.35 * (1 - i / 5)))
+                           + rng.standard_normal(CYCN) * 0.35 * (1 - i / 5)))
             for i in range(5)]
     gdata = np.concatenate(gatt + gcyc)
-    kit["lead"] = (_norm(gdata), 5 * 64, C5)
+    kit["lead"] = (_norm(gdata), 5 * CYCN, C5)
     # brass: saw stack, hard attack
     kit["brass"] = pitched([(1, 1.0), (2, 0.6), (3, 0.45), (4, 0.35),
                             (5, 0.28), (6, 0.22)], 5, 0.7, [(7, 0.3)])
@@ -309,7 +319,7 @@ def synth_kit(rng):
     tail = strike * 0.18
     cyl = [strike * (1.3 * 0.74 ** i + 0.18) for i in range(10)]
     bell = np.concatenate(cyl + [tail])
-    kit["bell"] = (_norm(bell), len(bell) - 64, C5)
+    kit["bell"] = (_norm(bell), len(bell) - CYCN, C5)
 
     sr = 16000
     t = np.arange(int(0.09 * sr)) / sr
@@ -500,8 +510,7 @@ def render_preview(path, bpm, kit, kit_order, channels, total_rows):
     sr = 32000
     step = 60.0 / bpm / 4
     out = np.zeros(int((total_rows + 8) * step * sr), dtype=np.float64)
-    GAIN = {"kick": 0.9, "snare": 0.7, "hat": 0.35, "bass": 0.8,
-            "keys": 0.4, "lead": 0.55, "brass": 0.6, "bell": 0.5}
+    # the volume column already carries the MIX table (score mode)
     for ch, evs in channels.items():
         for i, e in enumerate(evs):
             r, note, ins, vol, cut = e[:5]
@@ -531,7 +540,7 @@ def render_preview(path, bpm, kit, kit_order, channels, total_rows):
             fade[-f:] = np.linspace(1, 0, f)
             v = (vol if vol is not None else 48) / 64.0
             s0 = int((r * step) * sr)
-            out[s0:s0 + len(seg)] += seg * fade * v * GAIN[name]
+            out[s0:s0 + len(seg)] += seg * fade * v * 0.9
     out = _norm(out, 0.9)
     sf.write(path, out.astype(np.float32), sr)
     print("wrote", path, "(%.1fs)" % (len(out) / sr))
@@ -570,6 +579,19 @@ def main():
         write_it(args.out, name, bpm, kit, KIT_ALL, ch, total)
         render_preview(os.path.join(d, "preview.wav"), bpm, kit,
                        KIT_ALL, ch, total)
+        # the HONEST ear-proxy: render the actual .it through ffmpeg's
+        # libopenmpt (real tracker semantics: driver mixing, Gxx/Hxy,
+        # cuts). Still no BRR/gaussian, but far closer than the synth
+        # preview above.
+        import subprocess
+        try:
+            subprocess.run(["ffmpeg", "-hide_banner", "-loglevel",
+                            "error", "-y", "-i", args.out,
+                            os.path.join(d, "preview_it.wav")], check=True)
+            print("wrote", os.path.join(d, "preview_it.wav"),
+                  "(libopenmpt render of the actual module)")
+        except (OSError, subprocess.CalledProcessError) as e:
+            print("ffmpeg .it render skipped:", e)
         return
 
     def stem(pat):

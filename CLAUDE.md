@@ -594,8 +594,16 @@ are baked PER COURSE under its ambient (crs<n>_obj / crs<n>_buoy).
   instrument kit, plus <songdir>/preview.wav for ear checks. Suno STEMS
   and zips are LOCAL-ONLY (gitignored - hundreds of MB, GitHub rejects
   >100MB); the small MIDIs are committed so the .it can regenerate
-  anywhere. midi2it emits 8-BIT samples (every known-working module is
-  8-bit) and folds notes above 95 down an octave (the 128kHz ceiling).
+  anywhere. midi2it emits 16-BIT samples (doc-recommended - BRR keeps
+  more; the 8-bit detour was phantom-hang cargo cult) with 128-sample
+  cycles at C5Speed 33488 (short 64-sample loops came out FAR duller in
+  game than the preview - the DSP's gaussian filter eats harmonics near
+  Nyquist), notes fold down an octave above 83 (the 128kHz ceiling at
+  that rate). The .it volume column CARRIES the shared MIX table, so
+  the in-game balance is the preview's balance. preview.wav = a synth
+  APPROXIMATION (no BRR/gaussian/driver - it flattered the game once);
+  preview_it.wav = ffmpeg/libopenmpt rendering the ACTUAL module, the
+  honest ear-proxy short of the ROM itself.
 - A soundbank >32K is SPLIT by smconv into per-bank sections named
   SOUNDBANK__0/1/... - main.c must extern EACH and spcSetBank them in
   REVERSE order (<=32K goes back to a single SOUNDBANK__; the link
