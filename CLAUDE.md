@@ -617,8 +617,23 @@ are baked PER COURSE under its ambient (crs<n>_obj / crs<n>_buoy).
   ("No rule to make target '../assets/music/sunny_island/0'") - the
   bake dep list is scoped to courses/waves/top-level files, music
   excluded on purpose.
-- VERIFYING AUDIO: use tools/mesen/dspdump.lua (per-voice ENVX/OUTX =
-  ground truth). SPC RAM checksums are NOT a liveness signal - an
+- **SNESMod DRIVER BUG: an instrument WITHOUT a volume envelope fades
+  from its FIRST tick** (sm_spc.asm Channel_ProcessEnvelope: the
+  no-envelope branch jumps to _env_setfade when CF_KEYON is SET - the
+  comment says "on KEYOFF", the branch is inverted). Symptom: every
+  note plinks, nothing sustains - and it cost DAYS because register
+  snapshots misread it as "voices between phrases". Every real module
+  ships envelopes on every instrument, which is why nobody upstream
+  ever hit it. midi2it therefore writes a sustained volume envelope on
+  EVERY instrument (hold 64 at node 0 / susloop, release to 0 in 12
+  ticks); never emit an envelope-less instrument. Measure sustain with
+  tools/mesen/dutycheck.lua (per-voice %% of frames with ENVX>0: the
+  fix took lead 28%%->82%%, bass 38%%->66%%).
+- VERIFYING AUDIO: dspdump.lua (per-voice ENVX/OUTX snapshots) proves
+  voices key on; dutycheck.lua proves notes SUSTAIN - use both, and
+  neither replaces EARS: the user auditions preview_it.wav (libopenmpt
+  render of the real module) and the ROM in Mesen/snes9x. Claude cannot
+  hear - never claim how the game SOUNDS from registers alone. SPC RAM checksums are NOT a liveness signal - an
   echo-off module never touches the regions a naive sum watches, and a
   session was lost to a "driver hang" that was playing fine. The
   sequencer state (mod_row/patt_addr, driver zero page) reads via

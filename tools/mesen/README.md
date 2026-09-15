@@ -78,3 +78,8 @@ signal (a module with echo off never touches them; a whole "driver hang"
 was chased that was actually playing fine). Drum one-shots are ~90ms:
 easy to miss at 40-frame sampling, so silent drums in one dump prove
 nothing.
+
+`dutycheck.lua` — per-voice % of frames with ENVX > 0 over frames
+150-500: the SUSTAIN metric. Plinky/instant-fading notes read as low
+duty; held notes as high. This caught what dspdump's 40-frame snapshots
+misread as "voices between phrases" (the SNESMod no-envelope fade bug).

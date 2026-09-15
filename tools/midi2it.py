@@ -375,11 +375,19 @@ def pack_pattern(rows, nrows):
     return bytes(out)
 
 
-def env_bytes():
-    # 82 bytes: Flg=0(off) Num=2 LpB LpE SLB SLE + 25 nodes (s8 val,
-    # u16 tick) + 1 trailing
-    b = bytearray([0, 2, 0, 0, 0, 0])
-    b += struct.pack("<bH", 64, 0) + struct.pack("<bH", 64, 1)
+def env_bytes(vol_sustain=False):
+    # 82 bytes: Flg Num LpB LpE SLB SLE + 25 nodes (s8 val, u16 tick)
+    # + 1 trailing. The volume envelope is NEVER off: SNESMod's
+    # no-envelope path has an inverted branch (sm_spc.asm, "start fade
+    # on KEYOFF" fires on KEY-ON) that fades every note from its first
+    # tick - the "plinky, nothing held" bug. Sustain at node 0 holds
+    # full volume while the key is down; release ramps to 0 in 12 ticks.
+    if vol_sustain:
+        b = bytearray([0x05, 2, 0, 0, 0, 0])   # on + susloop, node 0
+        b += struct.pack("<bH", 64, 0) + struct.pack("<bH", 0, 12)
+    else:
+        b = bytearray([0, 2, 0, 0, 0, 0])
+        b += struct.pack("<bH", 64, 0) + struct.pack("<bH", 64, 1)
     b += bytes(23 * 3) + bytes(1)
     assert len(b) == 82
     return bytes(b)
@@ -396,7 +404,8 @@ def instrument_bytes(name, smp_1based):
     b += bytes([0, 0, 0, 0]) + struct.pack("<H", 0)  # IFC IFR MCh MPr Bnk
     for i in range(120):
         b += bytes([i, smp_1based])       # every key -> this sample
-    b += env_bytes() * 3                  # vol/pan/pitch envelopes: off
+    b += env_bytes(vol_sustain=True)      # volume: sustain (see note)
+    b += env_bytes() * 2                  # pan/pitch envelopes: off
     b += bytes(554 - len(b))
     assert len(b) == 554
     return bytes(b)
