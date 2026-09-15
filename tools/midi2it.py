@@ -223,17 +223,26 @@ def score_channels(tracks, I):
     lead += [(r, ln, p, v, "bell") for r, ln, p, v in tracks.get("Bells", [])]
     lead.sort()
     prev_end, prev_p = -99, 0
-    for r, ln, p, v, ins in lead:
+    for i, (r, ln, p, v, ins) in enumerate(lead):
         cmd = None
         if ins == "lead" and prev_end >= r and prev_p != p:
-            # legato/overlap = a bend: Gxx glides from the still-held
-            # previous pitch, no retrigger
+            # legato/overlap in the WRITTEN score = a bend: Gxx glides
+            # from the still-held previous pitch, no re-pick
             cmd = (CMD_G, 0x20 if abs(p - prev_p) <= 2 else 0x40)
-        ch[5].append((r, p, I[ins], vol(v), r + ln, cmd))
-        if ins == "lead" and ln >= 5:
-            for vr in range(r + 2, r + ln):
-                ch[5].append((vr, None, None, None, None, (CMD_H, 0x23)))
         prev_end, prev_p = r + ln, p
+        cut = r + ln
+        if ins == "lead":
+            # sustain: ring to the next event across small written gaps
+            # (guitar legato), and a touch into a real rest
+            nxt = lead[i + 1][0] if i + 1 < len(lead) else None
+            if nxt is not None and nxt - (r + ln) <= 4:
+                cut = nxt
+            else:
+                cut = r + ln + 2
+        ch[5].append((r, p, I[ins], vol(v), cut, cmd))
+        if ins == "lead" and cut - r >= 5:
+            for vr in range(r + 3, min(cut, r + 14)):
+                ch[5].append((vr, None, None, None, None, (CMD_H, 0x23)))
     return ch
 
 
@@ -275,13 +284,21 @@ def synth_kit(rng):
     # keys: soft square-ish organ pad
     kit["keys"] = pitched([(1, 1.0), (3, 0.33), (5, 0.2), (7, 0.14)],
                           3, 0.2, [(2, 0.2)])
-    # lead: "cheesy guitar" - odd-heavy harmonic stack soft-clipped for
-    # amp warmth, with a picked attack (uniform tanh keeps the loop
-    # seamless); slides/vibrato come from Gxx/Hxy in the patterns
-    data, loop, c5 = pitched([(1, 1.0), (2, 0.35), (3, 0.55), (4, 0.2),
-                              (5, 0.3), (7, 0.16)], 6, 0.9,
-                             [(6, 0.3), (9, 0.2)])
-    kit["lead"] = (_norm(np.tanh(2.2 * data)), loop, c5)
+    # lead: SUSTAINED electric guitar. Hard-clipped odd-heavy stack; the
+    # loop is 16 cycles whose brightness swings through one full period
+    # (seamless) - the harmonic "growl" that makes a distorted sustain
+    # read as guitar instead of organ. Pick attack at FULL level (a
+    # compressed guitar does not decay); vibrato/slides ride Gxx/Hxy.
+    gbase = cyc([(1, 1.0), (2, 0.45), (3, 0.6), (4, 0.3), (5, 0.35),
+                 (6, 0.18), (7, 0.2)])
+    gbright = cyc([(8, 0.5), (9, 0.3), (11, 0.2)])
+    gcyc = [np.tanh(3.2 * (gbase + 0.35 * np.cos(2 * np.pi * k / 16)
+                           * gbright)) for k in range(16)]
+    gatt = [np.tanh(3.2 * (gbase + 0.5 * gbright
+                           + rng.standard_normal(64) * 0.35 * (1 - i / 5)))
+            for i in range(5)]
+    gdata = np.concatenate(gatt + gcyc)
+    kit["lead"] = (_norm(gdata), 5 * 64, C5)
     # brass: saw stack, hard attack
     kit["brass"] = pitched([(1, 1.0), (2, 0.6), (3, 0.45), (4, 0.35),
                             (5, 0.28), (6, 0.22)], 5, 0.7, [(7, 0.3)])
