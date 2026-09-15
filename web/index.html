@@ -55,10 +55,15 @@
   window.EJS_player = "#game";
   window.EJS_core = "snes";
   window.EJS_gameName = "Super Waverace";
-  // ?v= is stamped with the commit SHA at deploy time: EmulatorJS caches
-  // the fetched ROM in IndexedDB keyed by this URL (immune to HTTP
-  // cache-busting), so the key must change whenever the ROM does
+  // ?v= is stamped with the commit SHA at deploy time so a fresh
+  // index.html always names a fresh ROM URL. IndexedDB caching is OFF
+  // outright (a 512K refetch is nothing): a stale index.html - GitHub
+  // Pages caches pages for 10 MINUTES - used to hand EmulatorJS an old
+  // ?v= key and serve a weeks-old ROM out of IndexedDB, which burned a
+  // whole debugging session. Testing within 10 min of a push can STILL
+  // show the previous build; hard-reload after the window passes.
   window.EJS_gameUrl = "superwaverace.sfc?v=dev";
+  window.EJS_disableDatabases = true;
   window.EJS_pathtodata = "https://cdn.emulatorjs.org/4.2.3/data/";
   window.EJS_backgroundColor = "#12151c";
 </script>
