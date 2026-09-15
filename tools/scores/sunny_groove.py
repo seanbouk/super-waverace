@@ -17,6 +17,11 @@ B (vi9-II9-IV-V13sus x2) - the E9 is the fusion lift.
 
 Rows are 16ths (4 per beat, 16 per bar). Edit freely - regenerating is
   toolchain/py311-audio/Scripts/python.exe tools/scores/sunny_groove.py
+
+LEAD SEMANTICS (the guitar treatment, applied by midi2it --score):
+touching/overlapping lead notes become a Gxx SLIDE (bend, no re-pick);
+a gap between notes means a fresh pick; notes held 5+ rows get vibrato.
+The grace-note pickups below exist purely to create bends.
 """
 import os
 import sys
@@ -136,8 +141,10 @@ for base in (0, 4):
 lead += [(at(2, 0), 2, n("B4"), 96), (at(2, 3), 2, n("D5"), 92),
          (at(2, 6), 2, n("E5"), 94), (at(2, 8), 5, n("D5"), 96)]
 lead += [(at(6, 0), 2, n("B4"), 96), (at(6, 3), 2, n("D5"), 92),
+         (at(6, 5), 1, n("E5"), 80),                  # slide pickup...
          (at(6, 6), 2, n("F#5"), 96), (at(6, 8), 4, n("E5"), 96)]
 # bars 3 and 7 rest: brass answers there
+lead += [(at(3, 14), 2, n("E4"), 72)]  # bends into the bar-5 hook F#4
 
 # ---- bells: B-half offbeat 8th arps (timeshare the lead channel) ------
 bells = []
@@ -152,7 +159,9 @@ lead += [(at(10, 0), 3, n("F#5"), 98), (at(10, 4), 2, n("E5"), 92),
          (at(11, 6), 1, n("E5"), 86), (at(11, 8), 2, n("D5"), 90),
          (at(11, 10), 4, n("B4"), 88)]
 lead += [(at(14, 0), 2, n("D5"), 92), (at(14, 4), 2, n("E5"), 94),
-         (at(14, 8), 2, n("F#5"), 96), (at(14, 12), 2, n("A5"), 98)]
+         (at(14, 8), 2, n("F#5"), 96),
+         (at(14, 11), 1, n("G5"), 84),                # bend up into...
+         (at(14, 12), 3, n("A5"), 98)]
 
 # --------------------------------------------------------------- emit
 mid = mido.MidiFile(type=1, ticks_per_beat=TPB)

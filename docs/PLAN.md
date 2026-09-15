@@ -542,8 +542,22 @@ Phases:
    writes the .it against a 7-sample procedural kit. Sunny Island:
    29.7K module, 17.7K ARAM spare with the SFX bank, whole 3min track.
    Playing in the ROM (verified at DSP level: tools/mesen/dspdump.lua).
-   NEXT: the user listens (preview.wav + web player) and we iterate the
-   kit/mix by ear, wave-lab style. Known dials: velocity quantisation +
+   PIVOT (Sep 15, user judgement): the transcription route capped out -
+   two stacked lossy AI steps (Suno separates its own mix into stems;
+   Basic Pitch transcribes those) give mush, and rich-PCM production
+   does not survive note quantisation. The pipeline's front door is now
+   a COMPOSED SCORE MIDI (midi2it --score): tracks named Bass/Keys/
+   Brass/Lead/Bells/Drums, composed inside the 6-channel plan; on the
+   Lead, touching notes = Gxx slide, gaps = re-pick, 5+ row holds get
+   Hxy vibrato (the "cheesy guitar" treatment; guitar-ised lead sample +
+   a bell sample landed with it). First composed groove:
+   tools/scores/sunny_groove.py -> 16 bars D major 128 BPM, user-
+   approved from the MIDI, IN GAME as a 6.9K module (vs 29.7K for the
+   transcribed track - composed music is ~4x cheaper). Songs loop
+   forever by default (order list wraps); intro-then-loop available via
+   Bxx when wanted. Suno = reference listening only now.
+   NEXT: the user listens on real SPC voices and we iterate score/kit,
+   wave-lab style. Known dials: velocity quantisation +
    32-row patterns if ARAM ever pinches (dedupe currently finds no
    repeats); swing via 32nd rows if the straight grid sounds stiff;
    16-bit samples if 8-bit sounds grainy (BRR gets more data).

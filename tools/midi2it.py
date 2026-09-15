@@ -144,6 +144,99 @@ def reduce_stream(notes, mode, step, off, vel_min=18):
     return voices
 
 
+# ------------------------------------------------------------- score mode
+def score_events(path):
+    """A COMPOSED score MIDI (tools/scores/*): tracks named Bass/Keys/
+    Brass/Lead/Bells/Drums, notes already on the 16th grid. Returns
+    (bpm, {trackname: [(row, len_rows, pitch, vel)]})."""
+    import mido
+    mf = mido.MidiFile(path)
+    bpm = 125.0
+    for m in mf.tracks[0]:
+        if m.type == "set_tempo":
+            bpm = mido.tempo2bpm(m.tempo)
+    tpr = mf.ticks_per_beat / 4
+    tracks = {}
+    for tr in mf.tracks:
+        t = 0
+        on = {}
+        notes = []
+        for m in tr:
+            t += m.time
+            if m.type == "note_on" and m.velocity > 0:
+                on[m.note] = (t, m.velocity)
+            elif m.type in ("note_off", "note_on") and m.note in on:
+                s, v = on.pop(m.note)
+                notes.append((int(round(s / tpr)),
+                              max(1, int(round((t - s) / tpr))), m.note, v))
+        if notes and tr.name:
+            tracks[tr.name] = sorted(notes)
+    return bpm, tracks
+
+
+GM_KICK, GM_SNARE, GM_HAT = 36, 38, 42
+CMD_G, CMD_H = 7, 8  # IT effects: tone portamento, vibrato
+
+
+def score_channels(tracks, I):
+    """Map named score tracks onto the 6-channel plan. Lead gets the
+    guitar treatment: a note starting at/before the previous note's end
+    becomes a Gxx slide (bend) instead of a retrigger, and held notes
+    get gentle Hxy vibrato rows."""
+    ch = {i: [] for i in range(6)}
+
+    def vol(v):
+        return int(np.clip(v // 2, 1, 64))
+
+    for r, ln, p, v in tracks.get("Drums", []):
+        if p == GM_KICK:
+            ch[0].append((r, 60, I["kick"], vol(v), None))
+        elif p == GM_SNARE:
+            ch[0].append((r, 60, I["snare"], vol(v), None))
+        elif p == GM_HAT:
+            ch[1].append((r, 60, I["hat"], vol(v), None))
+
+    for r, ln, p, v in tracks.get("Bass", []):
+        ch[2].append((r, p, I["bass"], vol(v), r + ln))
+
+    groups = {}
+    for r, ln, p, v in tracks.get("Keys", []):
+        groups.setdefault(r, []).append((p, ln, v))
+    for r in sorted(groups):
+        g = sorted(groups[r])
+        p, ln, v = g[-1]
+        ch[3].append((r, p, I["keys"], vol(v), r + ln))
+        if len(g) > 1:
+            p, ln, v = g[0]
+            ch[4].append((r, p, I["keys"], vol(v), r + ln))
+
+    bre = [(r, p, I["brass"], vol(v), r + ln)
+           for r, ln, p, v in tracks.get("Brass", [])]
+    if bre:
+        occupied = set()
+        for r, note, ins, v, cut in bre:
+            occupied.update(range(r, cut + 1))
+        ch[4] = [e for e in ch[4] if e[0] not in occupied] + bre
+        ch[4].sort()
+
+    lead = [(r, ln, p, v, "lead") for r, ln, p, v in tracks.get("Lead", [])]
+    lead += [(r, ln, p, v, "bell") for r, ln, p, v in tracks.get("Bells", [])]
+    lead.sort()
+    prev_end, prev_p = -99, 0
+    for r, ln, p, v, ins in lead:
+        cmd = None
+        if ins == "lead" and prev_end >= r and prev_p != p:
+            # legato/overlap = a bend: Gxx glides from the still-held
+            # previous pitch, no retrigger
+            cmd = (CMD_G, 0x20 if abs(p - prev_p) <= 2 else 0x40)
+        ch[5].append((r, p, I[ins], vol(v), r + ln, cmd))
+        if ins == "lead" and ln >= 5:
+            for vr in range(r + 2, r + ln):
+                ch[5].append((vr, None, None, None, None, (CMD_H, 0x23)))
+        prev_end, prev_p = r + ln, p
+    return ch
+
+
 # ------------------------------------------------------- house instruments
 def _norm(x, peak=0.85):
     m = np.abs(x).max()
@@ -182,12 +275,24 @@ def synth_kit(rng):
     # keys: soft square-ish organ pad
     kit["keys"] = pitched([(1, 1.0), (3, 0.33), (5, 0.2), (7, 0.14)],
                           3, 0.2, [(2, 0.2)])
-    # lead: brighter square/saw hybrid
-    kit["lead"] = pitched([(1, 1.0), (2, 0.5), (3, 0.33), (4, 0.25),
-                           (5, 0.2)], 4, 0.4, [(6, 0.3), (8, 0.2)])
+    # lead: "cheesy guitar" - odd-heavy harmonic stack soft-clipped for
+    # amp warmth, with a picked attack (uniform tanh keeps the loop
+    # seamless); slides/vibrato come from Gxx/Hxy in the patterns
+    data, loop, c5 = pitched([(1, 1.0), (2, 0.35), (3, 0.55), (4, 0.2),
+                              (5, 0.3), (7, 0.16)], 6, 0.9,
+                             [(6, 0.3), (9, 0.2)])
+    kit["lead"] = (_norm(np.tanh(2.2 * data)), loop, c5)
     # brass: saw stack, hard attack
     kit["brass"] = pitched([(1, 1.0), (2, 0.6), (3, 0.45), (4, 0.35),
                             (5, 0.28), (6, 0.22)], 5, 0.7, [(7, 0.3)])
+    # bell/marimba: fundamental + strong 4th partial, loud strike
+    # decaying into a QUIET loop (no envelopes - the tail fades by
+    # construction and note cuts finish the job)
+    strike = cyc([(1, 1.0), (4, 0.45), (10, 0.1)])
+    tail = strike * 0.18
+    cyl = [strike * (1.3 * 0.74 ** i + 0.18) for i in range(10)]
+    bell = np.concatenate(cyl + [tail])
+    kit["bell"] = (_norm(bell), len(bell) - 64, C5)
 
     sr = 16000
     t = np.arange(int(0.09 * sr)) / sr
@@ -211,23 +316,34 @@ def synth_kit(rng):
 
 # --------------------------------------------------------------- IT writer
 def pack_pattern(rows, nrows):
-    """rows: {row: {chan: (note, ins, vol)}}; note 254 = cut."""
+    """rows: {row: {chan: (note, ins, vol, cmdpair)}}; note 254 = cut,
+    None = no note (a command-only row); cmdpair = (cmd 1-26, param)."""
     out = bytearray()
     for r in range(nrows):
         for ch in sorted(rows.get(r, {})):
-            note, ins, vol = rows[r][ch]
-            mask = 1
+            note, ins, vol, cmd = rows[r][ch]
+            mask = 0
+            if note is not None:
+                mask |= 1
             if ins is not None:
                 mask |= 2
             if vol is not None:
                 mask |= 4
+            if cmd is not None:
+                mask |= 8
+            if not mask:
+                continue
             out.append((ch + 1) | 0x80)
             out.append(mask)
-            out.append(note)
+            if note is not None:
+                out.append(note)
             if ins is not None:
                 out.append(ins)
             if vol is not None:
                 out.append(vol)
+            if cmd is not None:
+                out.append(cmd[0])
+                out.append(cmd[1])
         out.append(0)
     return bytes(out)
 
@@ -277,18 +393,29 @@ def sample_bytes(name, data, loop_begin, c5, data_ofs):
 
 
 def write_it(path, songname, bpm, kit, kit_order, channels, total_rows):
-    """channels: {chan: [(row, note, ins_1based, vol, cut_row|None)]}"""
+    """channels: {chan: [(row, note, ins_1based, vol, cut_row[, cmdpair])]}
+    note None = command-only event (e.g. a vibrato row)."""
     ROWS = 64
     npat = (total_rows + ROWS - 1) // ROWS
 
-    # scatter events into per-pattern row dicts
+    # scatter events into per-pattern row dicts: real notes win the row,
+    # then command-only events, then cuts fill what remains
     pats = [dict() for _ in range(npat)]
-    for ch, evs in channels.items():
-        for r, note, ins, vol, cut in evs:
-            pats[r // ROWS].setdefault(r % ROWS, {})[ch] = (note, ins, vol)
-            if cut is not None and cut < total_rows:
-                pc, pr = divmod(cut, ROWS)
-                pats[pc].setdefault(pr, {}).setdefault(ch, (254, None, None))
+    for rank in (0, 1, 2):
+        for ch, evs in channels.items():
+            for e in evs:
+                r, note, ins, vol, cut = e[:5]
+                cmd = e[5] if len(e) > 5 else None
+                if rank == 0 and note is not None:
+                    pats[r // ROWS].setdefault(r % ROWS, {})[ch] = \
+                        (note, ins, vol, cmd)
+                elif rank == 1 and note is None:
+                    pats[r // ROWS].setdefault(r % ROWS, {}).setdefault(
+                        ch, (None, None, None, cmd))
+                elif rank == 2 and cut is not None and cut < total_rows:
+                    pc, pr = divmod(cut, ROWS)
+                    pats[pc].setdefault(pr, {}).setdefault(
+                        ch, (254, None, None, None))
 
     packed = [pack_pattern(p, ROWS) for p in pats]
     # dedupe identical patterns (funk grooves repeat)
@@ -357,17 +484,18 @@ def render_preview(path, bpm, kit, kit_order, channels, total_rows):
     step = 60.0 / bpm / 4
     out = np.zeros(int((total_rows + 8) * step * sr), dtype=np.float64)
     GAIN = {"kick": 0.9, "snare": 0.7, "hat": 0.35, "bass": 0.8,
-            "keys": 0.4, "lead": 0.55, "brass": 0.6}
+            "keys": 0.4, "lead": 0.55, "brass": 0.6, "bell": 0.5}
     for ch, evs in channels.items():
-        for i, (r, note, ins, vol, cut) in enumerate(evs):
-            if note > 200:
+        for i, e in enumerate(evs):
+            r, note, ins, vol, cut = e[:5]
+            if note is None or note > 200:
                 continue
             name = kit_order[ins - 1]
             data, loop, c5 = kit[name]
             rate = c5 * 2 ** ((note - 60) / 12)
             end_r = cut if cut is not None else r + 16
-            for j in range(i + 1, len(evs)):   # next event on channel cuts
-                if evs[j][0] > r:
+            for j in range(i + 1, len(evs)):   # next NOTE on channel cuts
+                if evs[j][0] > r and evs[j][1] is not None:
                     end_r = min(end_r, evs[j][0])
                     break
             dur = max(1, end_r - r) * step
@@ -399,12 +527,33 @@ def main():
     ap.add_argument("-o", "--out", required=True)
     ap.add_argument("--bpm", type=float, help="centre of the bpm search")
     ap.add_argument("--bars", type=int, help="truncate to N bars")
+    ap.add_argument("--score", help="composed score MIDI: skip the stem "
+                    "transcription path and convert this directly")
     args = ap.parse_args()
     d = args.songdir
 
     cfgp = os.path.join(d, "song.json")
     cfg = json.load(open(cfgp)) if os.path.exists(cfgp) else {}
     bpm_hint = args.bpm or cfg.get("bpm", 128)
+
+    KIT_ALL = ["kick", "snare", "hat", "bass", "keys", "lead", "brass",
+               "bell"]
+    if args.score:
+        bpm, tracks = score_events(args.score)
+        ch = score_channels(tracks, {n: KIT_ALL.index(n) + 1
+                                     for n in KIT_ALL})
+        total = max(e[0] for evs in ch.values() for e in evs) + 1
+        total = ((total + 15) // 16) * 16  # whole bars, clean loop
+        print("score: bpm=%.2f rows=%d events=%d"
+              % (bpm, total, sum(len(v) for v in ch.values())))
+        rng = np.random.default_rng(0x5EA)
+        kit = synth_kit(rng)
+        name = cfg.get("name",
+                       os.path.basename(d.rstrip("/\\")).upper())
+        write_it(args.out, name, bpm, kit, KIT_ALL, ch, total)
+        render_preview(os.path.join(d, "preview.wav"), bpm, kit,
+                       KIT_ALL, ch, total)
+        return
 
     def stem(pat):
         m = glob.glob(os.path.join(d, pat))

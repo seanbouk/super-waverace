@@ -33,7 +33,7 @@
 // REVERSE order (the lib example's pattern). Crossing the next 32K
 // boundary adds a SOUNDBANK__2 extern + spcSetBank line here, and a
 // soundbank <= 32K goes back to a single unsuffixed SOUNDBANK__.
-extern char SOUNDBANK__0, SOUNDBANK__1;
+extern char SOUNDBANK__;
 
 // per-course loaders (camera.asm): straight copy / RLE decode into WRAM
 // bank $7F, source + destination via the globals below
@@ -2153,8 +2153,7 @@ int main(void)
     // spike track: load once at boot, plays under everything. Effects
     // must (re)load AFTER a module load - spcLoad resets ARAM - so any
     // future per-course spcLoad repeats the spcLoadEffect calls
-    spcSetBank(&SOUNDBANK__1);
-    spcSetBank(&SOUNDBANK__0);
+    spcSetBank(&SOUNDBANK__);
     spcLoad(MOD_SUNNY_ISLAND);
     spcLoadEffect(0);
     spcPlay(0); // queued; the first loop's spcProcess() flushes it
