@@ -10,7 +10,7 @@ export ROMTITLE := SUPER WAVERACE
 # .asm/.h/.bnk in game/ (all gitignored). The EFFECTS bank lists FIRST
 # (MOD 0; -f sizes the effect set against it, per the lib's example).
 # -b 12: high banks are empty, and the profiler's code-bank map survives.
-AUDIOFILES := ../assets/music/spikesfx.it ../assets/music/sunny_island.it ../assets/music/sunset_cove.it ../assets/music/grey_lake.it ../assets/music/deep_blue.it ../assets/music/dawn_coast.it
+AUDIOFILES := ../assets/music/spikesfx.it ../assets/music/sunny_island.it ../assets/music/sunset_cove.it ../assets/music/grey_lake.it ../assets/music/deep_blue.it ../assets/music/dawn_coast.it ../assets/music/twilight_sky.it
 export SOUNDBANK := soundbank
 SMCONVFLAGS := -s -o $(SOUNDBANK) -V -b 12 -f
 

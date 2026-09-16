@@ -2186,6 +2186,7 @@ int main(void)
     crsMod[2] = MOD_GREY_LAKE;
     crsMod[3] = MOD_DEEP_BLUE;
     crsMod[4] = MOD_DAWN_COAST;
+    crsMod[5] = MOD_TWILIGHT_SKY;
     curMod = 0xFF;
 
     setScreenOn();

@@ -42,7 +42,7 @@ NOTE_MAX = 83     # SNESMod: playback rate must stay under 128 kHz
 # in-game balance must be the balance the preview auditioned
 MIX = {"kick": 0.9, "snare": 0.7, "hat": 0.35, "bass": 0.8,
        "keys": 0.4, "lead": 0.62, "brass": 0.55, "bell": 0.5,
-       "flute": 0.6, "pad": 0.38}
+       "flute": 0.6, "pad": 0.38, "sax": 0.62}
 
 
 # ---------------------------------------------------------------- tempo fit
@@ -234,10 +234,13 @@ def score_channels(tracks, I):
     lead = [(r, ln, p, v, "lead") for r, ln, p, v in tracks.get("Lead", [])]
     lead += [(r, ln, p, v, "flute")
              for r, ln, p, v in tracks.get("Flute", [])]
+    lead += [(r, ln, p, v, "sax")
+             for r, ln, p, v in tracks.get("Sax", [])]
     lead += [(r, ln, p, v, "bell") for r, ln, p, v in tracks.get("Bells", [])]
     lead.sort()
     # per-instrument vibrato: (param, onset rows after the note starts)
-    VIB = {"lead": (0x22, 3), "flute": (0x32, 4)}  # flute: delayed
+    VIB = {"lead": (0x22, 3), "flute": (0x32, 4),
+           "sax": (0x24, 4)}  # sax: deeper, slower, delayed
     prev_end, prev_p = -99, 0
     for i, (r, ln, p, v, ins) in enumerate(lead):
         cmd = None
@@ -331,6 +334,15 @@ def synth_kit(rng):
     pcyc = [pa * (1 - k / 7) + pb * (k / 7) for k in range(8)]
     pdata = np.concatenate(pcyc + pcyc[::-1])
     kit["pad"] = (_norm(pdata), 0, C5)
+
+    # sax: reedy even+odd blend, mild saturation, breathy onset
+    sxb = cyc([(1, 1.0), (2, 0.55), (3, 0.3), (4, 0.22), (5, 0.12),
+               (6, 0.08)])
+    sxa = [np.tanh(1.4 * (sxb * (0.7 + 0.3 * i / 4)
+                          + rng.standard_normal(CYCN) * 0.16 * (1 - i / 4)))
+           for i in range(4)]
+    sdata = np.concatenate(sxa + [np.tanh(1.4 * sxb)])
+    kit["sax"] = (_norm(sdata), 4 * CYCN, C5)
 
     # flute: near-pure tone with a breathy chiff attack, no clip
     fbase = cyc([(1, 1.0), (2, 0.16), (3, 0.07), (4, 0.03)])
@@ -626,7 +638,7 @@ def main():
     bpm_hint = args.bpm or cfg.get("bpm", 128)
 
     KIT_ALL = ["kick", "snare", "hat", "bass", "keys", "lead", "brass",
-               "bell", "flute", "pad"]
+               "bell", "flute", "pad", "sax"]
     if args.score:
         bpm, tracks = score_events(args.score)
         ch = score_channels(tracks, {n: KIT_ALL.index(n) + 1

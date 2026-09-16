@@ -570,8 +570,11 @@ Phases:
    (guitar groove) + Sunset Cove (Sep 16: 112 BPM F major, flute lead
    with delayed vibrato + bell answers, soft brass swells - 7.3K
    module; the kit gained a flute, and write_it now ships only the
-   samples a song uses). Remaining: four more courses' tracks (compose
-   as course themes firm up), then SFX (menu blip, countdown beeps,
+   samples a song uses). ALL SIX COURSES SCORED (Sep 16:
+   Deep Blue harbour-funk with a chromatic B-half descent; Dawn Coast
+   rising stepwise harmony with an EP/pad handover; Twilight Sky
+   finale - 132 BPM B minor, SAX lead, F#7alt stings, a dark pad
+   passage punching back bright). Remaining: SFX (menu blip, countdown beeps,
    splash/landing, gate pass/fail, finish sting - replaces the spikesfx
    placeholder bank; effects RELOAD after every spcLoad). Maybe: an
    engine hum pitched by speed via spcEffect (costs one SFX channel
