@@ -574,7 +574,14 @@ Phases:
    Deep Blue harbour-funk with a chromatic B-half descent; Dawn Coast
    rising stepwise harmony with an EP/pad handover; Twilight Sky
    finale - 132 BPM B minor, SAX lead, F#7alt stings, a dark pad
-   passage punching back bright). Remaining: SFX (menu blip, countdown beeps,
+   passage punching back bright). MENU SFX DONE (Sep 16,
+   VF-feel: tools/mksfx.py synthesises tick/back/boom with BAKED reverb
+   tails - the DSP echo belongs to the music module, so effects carry
+   their own space; menusfx.it is the soundbank's FIRST module = global
+   sources 0-2, reloaded after every spcLoad so slot==source;
+   SFX_TICK/BACK/BOOM macros wired into title, menu, rider/course
+   select, flyover skip, pause, results; the spikesfx placeholder is
+   GONE - the ROM is all-original audio now). Remaining: RACE SFX (menu blip, countdown beeps,
    splash/landing, gate pass/fail, finish sting - replaces the spikesfx
    placeholder bank; effects RELOAD after every spcLoad). Maybe: an
    engine hum pitched by speed via spcEffect (costs one SFX channel

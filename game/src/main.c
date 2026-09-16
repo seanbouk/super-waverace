@@ -167,6 +167,16 @@ u8 skiDist8, thrF8, thrR8;
 // and the results screen
 #define AUTOPILOT 0
 #define AUTOPILOT_COURSE 0
+
+// menu SFX (Virtua Fighter feel: tiny ticks, huge confirm boom).
+// menusfx.it is the soundbank's FIRST module, so its samples are
+// global sources 0-2; courseLoad reloads them after every spcLoad in
+// that order, so SLOT == SOURCE here. spcEffect packs slot and pitch
+// into 4 BITS EACH (max 16 effects); pitch = playback rate / 4kHz
+// (ticks authored at 32kHz -> 8, the boom at 16kHz -> 4).
+#define SFX_TICK() spcEffect(8, 0, 10 * 16 + 8)
+#define SFX_BACK() spcEffect(8, 1, 11 * 16 + 8)
+#define SFX_BOOM() spcEffect(4, 2, 15 * 16 + 8)
 // harness build: the chaser drives the CHAMPIONSHIP races too (finish,
 // points and standings all live) and every championship page auto-
 // advances, so the whole 6-race loop cycles hands-free under a Lua
@@ -1070,7 +1080,9 @@ static void courseLoad(u8 c)
         if (curMod != 0xFF)
         {
             spcLoad(curMod);
-            spcLoadEffect(0);
+            spcLoadEffect(0); // tick (slots = call order)
+            spcLoadEffect(1); // back
+            spcLoadEffect(2); // boom
             spcPlay(0); // queued; the next loop's spcProcess flushes
         }
     }
@@ -1392,7 +1404,7 @@ static void courseSelect(void)
             menuComposeList();
             courseGeom(courseSel); // repoints csMini for the vblank DMA
             menuDirty = 1;
-            spcEffect(4, 0, 15 * 16 + 8); // spike SFX: cursor blip
+            SFX_TICK();
 
         }
         if ((pad0 & KEY_DOWN) && !(menuPrev & KEY_DOWN)
@@ -1402,13 +1414,16 @@ static void courseSelect(void)
             menuComposeList();
             courseGeom(courseSel);
             menuDirty = 1;
-            spcEffect(4, 0, 15 * 16 + 8);
+            SFX_TICK();
         }
         menuPrev = pad0;
         if (!(pad0 & KEY_START))
             startHeld = 0;
         else if (!startHeld)
+        {
+            SFX_BOOM();
             break;
+        }
 #if AUTOPILOT
         if (menuT > 90)
         {
@@ -1493,7 +1508,10 @@ static void textScreen(char *name)
         if (!(pad0 & (KEY_B | KEY_START | KEY_A)))
             armed = 1; // the press that opened this page must not close it
         else if (armed)
+        {
+            SFX_BACK();
             break;
+        }
     }
     mosaicSweep(0, 0); // pixelate away; the next state snaps mosaic clear
 }
@@ -1663,6 +1681,7 @@ static u8 riderSelect(void)
             if (p2Join && sel == sel2)
                 sel = sel ? sel - 1 : sel2 + 1;
             dirty = 1;
+            SFX_TICK();
         }
         if ((pad0 & KEY_RIGHT) && !(menuPrev & KEY_RIGHT) && sel < 3)
         {
@@ -1670,16 +1689,21 @@ static u8 riderSelect(void)
             if (p2Join && sel == sel2)
                 sel = sel < 3 ? sel + 1 : sel2 - 1;
             dirty = 1;
+            SFX_TICK();
         }
         menuPrev = pad0;
         if (armed && (pad0 & (KEY_START | KEY_A)))
         {
+            SFX_BOOM();
             playerPal = sel;
             p2Pal = sel2;
             return 1;
         }
         if (armed && (pad0 & KEY_B))
+        {
+            SFX_BACK();
             return 0;
+        }
     }
 }
 
@@ -2006,7 +2030,10 @@ static void champPage(u8 mode)
         if (!(pad0 & (KEY_START | KEY_A)))
             armed = 1; // the press that got here must not skip the page
         else if (armed)
+        {
+            SFX_TICK();
             break;
+        }
         wait++;
 #if CHAMP_AUTO
         if (wait > 240)
@@ -2445,10 +2472,14 @@ int main(void)
                 }
                 // lapCount seeds 255, 0 at the rolling start, 1 after
                 // the lap - the flyover shows the whole course once
-                if ((lapCount >= 1 && lapCount != 255)
-                    || ((pad0 & (KEY_START | KEY_A))
-                        && !(ovlPrev & (KEY_START | KEY_A))))
-                    raceDone = 1; // -> the real race (main's flow)
+                if ((pad0 & (KEY_START | KEY_A))
+                    && !(ovlPrev & (KEY_START | KEY_A)))
+                {
+                    SFX_BOOM();
+                    raceDone = 1; // skip the flyover -> the race
+                }
+                if (lapCount >= 1 && lapCount != 255)
+                    raceDone = 1; // full lap shown -> the race
             }
             else if (raceMode == RM_TITLE)
             {
@@ -2460,6 +2491,7 @@ int main(void)
                 if ((pad0 & (KEY_START | KEY_A))
                     && !(ovlPrev & (KEY_START | KEY_A)))
                 {
+                    SFX_BOOM();
                     raceMode = RM_MENU;
                     uiClear();
                     ovlMenuDraw();
@@ -2471,15 +2503,18 @@ int main(void)
                 {
                     menuSel--;
                     ovlMenuDraw();
+                    SFX_TICK();
                 }
                 if ((pad0 & KEY_DOWN) && !(ovlPrev & KEY_DOWN)
                     && menuSel < 2)
                 {
                     menuSel++;
                     ovlMenuDraw();
+                    SFX_TICK();
                 }
                 if ((pad0 & KEY_B) && !(ovlPrev & KEY_B))
                 {
+                    SFX_BACK();
                     raceMode = RM_TITLE;
                     ovlFlash = 2;
                     uiClear();
@@ -2487,6 +2522,7 @@ int main(void)
                 if ((pad0 & (KEY_START | KEY_A))
                     && !(ovlPrev & (KEY_START | KEY_A)))
                 {
+                    SFX_BOOM();
                     menuGo = 1;
                     raceDone = 1;
                 }
@@ -2525,9 +2561,13 @@ int main(void)
                 waveHdma(phase, camBufOff);
                 pad0 = padsCurrent(0);
                 if ((pad0 & KEY_START) && !(ovlPrev & KEY_START))
+                {
+                    SFX_TICK();
                     break;
+                }
                 if ((pad0 & KEY_B) && !(ovlPrev & KEY_B))
                 {
+                    SFX_BACK();
                     raceDone = 1; // quit to the title
                     break;
                 }
