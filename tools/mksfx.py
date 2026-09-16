@@ -124,6 +124,56 @@ imp[:int(0.015 * sr)] = rng.standard_normal(int(0.015 * sr)) \
 dry[o:] += sub * 1.05 + gong * 0.55 + lowpass(imp, 0.6)
 FX["boom"] = (norm(room(dry, sr, 12, 0.58, 0.38, 0.38), 0.95), sr)
 
+# ---- engine hum: wet (underwater load) + dry (airborne rev) ------------
+# NOT looped: SNESMod reclaims an effect voice on the sample-end flag,
+# which a looped sample raises every wrap (~30ms) - loops die instantly
+# (measured). Each engine sample is ~190ms of un-looped texture and the
+# game RE-FIRES it every tick before it drains; the retrigger granulation
+# reads as engine roughness. Three periods per flavour x the driver's
+# 4kHz pitch steps = the ~8-rung rev ladder printed below.
+def engine(period, wet):
+    cycles = 3072 // period
+    n = period * cycles
+    t = np.arange(n) / period
+    if wet:
+        harm = ((1, 1.0), (2, 0.62), (3, 0.34), (4, 0.18))
+        noise_g, wob_g, wob_n, dark = 0.22, 0.2, cycles // 2, 0.18
+    else:
+        harm = ((1, 0.85), (2, 0.7), (3, 0.55), (4, 0.4), (5, 0.28),
+                (6, 0.18))
+        noise_g, wob_g, wob_n, dark = 0.34, 0.0, 1, 0.45
+    w = np.zeros(n)
+    for k, g in harm:
+        w += g * np.sin(2 * np.pi * k * t + k * 1.7)
+    nz = lowpass(rng.standard_normal(n), dark)
+    wob = 1 + wob_g * np.sin(2 * np.pi * wob_n * np.arange(n) / n)
+    return norm((w + nz * noise_g) * wob, 0.85)
+
+
+for i, period in enumerate((128, 112, 96)):
+    FX["engw%d" % i] = (engine(period, True), 16000)
+    FX["engd%d" % i] = (engine(period, False), 16000)
+
+steps = []
+for si, period in enumerate((128, 112, 96)):
+    for p in (2, 3, 4, 5):
+        steps.append((4000 * p / period, si, p))
+steps.sort()
+print("rev ladder (Hz, sample, pitch):",
+      ["%.0f=(%d,%d)" % s for s in steps])
+
+# ---- splash: the air-to-water hit --------------------------------------
+sr = 16000
+n = int(0.38 * sr)
+t = np.arange(n) / sr
+f = 140 * np.exp(-t * 8) + 55
+thump = np.sin(2 * np.pi * np.cumsum(f) / sr) * env(n, 7) * 0.75
+nz = rng.standard_normal(n)
+bright = np.diff(nz, prepend=0) * env(n, 14) * 0.5
+body = lowpass(nz, 0.2) * env(n, 5)
+FX["splash"] = (norm(room(thump + bright + body, sr, 5, 0.45, 0.3, 0.12),
+                     0.9), sr)
+
 # --------------------------------------------------------- emit the .it
 os.makedirs(OUTDIR, exist_ok=True)
 kit = {}
@@ -131,13 +181,16 @@ for name, (data, rate) in FX.items():
     # pad to a multiple of 16 samples (BRR block alignment)
     pad = (-len(data)) % 16
     data = np.concatenate([data, np.zeros(pad)])
-    kit[name] = (data, None, rate)
+    kit[name] = (data, None, rate)   # all one-shots (engines re-fired)
     sf.write(os.path.join(OUTDIR, "preview_%s.wav" % name),
              data.astype(np.float32), rate)
-    print("%-5s %5.0fms at %dHz (%d samples)"
+    print("%-6s %5.0fms at %dHz (%d samples)"
           % (name, 1000 * len(data) / rate, rate, len(data)))
 
-ORDER = ["tick", "back", "boom"]   # = source indexes 0/1/2
+ORDER = ["tick", "back", "boom",           # sources 0-2 (menu)
+         "engw0", "engw1", "engw2",        # 3-5 wet engine
+         "engd0", "engd1", "engd2",        # 6-8 dry engine
+         "splash"]                         # 9
 I = {nm: ORDER.index(nm) + 1 for nm in ORDER}
 ch = {0: [(i, 60, I[nm], 1, None) for i, nm in enumerate(ORDER)]}
 M.write_it(os.path.join(ROOT, "assets", "music", "menusfx.it"),

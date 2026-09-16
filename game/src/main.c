@@ -47,6 +47,8 @@ dmaMemory mapBuf; // the $7F8000 decode buffer, as a pointer for the lib
 u8 courseSel;     // menu cursor; persists between menus
 u8 crsMod[WAVE_COURSES]; // per-course music module (0xFF = silence),
 u8 curMod;               // filled in main(); curMod = what's loaded
+u8 engIdx, engWetF, engCd;     // engine hum: rung / flavour / cooldown
+u8 engS[8], engP[8], engV[8];  // rev ladder (see tools/mksfx.py)
 extern char ski_tiles, ski_pal; // OBJ palettes 0-3 + 5 are per course
                                 // (csObj/csBuoy, loaded by courseLoad)
 extern char tall_tiles; // OBJ name table 2: the stacked tall racers
@@ -177,6 +179,11 @@ u8 skiDist8, thrF8, thrR8;
 #define SFX_TICK() spcEffect(8, 0, 10 * 16 + 8)
 #define SFX_BACK() spcEffect(8, 1, 11 * 16 + 8)
 #define SFX_BOOM() spcEffect(4, 2, 15 * 16 + 8)
+// race SFX: slots 3-5 = wet engine loops (periods 128/112/96), 6-8 =
+// dry (airborne) loops, 9 = the landing splash. A LOOPED effect keeps
+// its voice until replaced, so the engine hum owns one of the two FX
+// voices while one-shots rotate on the other.
+#define SFX_SPLASH(vol) spcEffect(4, 9, (u8)((vol) * 16 + 8))
 // harness build: the chaser drives the CHAMPIONSHIP races too (finish,
 // points and standings all live) and every championship page auto-
 // advances, so the whole 6-race loop cycles hands-free under a Lua
@@ -1080,9 +1087,8 @@ static void courseLoad(u8 c)
         if (curMod != 0xFF)
         {
             spcLoad(curMod);
-            spcLoadEffect(0); // tick (slots = call order)
-            spcLoadEffect(1); // back
-            spcLoadEffect(2); // boom
+            for (bi = 0; bi < 10; bi++) // tick/back/boom, 6 engine
+                spcLoadEffect(bi);          // loops, splash: slot = order
             spcPlay(0); // queued; the next loop's spcProcess flushes
         }
     }
@@ -1273,6 +1279,9 @@ static void raceInit(void)
     sprBurst = 0;
     sprKick = 0;
     sprWet = 0;
+    engIdx = 255; // engine hum re-fires on the first tick
+    engWetF = 1;
+    engCd = 0;
     prevWater = waveSkiRow[0];
     for (bi = 0; bi < SPRAY_ROWS; bi++)
         sprInt[bi] = 0;
@@ -1432,6 +1441,40 @@ static void courseSelect(void)
         }
 #endif
     }
+}
+
+//---------------------------------------------------------------------------------
+// engine hum: speed picks a rung on the rev ladder; airborne swaps the
+// wet loop for the raspier dry one a rung up (revving free). Re-fires
+// only when the rung or flavour changes (a re-fire retriggers the loop
+// - the samples are attackless, so it reads as a gear step), with a
+// cooldown so a speed sitting on a boundary cannot flap.
+static void engineTick(void)
+{
+    u8 idx;
+    s16 v = vAlong;
+    if (v < 0)
+        v = -v;
+    if (v < 380)        idx = 0;
+    else if (v < 850)   idx = 1;
+    else if (v < 1400)  idx = 2;
+    else if (v < 2000)  idx = 3;
+    else if (v < 2650)  idx = 4;
+    else if (v < 3300)  idx = 5;
+    else if (v < 3950)  idx = 6;
+    else                idx = 7;
+    if (!inWater && idx < 7)
+        idx++; // no load in the air: rev up a rung
+    if (pFin)
+        idx = 0; // finished: settle to idle
+    // RE-FIRE EVERY TICK: the samples are ~190ms un-looped one-shots
+    // (looped effects die in ~30ms on this driver), so the hum must be
+    // retriggered continuously to sustain. One queued message per tick,
+    // drained by the same tick's spcProcess - balanced, no FIFO growth.
+    engIdx = idx;
+    engWetF = inWater;
+    spcEffect(engP[idx], (u16)((inWater ? 3 : 6) + engS[idx]),
+              (u8)(engV[idx] * 16 + 8));
 }
 
 //---------------------------------------------------------------------------------
@@ -2215,6 +2258,14 @@ int main(void)
     crsMod[4] = MOD_DAWN_COAST;
     crsMod[5] = MOD_TWILIGHT_SKY;
     curMod = 0xFF;
+    // the merged engine rev ladder printed by tools/mksfx.py:
+    // 62/71/83/94/107/125/143/156 Hz = (sample, pitch) pairs
+    engS[0] = 0; engS[1] = 1; engS[2] = 2; engS[3] = 0;
+    engS[4] = 1; engS[5] = 0; engS[6] = 1; engS[7] = 0;
+    engP[0] = 2; engP[1] = 2; engP[2] = 2; engP[3] = 3;
+    engP[4] = 3; engP[5] = 4; engP[6] = 4; engP[7] = 5;
+    engV[0] = 6; engV[1] = 7; engV[2] = 8; engV[3] = 9;
+    engV[4] = 10; engV[5] = 10; engV[6] = 11; engV[7] = 11;
 
     setScreenOn();
 
@@ -2551,6 +2602,8 @@ int main(void)
                 uiClear(); // the pause menu owns the band; HUD redraws after
                 uiPrint(13, 1, "PAUSED");
                 uiPrint(6, 3, "START RESUME     B QUIT");
+                if (!attract)
+                    spcEffect(engP[0], 3, 3 * 16 + 8); // engine to idle
             }
             ovlPrev = pad0;
             while (1)
@@ -2577,6 +2630,7 @@ int main(void)
             h2S = 255;     // 2P: both HUD rows recompose
             sv_h2S = 255;
             hudInit = 0;   // ...and force the HUD to redraw everything
+            engIdx = 255;  // engine re-fires at the real rung
             pwDrawn = 255;
             hRank = 255;
             hLapD = 255;
@@ -3081,6 +3135,8 @@ int main(void)
                     sprBurst = SPRAY_BURST_CELLS;
                     sprKick = 1; // inject at once: the burst belongs at the
                                  // stern on the frame you actually land
+                    if (!attract && !split) // the wet landing hit
+                        SFX_SPLASH(-skiVv >= 480 ? 14 : 11);
                 }
                 skiVv >>= 2;
             }
@@ -3924,6 +3980,8 @@ int main(void)
 #endif
         }
 
+        if (raceMode == RM_RACE && !attract && !split)
+            engineTick(); // the hum idles through the countdown too
         spcProcess(); // drain queued SPC messages (cheap when empty)
         WaitForVBlank();
         // cloud parallax: BG3 (the mode-1 sky overlay - BG2 belongs to
