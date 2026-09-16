@@ -93,8 +93,7 @@ Top Gear lead", "like Dire Straits neck pickup" — I translate.
   16ms units and 2K ARAM each, EVOL = level, EFB = feedback/tail, EON =
   which channels; 1-8, our melody is 6, chords 4-5). Grey Lake is the
   wettest (EDL 5), Deep Blue the driest (EDL 3). "More/less reverb",
-  "longer tail", "echo on the bells too" are one-line changes. The DSP has a genuine echo/delay
- 
+  "longer tail", "echo on the bells too" are one-line changes.
 - **Pitch bends are stepped per tick** (24 ticks/beat) — fast wide
   bends are convincing, ultra-slow ones can zipper.
 - I can't hear any of it: **preview_it.wav** (real tracker render of
