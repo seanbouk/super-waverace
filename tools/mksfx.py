@@ -83,22 +83,46 @@ f = 1560 * np.exp(-t * 9) + 780
 back = np.sin(2 * np.pi * np.cumsum(f) / sr) * env(n, 6)
 FX["back"] = (norm(room(back, sr, 4, 0.4, 0.45, 0.11)), sr)
 
-# ---- boom: the VF confirm - sub drop + gong ring + impact, big tail ----
+# ---- boom: the confirm figure - "biddly BUM": two quick bright rising
+# bell notes, then the big hit (sub drop + gong ring + impact), long
+# bright tail (user: bigger, brighter, longer)
 sr = 16000
-n = int(0.42 * sr)
+
+
+def bellnote(freq, dur, sparkle=0.5):
+    m = int(dur * sr)
+    tt = np.arange(m) / sr
+    w = np.sin(2 * np.pi * freq * tt) * env(m, 6)
+    w += np.sin(2 * np.pi * freq * 3.01 * tt) * env(m, 10) * sparkle
+    w += np.sin(2 * np.pi * freq * 5.4 * tt) * env(m, 14) * sparkle * 0.4
+    w[:24] += rng.standard_normal(24) * 0.1
+    return w
+
+
+total = int(0.72 * sr)
+dry = np.zeros(total)
+dry[0:0] = 0
+b1 = bellnote(659.3, 0.30)                        # E5  "bid-"
+b2 = bellnote(880.0, 0.34)                        # A5  "-dly"
+dry[:len(b1)] += b1 * 0.62
+o = int(0.095 * sr)
+dry[o:o + len(b2)] += b2 * 0.72
+
+o = int(0.19 * sr)                                # "BUM"
+n = total - o
 t = np.arange(n) / sr
-f = 118 * np.exp(-t * 10) + 46
-sub = np.sin(2 * np.pi * np.cumsum(f) / sr) * env(n, 5.5)
+f = 130 * np.exp(-t * 9) + 48
+sub = np.sin(2 * np.pi * np.cumsum(f) / sr) * env(n, 4.5)
 gong = np.zeros(n)
-for ratio, g, dk in ((1.0, 0.9, 4.5), (2.756, 0.5, 6.5), (4.07, 0.33, 8),
-                     (5.42, 0.2, 10), (6.79, 0.12, 12)):
-    gong += np.sin(2 * np.pi * 182 * ratio * t
+for ratio, g, dk in ((1.0, 0.9, 3.5), (2.756, 0.55, 5), (4.07, 0.4, 6.5),
+                     (5.42, 0.28, 8), (6.79, 0.18, 9.5), (8.21, 0.1, 11)):
+    gong += np.sin(2 * np.pi * 220 * ratio * t
                    + rng.uniform(0, 6.28)) * g * env(n, dk)
 imp = np.zeros(n)
 imp[:int(0.015 * sr)] = rng.standard_normal(int(0.015 * sr)) \
-    * env(int(0.015 * sr), 4) * 0.8
-dry = sub * 1.0 + gong * 0.45 + lowpass(imp, 0.5)
-FX["boom"] = (norm(room(dry, sr, 10, 0.55, 0.3, 0.28), 0.92), sr)
+    * env(int(0.015 * sr), 4) * 0.9
+dry[o:] += sub * 1.05 + gong * 0.55 + lowpass(imp, 0.6)
+FX["boom"] = (norm(room(dry, sr, 12, 0.58, 0.38, 0.38), 0.95), sr)
 
 # --------------------------------------------------------- emit the .it
 os.makedirs(OUTDIR, exist_ok=True)
