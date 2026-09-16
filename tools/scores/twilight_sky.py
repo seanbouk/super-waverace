@@ -1,24 +1,17 @@
-"""twilight_sky - composed 16-bar score for Twilight Sky (draft 1).
+"""twilight_sky - composed 16-bar score for Twilight Sky (draft 2).
 
-Brief (the user's Suno prompt): the championship finale - twilight
-harbour city after the lights come on. Energetic sophisticated funk-
-fusion, 128-138 BPM, tight syncopated bass, punchy drums with BUSY
-hats, sharp EP stabs, bright brass, subtle mallets, airy pads,
-SAX-like lead; tense-but-confident harmony with altered chords and
-chromatic movement, brief darker passages resolving bright, ascending
-determined melody, dramatic harmonic lifts.
+Draft 1 leaned on Sunny Island's funk skeleton and read as "tune 1 but
+moodier" (user). Draft 2 gives the finale its own engine: 138 BPM,
+OCTAVE-PUMPING 8th-note bass (night-racer drive, nothing like the slap
+riff), four-on-the-floor kick under busy 16th hats, a tight
+repeated-note sax hook that develops across the form, and fast-rising
+B-half changes (Em9-A13-Dmaj9-Gmaj9). The dark dip is ONE bar (15) with
+the bass still pumping under a pad breath, then the F#7alt brass
+walk-up slams the loop shut.
 
-Key: B minor, 132 BPM. Form:
-  A (1-8):  Bm9 Bm9 Em9 A13 | DMAJ9 Gmaj9 Em9 F#7alt
-            (circle-of-fifths lift into the bright Dmaj9 arrival;
-             F#7alt is the tension that snaps it back to dark)
-  B (9-16): Bm9 Bm9 (THE DARK PASSAGE: pads, thinned drums, brooding
-            low sax) | Gmaj9 F#7alt | Em9 A13 DMAJ9 F#7alt
-            (the kit punches back in and climbs to the triumphant
-             held A5 over Dmaj9 in bar 15)
-SAX owns the melody channel (scoop slides on touching notes, deep
-delayed vibrato); bells answer bars 4/8/16; brass stings the F#7alt
-bars with the A# (the altered third).
+Key: B minor, 138 BPM. Form:
+  A (1-8): Bm9 Bm9 Gmaj9 A13 | Bm9 Bm9 Gmaj9 F#7alt
+  B (9-16): Em9 A13 DMAJ9 Gmaj9 | Em9 F#7alt Bm9(pad dip) F#7alt
 
 Regenerate:
   toolchain/py311-audio/Scripts/python.exe tools/scores/twilight_sky.py
@@ -27,7 +20,7 @@ import os
 
 import mido
 
-BPM = 132
+BPM = 138
 TPB = 480
 TPR = TPB // 4
 OUT = os.path.join(os.path.dirname(__file__), "..", "..",
@@ -50,10 +43,10 @@ CHORDS = {
     "Gmaj9":  ("G2", ("B3", "F#4")),
     "F#7alt": ("F#2", ("A#3", "E4")),
 }
-PROG = ["Bm9", "Bm9", "Em9", "A13", "Dmaj9", "Gmaj9", "Em9", "F#7alt",
-        "Bm9", "Bm9", "Gmaj9", "F#7alt", "Em9", "A13", "Dmaj9", "F#7alt"]
+PROG = ["Bm9", "Bm9", "Gmaj9", "A13", "Bm9", "Bm9", "Gmaj9", "F#7alt",
+        "Em9", "A13", "Dmaj9", "Gmaj9", "Em9", "F#7alt", "Bm9", "F#7alt"]
 BARS = len(PROG)
-DARK = (8, 9)  # the brooding bars: pads in, stabs out, drums thinned
+DIP = 14  # one-bar pad breath; the bass keeps pumping through it
 
 drums, bass, keys, pad, brass, sax, bells = [], [], [], [], [], [], []
 
@@ -62,105 +55,97 @@ def at(bar, row):
     return bar * 16 + row
 
 
-# ---- drums: punchy, busy hats; bars 9-10 thin out then build back ------
+# ---- drums: four-on-the-floor drive + busy accented 16th hats ----------
 for b in range(BARS):
-    if b in DARK:
-        drums.append((at(b, 0), 1, 36, 88))
-        for r in range(0, 16, 2):
-            drums.append((at(b, r), 1, 42, 30))
-        if b == DARK[-1]:                          # re-entry build
-            for i, r in enumerate((10, 12, 14, 15)):
-                drums.append((at(b, r), 1, 38, 46 + i * 14))
-        continue
     fill = b in (7, 15)
-    for r, v in ((0, 108), (7, 88), (10, 100), (13, 76)):
-        drums.append((at(b, r), 1, 36, v))
-    drums.append((at(b, 4), 1, 38, 108))
+    for r in (0, 4, 8, 12):
+        drums.append((at(b, r), 1, 36, 104 if r % 8 == 0 else 96))
     if not fill:
-        drums.append((at(b, 12), 1, 38, 108))
+        drums.append((at(b, 4), 1, 38, 106))       # layered with the kick
+        drums.append((at(b, 12), 1, 38, 106))
         drums.append((at(b, 15), 1, 38, 30))       # ghost
     else:
-        for i, r in enumerate((12, 13, 14, 15)):
-            drums.append((at(b, r), 1, 38, 70 + i * 12))
+        drums.append((at(b, 4), 1, 38, 106))
+        for i, r in enumerate((10, 12, 13, 14, 15)):
+            drums.append((at(b, r), 1, 38, 60 + i * 11))
     for r in range(16):
-        if fill and r >= 12:
+        if fill and r >= 10:
             continue
-        drums.append((at(b, r), 1, 42, 84 if r % 4 == 0 else
-                      (64 if r % 2 == 0 else 48)))
+        drums.append((at(b, r), 1, 42, 86 if r % 4 == 2 else
+                      (58 if r % 2 == 0 else 44)))  # accent the offbeats
 
-# ---- bass: the tightest riff of the six --------------------------------
+# ---- bass: octave-pumping 8ths - the night-drive engine ----------------
 for b in range(BARS):
     root = n(CHORDS[PROG[b]][0])
     nxt = n(CHORDS[PROG[(b + 1) % BARS]][0])
-    if b in DARK:
-        bass += [(at(b, 0), 4, root, 76), (at(b, 8), 4, root, 68),
-                 (at(b, 12), 2, root + 7, 60)]
-        continue
-    bass += [(at(b, 0), 2, root, 100),
-             (at(b, 3), 1, root + 12, 88),
-             (at(b, 6), 2, root, 84),
-             (at(b, 8), 1, root, 92),
-             (at(b, 10), 1, root + 12, 86),
-             (at(b, 11), 1, root + 10, 74),
-             (at(b, 12), 2, root + 7, 80)]
-    if nxt != root:
-        bass.append((at(b, 14), 2, nxt - 1 if nxt > root else nxt + 1, 78))
-    else:
-        bass.append((at(b, 14), 1, root + 12, 70))
+    for i, r in enumerate(range(0, 16, 2)):
+        if r == 14 and nxt != root:
+            bass.append((at(b, r), 2,
+                         nxt - 1 if nxt > root else nxt + 1, 84))
+        else:
+            hi = i % 2 == 1
+            bass.append((at(b, r), 2, root + (12 if hi else 0),
+                         80 if hi else 98))
 
-# ---- keys: sharp short stabs (rest in the dark bars) --------------------
+# ---- keys: sharp stabs on the pushes (rest in the dip bar) -------------
 for b in range(BARS):
-    if b in DARK:
+    if b == DIP:
         continue
     lo, hi = (n(p) for p in CHORDS[PROG[b]][1])
-    for r, v in ((3, 74), (6, 78), (11, 68), (14, 60)):
+    for r, v in ((2, 72), (7, 78), (10, 68)):
         keys += [(at(b, r), 1, lo, v), (at(b, r), 1, hi, v)]
 
-# ---- pads: only the dark passage breathes ------------------------------
+# ---- pad: one dark breath under bar 15, engine still running -----------
 lo, hi = (n(p) for p in CHORDS["Bm9"][1])
-pad += [(at(DARK[0], 0), 30, lo, 60), (at(DARK[0], 0), 30, hi, 60)]
+pad += [(at(DIP, 0), 14, lo, 60), (at(DIP, 0), 14, hi, 60)]
 
-# ---- brass: F#7alt stings (the A# is the drama) + the loop turnaround --
+# ---- brass: alt-chord stings + the walk-up that slams the loop shut ----
+brass += [(at(3, 12), 2, n("C#5"), 88), (at(3, 14), 2, n("E5"), 92)]
 brass += [(at(7, 8), 1, n("F#4"), 96), (at(7, 9), 1, n("F#4"), 86),
           (at(7, 11), 3, n("A#4"), 104)]
-brass += [(at(11, 8), 1, n("C#5"), 92), (at(11, 10), 2, n("A#4"), 96)]
+brass += [(at(13, 8), 1, n("C#5"), 92), (at(13, 10), 2, n("A#4"), 96)]
 for i, (r, p) in enumerate(((8, "E4"), (10, "F#4"), (12, "A#4"),
                             (14, "C#5"))):
-    brass.append((at(15, r), 2, n(p), 86 + i * 5))
+    brass.append((at(15, r), 2, n(p), 88 + i * 5))
 
-# ---- sax: determined, ascending; scoops on touching notes ---------------
-S = [
-    (0, 0, 2, "B4", 88), (0, 3, 2, "D5", 88), (0, 6, 1, "E5", 84),
-    (0, 7, 7, "F#5", 92),                       # scoop onto the & push
-    (1, 6, 2, "E5", 82), (1, 8, 4, "D5", 84), (1, 12, 4, "B4", 80),
-    (2, 2, 2, "D5", 84), (2, 4, 2, "E5", 86), (2, 6, 2, "G5", 88),
-    (2, 8, 6, "F#5", 90),                       # 9 over Em: the tension
-    (3, 2, 4, "E5", 84),                        # ...bells answer
-    (4, 0, 4, "A5", 96),                        # the BRIGHT arrival
-    (4, 6, 2, "F#5", 86), (4, 8, 6, "E5", 88),
-    (5, 2, 2, "F#5", 86), (5, 4, 2, "G5", 88), (5, 8, 6, "D5", 84),
-    (6, 0, 2, "B4", 82), (6, 3, 2, "D5", 84), (6, 6, 2, "E5", 86),
-    (6, 8, 4, "G5", 90),
-    (7, 2, 2, "A#4", 88), (7, 4, 3, "C#5", 86), # ...brass sting answers
-    (8, 4, 4, "B4", 74), (8, 10, 4, "A4", 70),  # the dark passage:
-    (9, 2, 4, "F#4", 68), (9, 8, 6, "B4", 74),  # low and brooding
-    (10, 0, 2, "B4", 86), (10, 3, 2, "D5", 88), (10, 6, 2, "F#5", 90),
-    (10, 8, 4, "G5", 92),                       # back with intent
-    (11, 2, 2, "E5", 86), (11, 4, 4, "C#5", 84),
-    (12, 0, 2, "E5", 86), (12, 3, 2, "G5", 90), (12, 8, 4, "A5", 92),
-    (13, 2, 2, "F#5", 86), (13, 4, 4, "G5", 88), (13, 10, 2, "E5", 82),
-    (14, 0, 8, "A5", 96),                       # the triumphant hold
-    (14, 10, 4, "F#5", 88),
-    (15, 2, 2, "E5", 84), (15, 4, 3, "C#5", 82),  # ...brass walk closes
-]
+# ---- sax: the repeated-note hook, developed across the form ------------
+def hook(bar, p1, p2, p3, p4):
+    """rhythmic motif: da-da-daa ... DA(push) da-daa"""
+    return [(bar, 0, 1, p1, 92), (bar, 2, 1, p1, 88), (bar, 4, 2, p1, 94),
+            (bar, 7, 3, p2, 98), (bar, 11, 1, p3, 88), (bar, 12, 3, p4, 92)]
+
+S = []
+S += hook(0, "F#5", "A5", "F#5", "E5")
+S += [(1, 0, 2, "D5", 88), (1, 3, 2, "E5", 88), (1, 6, 2, "F#5", 90),
+      (1, 8, 5, "D5", 88)]
+S += hook(2, "D5", "G5", "F#5", "E5")
+S += [(3, 0, 2, "E5", 88), (3, 3, 2, "F#5", 90), (3, 6, 2, "G5", 92),
+      (3, 8, 3, "E5", 88)]                      # brass takes r12
+S += hook(4, "F#5", "A5", "F#5", "E5")
+S += [(5, 0, 2, "D5", 88), (5, 3, 2, "E5", 88), (5, 6, 2, "F#5", 90),
+      (5, 8, 5, "D5", 88)]
+S += [(6, 0, 2, "G5", 92), (6, 3, 2, "A5", 94), (6, 6, 6, "B5", 98),
+      (6, 13, 3, "A5", 90)]                     # the climb
+S += [(7, 2, 2, "A#5", 94), (7, 4, 3, "F#5", 90)]  # alt sting answer
+S += hook(8, "E5", "G5", "F#5", "E5")
+S += [(9, 0, 2, "F#5", 90), (9, 3, 2, "G5", 92), (9, 6, 2, "E5", 88),
+      (9, 8, 4, "C#5", 86)]
+S += [(10, 0, 4, "A5", 98), (10, 6, 2, "F#5", 90), (10, 8, 4, "D5", 88),
+      (10, 13, 3, "E5", 90)]                    # the bright arrival
+S += [(11, 0, 2, "F#5", 90), (11, 3, 2, "G5", 92), (11, 6, 6, "A5", 94)]
+S += hook(12, "E5", "A5", "G5", "F#5")
+S += [(13, 0, 2, "C#5", 88), (13, 3, 2, "A#4", 86), (13, 6, 2, "C#5", 88)]
+# bar 15 = the dip: sax out, pad + bells breathe, bass pumps on
+S += [(15, 0, 2, "E5", 88), (15, 3, 2, "C#5", 86)]  # then brass walks
 for bar, r, ln, p, v in S:
     sax.append((at(bar, r), ln, n(p), v))
 
-# ---- bells: harbour-light glints in the gaps ---------------------------
+# ---- bells: glints; they own the dip bar -------------------------------
 B = [
-    (3, 8, 2, "C#5", 58), (3, 10, 2, "E5", 60), (3, 12, 2, "A4", 54),
-    (7, 8, 2, "A#4", 58), (7, 10, 2, "C#5", 60), (7, 12, 2, "E5", 58),
-    (15, 8, 2, "A#4", 56), (15, 10, 2, "C#5", 58), (15, 12, 2, "E5", 60),
+    (7, 13, 3, "C#5", 58),
+    (11, 13, 3, "D5", 58),
+    (14, 2, 2, "D5", 60), (14, 4, 2, "F#5", 62), (14, 6, 2, "B4", 56),
+    (14, 8, 2, "D5", 60), (14, 10, 2, "F#5", 62), (14, 12, 3, "A5", 64),
 ]
 for bar, r, ln, p, v in B:
     bells.append((at(bar, r), ln, n(p), v))
@@ -195,7 +180,7 @@ def emit(name, events, program, channel):
     print("  %-6s %3d notes" % (name, len(events)))
 
 
-emit("Bass", bass, 36, 1)    # slap bass
+emit("Bass", bass, 38, 1)    # synth bass 1 (pumping)
 emit("Keys", keys, 4, 2)     # EP 1
 emit("Pad", pad, 89, 6)      # warm pad
 emit("Brass", brass, 62, 3)  # synth brass
