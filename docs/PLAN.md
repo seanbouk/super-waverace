@@ -561,10 +561,18 @@ Phases:
    32-row patterns if ARAM ever pinches (dedupe currently finds no
    repeats); swing via 32nd rows if the straight grid sounds stiff;
    16-bit samples if 8-bit sounds grainy (BRR gets more data).
-3. Content + SFX: track slots (title/menu, 2-3 race tracks rotated
-   across courses, results jingle), spcLoad per state (force blank,
-   effects RELOAD after every spcLoad — module load resets ARAM),
-   spcFadeModuleVolume over the mosaic transitions; real SFX set: menu
-   blip, countdown beeps, splash/landing, gate pass/fail, finish sting.
-   Maybe: a looped engine hum pitched by speed via spcEffect's pitch arg
-   (costs one of the two SFX channels permanently — decide by ear).
+3. Content: DECIDED (Sep 16) - ONE SONG PER COURSE, nothing else: the
+   music switches inside courseLoad (the only place a course changes -
+   championship intros and arcade course changes both pass through it)
+   and runs untouched until the next courseLoad; courses without a
+   track get SILENCE (crsMod[c] = 0xFF; the title/attract inherits
+   Sunny Island's because attract loads course 0). DONE: Sunny Island
+   (guitar groove) + Sunset Cove (Sep 16: 112 BPM F major, flute lead
+   with delayed vibrato + bell answers, soft brass swells - 7.3K
+   module; the kit gained a flute, and write_it now ships only the
+   samples a song uses). Remaining: four more courses' tracks (compose
+   as course themes firm up), then SFX (menu blip, countdown beeps,
+   splash/landing, gate pass/fail, finish sting - replaces the spikesfx
+   placeholder bank; effects RELOAD after every spcLoad). Maybe: an
+   engine hum pitched by speed via spcEffect (costs one SFX channel
+   permanently - decide by ear).
