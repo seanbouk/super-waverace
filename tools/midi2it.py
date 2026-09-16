@@ -187,17 +187,20 @@ GM_KICK, GM_SNARE, GM_HAT = 36, 38, 42
 CMD_G, CMD_H = 7, 8  # IT effects: tone portamento, vibrato
 
 
-def score_channels(tracks, I):
+def score_channels(tracks, I, slides=True, mixover=None):
     """Map named score tracks onto the 6-channel plan. Lead gets the
     guitar treatment: a note starting at/before the previous note's end
     becomes a Gxx slide (bend) instead of a retrigger, and held notes
     get gentle Hxy vibrato rows."""
     ch = {i: [] for i in range(6)}
+    mix = dict(MIX)
+    if mixover:
+        mix.update(mixover)   # song.json "mix": per-song level tweaks
 
     def vol(v, ins):
         # the .it volume column CARRIES the mix (shared MIX table), so
         # the game balances exactly like the preview
-        return int(np.clip(round(v / 2 * MIX[ins] / 0.9), 1, 64))
+        return int(np.clip(round(v / 2 * mix[ins] / 0.9), 1, 64))
 
     for r, ln, p, v in tracks.get("Drums", []):
         if p == GM_KICK:
@@ -244,7 +247,7 @@ def score_channels(tracks, I):
     prev_end, prev_p = -99, 0
     for i, (r, ln, p, v, ins) in enumerate(lead):
         cmd = None
-        if ins in VIB and prev_end >= r and prev_p != p:
+        if slides and ins in VIB and prev_end >= r and prev_p != p:
             # legato/overlap in the WRITTEN score = a bend: Gxx glides
             # from the still-held previous pitch, no re-pick
             cmd = (CMD_G, 0x20 if abs(p - prev_p) <= 2 else 0x40)
@@ -642,7 +645,9 @@ def main():
     if args.score:
         bpm, tracks = score_events(args.score)
         ch = score_channels(tracks, {n: KIT_ALL.index(n) + 1
-                                     for n in KIT_ALL})
+                                     for n in KIT_ALL},
+                            slides=cfg.get("slides", True),
+                            mixover=cfg.get("mix"))
         total = max(e[0] for evs in ch.values() for e in evs) + 1
         total = ((total + 15) // 16) * 16  # whole bars, clean loop
         print("score: bpm=%.2f rows=%d events=%d"

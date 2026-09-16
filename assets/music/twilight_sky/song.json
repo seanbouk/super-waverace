@@ -1,4 +1,13 @@
 {
   "name": "TWILIGHT SKY",
-  "snesmod": ["EDL 4", "EVOL 16", "EFB 40", "EON 4 5 6"]
+  "snesmod": [
+    "EDL 4",
+    "EVOL 16",
+    "EFB 40",
+    "EON 4 5 6"
+  ],
+  "slides": false,
+  "mix": {
+    "sax": 0.5
+  }
 }
