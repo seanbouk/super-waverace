@@ -33,7 +33,7 @@
 // REVERSE order (the lib example's pattern). Crossing the next 32K
 // boundary adds a SOUNDBANK__2 extern + spcSetBank line here, and a
 // soundbank <= 32K goes back to a single unsuffixed SOUNDBANK__.
-extern char SOUNDBANK__;
+extern char SOUNDBANK__0, SOUNDBANK__1; // >32K again since Deep Blue
 
 // per-course loaders (camera.asm): straight copy / RLE decode into WRAM
 // bank $7F, source + destination via the globals below
@@ -2173,7 +2173,8 @@ int main(void)
     // spike track: load once at boot, plays under everything. Effects
     // must (re)load AFTER a module load - spcLoad resets ARAM - so any
     // future per-course spcLoad repeats the spcLoadEffect calls
-    spcSetBank(&SOUNDBANK__);
+    spcSetBank(&SOUNDBANK__1); // reverse order, per the lib's example
+    spcSetBank(&SOUNDBANK__0);
     // per-course track table (music switches inside courseLoad; the
     // boot flow's first courseLoad starts the title/attract music).
     // 0xFF = course has no track yet = silence. RAM table, not const:
@@ -2183,6 +2184,7 @@ int main(void)
     crsMod[0] = MOD_SUNNY_ISLAND;
     crsMod[1] = MOD_SUNSET_COVE;
     crsMod[2] = MOD_GREY_LAKE;
+    crsMod[3] = MOD_DEEP_BLUE;
     curMod = 0xFF;
 
     setScreenOn();
