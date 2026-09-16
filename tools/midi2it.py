@@ -41,7 +41,8 @@ NOTE_MAX = 83     # SNESMod: playback rate must stay under 128 kHz
 # ONE mix table shared by the .it volumes and the preview render - the
 # in-game balance must be the balance the preview auditioned
 MIX = {"kick": 0.9, "snare": 0.7, "hat": 0.35, "bass": 0.8,
-       "keys": 0.4, "lead": 0.62, "brass": 0.55, "bell": 0.5}
+       "keys": 0.4, "lead": 0.62, "brass": 0.55, "bell": 0.5,
+       "flute": 0.6}
 
 
 # ---------------------------------------------------------------- tempo fit
@@ -230,18 +231,22 @@ def score_channels(tracks, I):
         ch[4].sort()
 
     lead = [(r, ln, p, v, "lead") for r, ln, p, v in tracks.get("Lead", [])]
+    lead += [(r, ln, p, v, "flute")
+             for r, ln, p, v in tracks.get("Flute", [])]
     lead += [(r, ln, p, v, "bell") for r, ln, p, v in tracks.get("Bells", [])]
     lead.sort()
+    # per-instrument vibrato: (param, onset rows after the note starts)
+    VIB = {"lead": (0x22, 3), "flute": (0x32, 4)}  # flute: delayed
     prev_end, prev_p = -99, 0
     for i, (r, ln, p, v, ins) in enumerate(lead):
         cmd = None
-        if ins == "lead" and prev_end >= r and prev_p != p:
+        if ins in VIB and prev_end >= r and prev_p != p:
             # legato/overlap in the WRITTEN score = a bend: Gxx glides
             # from the still-held previous pitch, no re-pick
             cmd = (CMD_G, 0x20 if abs(p - prev_p) <= 2 else 0x40)
         prev_end, prev_p = r + ln, p
         cut = r + ln
-        if ins == "lead":
+        if ins in VIB:
             # sustain: ring to the next event across small written gaps
             # (guitar legato), and a touch into a real rest
             nxt = lead[i + 1][0] if i + 1 < len(lead) else None
@@ -250,9 +255,10 @@ def score_channels(tracks, I):
             else:
                 cut = r + ln + 2
         ch[5].append((r, p, I[ins], vol(v, ins), cut, cmd))
-        if ins == "lead" and cut - r >= 5:
-            for vr in range(r + 3, min(cut, r + 14)):
-                ch[5].append((vr, None, None, None, None, (CMD_H, 0x22)))
+        if ins in VIB and cut - r >= 5:
+            par, onset = VIB[ins]
+            for vr in range(r + onset, min(cut, r + 14)):
+                ch[5].append((vr, None, None, None, None, (CMD_H, par)))
     return ch
 
 
@@ -317,6 +323,13 @@ def synth_kit(rng):
     # bell/marimba: fundamental + strong 4th partial, loud strike
     # decaying into a QUIET loop (no envelopes - the tail fades by
     # construction and note cuts finish the job)
+    # flute: near-pure tone with a breathy chiff attack, no clip
+    fbase = cyc([(1, 1.0), (2, 0.16), (3, 0.07), (4, 0.03)])
+    fatt = [fbase * (0.8 + 0.2 * i / 3)
+            + rng.standard_normal(CYCN) * 0.10 * (1 - i / 3)
+            for i in range(3)]
+    kit["flute"] = (_norm(np.concatenate(fatt + [fbase])), 3 * CYCN, C5)
+
     strike = cyc([(1, 1.0), (4, 0.45), (10, 0.1)])
     tail = strike * 0.18
     cyl = [strike * (1.3 * 0.74 ** i + 0.18) for i in range(10)]
@@ -440,6 +453,13 @@ def sample_bytes(name, data, loop_begin, c5, data_ofs):
 def write_it(path, songname, bpm, kit, kit_order, channels, total_rows):
     """channels: {chan: [(row, note, ins_1based, vol, cut_row[, cmdpair])]}
     note None = command-only event (e.g. a vibrato row)."""
+    used = sorted({e[2] for evs in channels.values() for e in evs
+                   if e[2] is not None})
+    remap = {old_i: i + 1 for i, old_i in enumerate(used)}
+    kit_order = [kit_order[i - 1] for i in used]
+    channels = {c: [(e[0], e[1], remap[e[2]] if e[2] else e[2], *e[3:])
+                    for e in evs] for c, evs in channels.items()}
+
     ROWS = 64
     npat = (total_rows + ROWS - 1) // ROWS
 
@@ -581,7 +601,7 @@ def main():
     bpm_hint = args.bpm or cfg.get("bpm", 128)
 
     KIT_ALL = ["kick", "snare", "hat", "bass", "keys", "lead", "brass",
-               "bell"]
+               "bell", "flute"]
     if args.score:
         bpm, tracks = score_events(args.score)
         ch = score_channels(tracks, {n: KIT_ALL.index(n) + 1

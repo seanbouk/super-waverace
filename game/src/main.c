@@ -45,6 +45,8 @@ u16 cpDst;       // $7F offset
 u16 cpLen;       // bytes (even), copyTo7F only
 dmaMemory mapBuf; // the $7F8000 decode buffer, as a pointer for the lib
 u8 courseSel;     // menu cursor; persists between menus
+u8 crsMod[WAVE_COURSES]; // per-course music module (0xFF = silence),
+u8 curMod;               // filled in main(); curMod = what's loaded
 extern char ski_tiles, ski_pal; // OBJ palettes 0-3 + 5 are per course
                                 // (csObj/csBuoy, loaded by courseLoad)
 extern char tall_tiles; // OBJ name table 2: the stacked tall racers
@@ -1054,6 +1056,24 @@ static void courseLoad(u8 c)
     setPaletteColor(79, csZen);
     setPaletteColor(95, csZen);
     setPaletteColor(111, csZen);
+
+    // MUSIC RIDES THE COURSE (decision Sep 16): one track per course,
+    // switched here - the only place a course changes - and left alone
+    // until the next courseLoad. crsMod holds each course's module id
+    // (0xFF = no track yet = silence). Effects RELOAD after every
+    // spcLoad (a module load resets ARAM). Safe here: force blank,
+    // HDMA off, and spcLoad's port traffic touches no PPU state.
+    if (crsMod[c] != curMod)
+    {
+        curMod = crsMod[c];
+        spcStop();
+        if (curMod != 0xFF)
+        {
+            spcLoad(curMod);
+            spcLoadEffect(0);
+            spcPlay(0); // queued; the next loop's spcProcess flushes
+        }
+    }
     setScreenOn();
 }
 
@@ -2154,9 +2174,15 @@ int main(void)
     // must (re)load AFTER a module load - spcLoad resets ARAM - so any
     // future per-course spcLoad repeats the spcLoadEffect calls
     spcSetBank(&SOUNDBANK__);
-    spcLoad(MOD_SUNNY_ISLAND);
-    spcLoadEffect(0);
-    spcPlay(0); // queued; the first loop's spcProcess() flushes it
+    // per-course track table (music switches inside courseLoad; the
+    // boot flow's first courseLoad starts the title/attract music).
+    // 0xFF = course has no track yet = silence. RAM table, not const:
+    // tcc cannot read far ROM data.
+    for (bi = 0; bi < WAVE_COURSES; bi++)
+        crsMod[bi] = 0xFF;
+    crsMod[0] = MOD_SUNNY_ISLAND;
+    crsMod[1] = MOD_SUNSET_COVE;
+    curMod = 0xFF;
 
     setScreenOn();
 
