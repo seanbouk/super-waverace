@@ -2182,6 +2182,7 @@ int main(void)
         crsMod[bi] = 0xFF;
     crsMod[0] = MOD_SUNNY_ISLAND;
     crsMod[1] = MOD_SUNSET_COVE;
+    crsMod[2] = MOD_GREY_LAKE;
     curMod = 0xFF;
 
     setScreenOn();

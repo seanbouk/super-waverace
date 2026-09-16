@@ -42,7 +42,7 @@ NOTE_MAX = 83     # SNESMod: playback rate must stay under 128 kHz
 # in-game balance must be the balance the preview auditioned
 MIX = {"kick": 0.9, "snare": 0.7, "hat": 0.35, "bass": 0.8,
        "keys": 0.4, "lead": 0.62, "brass": 0.55, "bell": 0.5,
-       "flute": 0.6}
+       "flute": 0.6, "pad": 0.38}
 
 
 # ---------------------------------------------------------------- tempo fit
@@ -210,16 +210,17 @@ def score_channels(tracks, I):
     for r, ln, p, v in tracks.get("Bass", []):
         ch[2].append((r, p, I["bass"], vol(v, "bass"), r + ln))
 
-    groups = {}
-    for r, ln, p, v in tracks.get("Keys", []):
-        groups.setdefault(r, []).append((p, ln, v))
-    for r in sorted(groups):
-        g = sorted(groups[r])
-        p, ln, v = g[-1]
-        ch[3].append((r, p, I["keys"], vol(v, "keys"), r + ln))
-        if len(g) > 1:
-            p, ln, v = g[0]
-            ch[4].append((r, p, I["keys"], vol(v, "keys"), r + ln))
+    for tname, iname in (("Keys", "keys"), ("Pad", "pad")):
+        groups = {}
+        for r, ln, p, v in tracks.get(tname, []):
+            groups.setdefault(r, []).append((p, ln, v))
+        for r in sorted(groups):
+            g = sorted(groups[r])
+            p, ln, v = g[-1]
+            ch[3].append((r, p, I[iname], vol(v, iname), r + ln))
+            if len(g) > 1:
+                p, ln, v = g[0]
+                ch[4].append((r, p, I[iname], vol(v, iname), r + ln))
 
     bre = [(r, p, I["brass"], vol(v, "brass"), r + ln)
            for r, ln, p, v in tracks.get("Brass", [])]
@@ -323,6 +324,14 @@ def synth_kit(rng):
     # bell/marimba: fundamental + strong 4th partial, loud strike
     # decaying into a QUIET loop (no envelopes - the tail fades by
     # construction and note cuts finish the job)
+    # pad: warm wave whose loop drifts gently (two cycles beating);
+    # the swell is the instrument's volume envelope, not the sample
+    pa = cyc([(1, 1.0), (2, 0.4), (3, 0.22), (4, 0.12), (5, 0.08)])
+    pb = cyc([(1, 1.0), (2, 0.32), (3, 0.28), (4, 0.09), (5, 0.11)])
+    pcyc = [pa * (1 - k / 7) + pb * (k / 7) for k in range(8)]
+    pdata = np.concatenate(pcyc + pcyc[::-1])
+    kit["pad"] = (_norm(pdata), 0, C5)
+
     # flute: near-pure tone with a breathy chiff attack, no clip
     fbase = cyc([(1, 1.0), (2, 0.16), (3, 0.07), (4, 0.03)])
     fatt = [fbase * (0.8 + 0.2 * i / 3)
@@ -397,7 +406,11 @@ def env_bytes(vol_sustain=False):
     # on KEYOFF" fires on KEY-ON) that fades every note from its first
     # tick - the "plinky, nothing held" bug. Sustain at node 0 holds
     # full volume while the key is down; release ramps to 0 in 12 ticks.
-    if vol_sustain == "decay":
+    if vol_sustain == "swell":
+        # pad: rise from quiet over 20 ticks, hold, gentle 24-tick release
+        b = bytearray([0x05, 3, 0, 0, 1, 1])
+        b += struct.pack("<bH", 10, 0) + struct.pack("<bH", 64, 20)             + struct.pack("<bH", 0, 44)
+    elif vol_sustain == "decay":
         # guitar-style: full onset, settle to ~2/3 over 36 ticks
         # (~1.5 beats at speed 6), HOLD there (sustain node 1), then a
         # 12-tick release
@@ -426,7 +439,8 @@ def instrument_bytes(name, smp_1based):
     b += bytes([0, 0, 0, 0]) + struct.pack("<H", 0)  # IFC IFR MCh MPr Bnk
     for i in range(120):
         b += bytes([i, smp_1based])       # every key -> this sample
-    b += env_bytes(vol_sustain="decay" if name == "lead" else True)
+    b += env_bytes(vol_sustain={"lead": "decay", "pad": "swell"}
+                   .get(name, True))
     b += env_bytes() * 2                  # pan/pitch envelopes: off
     b += bytes(554 - len(b))
     assert len(b) == 554
@@ -450,7 +464,8 @@ def sample_bytes(name, data, loop_begin, c5, data_ofs):
     return bytes(b)
 
 
-def write_it(path, songname, bpm, kit, kit_order, channels, total_rows):
+def write_it(path, songname, bpm, kit, kit_order, channels, total_rows,
+             message=None):
     """channels: {chan: [(row, note, ins_1based, vol, cut_row[, cmdpair])]}
     note None = command-only event (e.g. a vibrato row)."""
     used = sorted({e[2] for evs in channels.values() for e in evs
@@ -501,9 +516,15 @@ def write_it(path, songname, bpm, kit, kit_order, channels, total_rows):
     hdr += songname[:26].ljust(26, "\0").encode()
     hdr += struct.pack("<HHHHH", 0x0410, len(orders), n_ins, n_ins,
                        len(uniq))
-    hdr += struct.pack("<HHHH", 0x0217, 0x0214, 0x000D, 0)
+    msg = b""
+    if message:
+        # smconv parses [[SNESMOD]] echo commands out of the IT song
+        # message (EDL/EVOL/EFB/EFIR/EON - see pvsneslib_snesmod.txt)
+        msg = ("[[SNESMOD]]\r" + "\r".join(message) + "\r").encode()
+    hdr += struct.pack("<HHHH", 0x0217, 0x0214, 0x000D,
+                       1 if msg else 0)
     hdr += bytes([128, 48, 6, int(round(bpm)), 128, 0])  # GV MV IS IT Sep
-    hdr += struct.pack("<HI", 0, 0) + bytes(4)
+    hdr += struct.pack("<HI", len(msg), 0) + bytes(4)  # offset patched
     hdr += bytes([32] * 8 + [128] * 56)   # channel pans
     hdr += bytes([64] * 64)               # channel vols
     assert len(hdr) == 0xC0
@@ -532,6 +553,10 @@ def write_it(path, songname, bpm, kit, kit_order, channels, total_rows):
         body[smp_hdr_pos[i]:smp_hdr_pos[i] + 0x50] = sb
         body += pcm
 
+    if msg:
+        msg_ofs = pos + len(body)
+        body += msg
+        hdr[0x38:0x3C] = struct.pack("<I", msg_ofs)
     with open(path, "wb") as f:
         f.write(hdr)
         f.write(orders)
@@ -601,7 +626,7 @@ def main():
     bpm_hint = args.bpm or cfg.get("bpm", 128)
 
     KIT_ALL = ["kick", "snare", "hat", "bass", "keys", "lead", "brass",
-               "bell", "flute"]
+               "bell", "flute", "pad"]
     if args.score:
         bpm, tracks = score_events(args.score)
         ch = score_channels(tracks, {n: KIT_ALL.index(n) + 1
@@ -614,7 +639,8 @@ def main():
         kit = synth_kit(rng)
         name = cfg.get("name",
                        os.path.basename(d.rstrip("/\\")).upper())
-        write_it(args.out, name, bpm, kit, KIT_ALL, ch, total)
+        write_it(args.out, name, bpm, kit, KIT_ALL, ch, total,
+                 message=cfg.get("snesmod"))
         render_preview(os.path.join(d, "preview.wav"), bpm, kit,
                        KIT_ALL, ch, total)
         # the HONEST ear-proxy: render the actual .it through ffmpeg's
