@@ -252,7 +252,7 @@ def score_channels(tracks, I):
         ch[5].append((r, p, I[ins], vol(v, ins), cut, cmd))
         if ins == "lead" and cut - r >= 5:
             for vr in range(r + 3, min(cut, r + 14)):
-                ch[5].append((vr, None, None, None, None, (CMD_H, 0x23)))
+                ch[5].append((vr, None, None, None, None, (CMD_H, 0x22)))
     return ch
 
 
@@ -302,7 +302,9 @@ def synth_kit(rng):
     gbase = cyc([(1, 1.0), (2, 0.45), (3, 0.6), (4, 0.3), (5, 0.35),
                  (6, 0.18), (7, 0.2)])
     gbright = cyc([(8, 0.5), (9, 0.3), (11, 0.2)])
-    gcyc = [np.tanh(3.2 * (gbase + 0.35 * np.cos(2 * np.pi * k / 16)
+    # growl depth 0.15: at 0.35 the brightness swing read as a "wah"
+    # that pulled the note out of tune (user, Sep 16)
+    gcyc = [np.tanh(3.2 * (gbase + 0.15 * np.cos(2 * np.pi * k / 16)
                            * gbright)) for k in range(16)]
     gatt = [np.tanh(3.2 * (gbase + 0.5 * gbright
                            + rng.standard_normal(CYCN) * 0.35 * (1 - i / 5)))
@@ -382,13 +384,20 @@ def env_bytes(vol_sustain=False):
     # on KEYOFF" fires on KEY-ON) that fades every note from its first
     # tick - the "plinky, nothing held" bug. Sustain at node 0 holds
     # full volume while the key is down; release ramps to 0 in 12 ticks.
-    if vol_sustain:
+    if vol_sustain == "decay":
+        # guitar-style: full onset, settle to ~2/3 over 36 ticks
+        # (~1.5 beats at speed 6), HOLD there (sustain node 1), then a
+        # 12-tick release
+        b = bytearray([0x05, 3, 0, 0, 1, 1])
+        b += struct.pack("<bH", 64, 0) + struct.pack("<bH", 42, 36) \
+            + struct.pack("<bH", 0, 48)
+    elif vol_sustain:
         b = bytearray([0x05, 2, 0, 0, 0, 0])   # on + susloop, node 0
         b += struct.pack("<bH", 64, 0) + struct.pack("<bH", 0, 12)
     else:
         b = bytearray([0, 2, 0, 0, 0, 0])
         b += struct.pack("<bH", 64, 0) + struct.pack("<bH", 64, 1)
-    b += bytes(23 * 3) + bytes(1)
+    b += bytes(82 - len(b))  # pad the 25-node area + trailing byte
     assert len(b) == 82
     return bytes(b)
 
@@ -404,7 +413,7 @@ def instrument_bytes(name, smp_1based):
     b += bytes([0, 0, 0, 0]) + struct.pack("<H", 0)  # IFC IFR MCh MPr Bnk
     for i in range(120):
         b += bytes([i, smp_1based])       # every key -> this sample
-    b += env_bytes(vol_sustain=True)      # volume: sustain (see note)
+    b += env_bytes(vol_sustain="decay" if name == "lead" else True)
     b += env_bytes() * 2                  # pan/pitch envelopes: off
     b += bytes(554 - len(b))
     assert len(b) == 554
