@@ -57,6 +57,16 @@ Top Gear lead", "like Dire Straits neck pickup" — I translate.
   "triangle with distortion" — i.e. the core wave is too hollow/pure.
   Ask for: *more bite* (upper-mid harmonics), *thicker/power-chord*,
   *smoother/neck-pickup*, plus the lead-only dials above.
+- **Flute** (Sunset Cove, Grey Lake, Dawn Coast leads) -- near-pure
+  breathy tone, chiff attack, DELAYED shallow vibrato, scoop slides on
+  touching notes. Ask for: *breathier*, *purer/glassier*, *more chiff*,
+  *whistle-ish* (brighter, faster vibrato), *pan-flute* (harder chiff).
+- **Sax** (Twilight Sky lead) -- reedy even+odd blend, mild drive,
+  breathy onset, deep slow delayed vibrato. Ask for: *honkier/reedier*,
+  *smoother (soprano-ish)*, *more breath*, *growlier*.
+- **Pad** (Grey Lake, Dawn Coast, Twilight Sky) -- warm drifting wave,
+  SWELL envelope (rises over ~half a second), no attack transient. Ask
+  for: *slower/faster swell*, *warmer/glassier*, *thinner (more air)*.
 - **Bell (marimba)** — strike (fundamental + strong 4th partial +
   shimmer) decaying into a quiet ring. Ask for: *woodier/marimba*
   (fast decay, mellow), *glassier/vibes* (higher partials, longer
@@ -79,10 +89,12 @@ Top Gear lead", "like Dire Straits neck pickup" — I translate.
   lower, and very high notes thin out and hit the 128kHz ceiling (we
   fold anything above note 83). "Same sound but two octaves down"
   usually means re-voicing the sample.
-- **Echo exists but is OFF.** The DSP has a genuine echo/delay
-  (per-channel enable, delay, feedback) — very SNES, and cheap for us
-  now (~2KB ARAM per 16ms of delay; we have ~38KB spare). "Add some
-  echo to the lead/snare" is a fair request.
+- **Echo is per-song now** (song.json "snesmod": EDL = delay length in
+  16ms units and 2K ARAM each, EVOL = level, EFB = feedback/tail, EON =
+  which channels; 1-8, our melody is 6, chords 4-5). Grey Lake is the
+  wettest (EDL 5), Deep Blue the driest (EDL 3). "More/less reverb",
+  "longer tail", "echo on the bells too" are one-line changes. The DSP has a genuine echo/delay
+ 
 - **Pitch bends are stepped per tick** (24 ticks/beat) — fast wide
   bends are convincing, ultra-slow ones can zipper.
 - I can't hear any of it: **preview_it.wav** (real tracker render of
