@@ -132,16 +132,30 @@ FX["boom"] = (norm(room(dry, sr, 8, 0.5, 0.35, 0.12), 0.95), sr)
 # bouncing along the water, fired on every water re-entry - main.c.)
 
 # ---- splash: the air-to-water hit --------------------------------------
+# a SOFT wash, not a tick: the previous version decayed in ~50ms and led
+# with a pitched thump (that was the "tick"). Now the filtered-noise
+# WATER is the star - ramped-in attack (no click) and a long ~350ms
+# decay (the shhhh) - with only a quiet low bloop of displaced water
+# underneath.
 sr = 16000
-n = int(0.38 * sr)
+n = int(0.5 * sr)
 t = np.arange(n) / sr
-f = 140 * np.exp(-t * 8) + 55
-thump = np.sin(2 * np.pi * np.cumsum(f) / sr) * env(n, 7) * 0.75
+
+wash = np.ones(n)                         # soft attack + gentle long decay
+a = int(0.018 * sr)
+wash[:a] = np.linspace(0, 1, a)
+wash *= np.exp(-t * 3.2)                  # ~350ms wash, not a spike
+
 nz = rng.standard_normal(n)
-bright = np.diff(nz, prepend=0) * env(n, 14) * 0.5
-body = lowpass(nz, 0.2) * env(n, 5)
-FX["splash"] = (norm(room(thump + bright + body, sr, 5, 0.45, 0.3, 0.12),
-                     0.9), sr)
+body = lowpass(nz, 0.35)                  # water-toned noise (the shhhh)
+spray = (nz - lowpass(nz, 0.5)) * np.exp(-t * 7) * 0.45   # brief bright top
+water = (body + spray) * wash
+
+f = 90 * np.exp(-t * 10) + 42             # quiet, soft, plummy - NOT a thump
+bloop = np.sin(2 * np.pi * np.cumsum(f) / sr) * np.exp(-t * 8) * 0.3
+
+FX["splash"] = (norm(room(water * 0.9 + bloop, sr, 6, 0.5, 0.3, 0.16),
+                     0.85), sr)
 
 # --------------------------------------------------------- emit the .it
 os.makedirs(OUTDIR, exist_ok=True)
