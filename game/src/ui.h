@@ -23,6 +23,7 @@
 #define HUD_PAL_BOT 0x1800
 
 void uiInit(void);
+void uiSkyBand(void); // (re)fill the BG1 sky-band tilemap rows
 
 // HUD gradient text. Big = double height across rows 2+3; Small = single
 // height with the palette row of your choice; Digit avoids the glyph

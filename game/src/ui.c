@@ -20,6 +20,22 @@ extern char skyf_gfx;             // BG3 2bpp sky text font (results)
 
 u16 uiMap[UI_COLS * UI_ROWS];
 
+// (re)fill the BG1 tilemap's mode-1 sky band: rows UI_ROWS.. with the
+// gradient tiles (chars WAVE_SKY_CHAR0+, palette row 2). Set once at
+// boot, but ALSO callable to restore the band after something wipes the
+// map (the boot epigraph blanks the whole map for its black backdrop -
+// courseLoad never rebuilds this, so the sky would otherwise go flat).
+void uiSkyBand(void)
+{
+    u16 i, c;
+    for (i = 0; i < WAVE_SKY_ROWS; i++)
+    {
+        for (c = 0; c < 32; c++)
+            uiMap[c] = 0x0800 | (WAVE_SKY_CHAR0 + i); // palette row 2
+        dmaCopyVram((u8 *)uiMap, 0x4000 + (UI_ROWS + i) * 32, 64);
+    }
+}
+
 void uiInit(void)
 {
     u16 i;
@@ -55,13 +71,7 @@ void uiInit(void)
     // WAVE_SKY_ROWS includes the extra bottom row for the BG scroll
     // off-by-one (screen line N samples map line N+1); the bake authors
     // the tiles map-line indexed so every visible line lands exactly
-    for (i = 0; i < WAVE_SKY_ROWS; i++)
-    {
-        u16 c;
-        for (c = 0; c < 32; c++)
-            uiMap[c] = 0x0800 | (WAVE_SKY_CHAR0 + i); // palette row 2
-        dmaCopyVram((u8 *)uiMap, 0x4000 + (UI_ROWS + i) * 32, 64);
-    }
+    uiSkyBand();
 
     // BG3 cloud overlay (mode-1 sky rows only; the TM table keeps it off
     // the text band). BG3, NOT BG2: EXTBG stays on all frame for the

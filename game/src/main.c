@@ -1587,8 +1587,10 @@ static void splashScreen(void)
         setBrightness(b);
     }
     setScreenOff(); // leave black; the attract's courseLoad reveals next
-    for (bi = 0; bi < 28; bi++) // wipe the map: my rows 9/11 sit in the
-        uiMenuRow(bi, 0, "");   // race's sky band (4-11) and would burn in
+    for (bi = 0; bi < 28; bi++) // wipe my text (rows 9/11 sit in the sky
+        uiMenuRow(bi, 0, "");   // band 4-11 and would burn into the race)
+    uiSkyBand(); // ...then rebuild the sky-band gradient tiles the wipe
+                 // cleared - courseLoad never does, so the sky goes flat
 }
 
 // one 32x32 logo block; s16 x so the slide can start offscreen either
