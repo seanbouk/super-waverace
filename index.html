@@ -28,6 +28,14 @@
     border-radius: 8px;
     overflow: hidden;
   }
+  /* the game is 256px upscaled ~3.5x - keep it NEAREST-NEIGHBOUR so the
+     sky's 4px dither stays crisp instead of being bilinear-blurred into
+     a smooth gradient (the "lost dithering" - the ROM's dither is fine,
+     it was the browser's default smooth upscale) */
+  #game canvas {
+    image-rendering: pixelated;
+    image-rendering: crisp-edges;
+  }
   #footer { color: var(--dim); font-size: 12px; margin-top: 14px; text-align: center; }
   kbd {
     background: var(--panel);
@@ -62,7 +70,7 @@
   // ?v= key and serve a weeks-old ROM out of IndexedDB, which burned a
   // whole debugging session. Testing within 10 min of a push can STILL
   // show the previous build; hard-reload after the window passes.
-  window.EJS_gameUrl = "superwaverace.sfc?v=f79fcf225f713daf927d4fe06582e5d2ea5b3776";
+  window.EJS_gameUrl = "superwaverace.sfc?v=0d82609ad324e8e72eca7c7b4f2941ac386aec76";
   window.EJS_disableDatabases = true;
   window.EJS_pathtodata = "https://cdn.emulatorjs.org/4.2.3/data/";
   window.EJS_backgroundColor = "#12151c";
