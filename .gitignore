@@ -42,3 +42,10 @@ game/soundbank.bnk
 assets/music/*/*.wav
 assets/music/*/*.zip
 assets/music/*/*.mp3
+# but DO commit the baked sampled-instrument kit (small, CI needs it -
+# the 148MB .sf2 it came from is local-only)
+!assets/music/kit/*.wav
+
+# FluidR3_GM soundfont (148MB, local only - see tools/sf2extract.py)
+*.sf2
+assets/music/sf2preview/

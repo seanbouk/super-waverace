@@ -1,0 +1,44 @@
+{
+  "keys": {
+    "loop": null,
+    "c5": 11025.0,
+    "src": "Rhodes C5",
+    "n": 15544
+  },
+  "bass": {
+    "loop": 1212,
+    "c5": 39288.63,
+    "src": "Slap Bass D3",
+    "n": 1708
+  },
+  "pbass": {
+    "loop": 1212,
+    "c5": 70004.39,
+    "src": "Picked Bass E2",
+    "n": 1676
+  },
+  "flute": {
+    "loop": 1212,
+    "c5": 14716.61,
+    "src": "Flute G4",
+    "n": 6204
+  },
+  "sax": {
+    "loop": 1212,
+    "c5": 11025.0,
+    "src": "Tenor C5",
+    "n": 6300
+  },
+  "bell": {
+    "loop": null,
+    "c5": 1378.12,
+    "src": "Glocken C8",
+    "n": 8268
+  },
+  "marimba": {
+    "loop": null,
+    "c5": 11025.0,
+    "src": "Marimba C 5",
+    "n": 8268
+  }
+}

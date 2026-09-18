@@ -586,8 +586,38 @@ are baked PER COURSE under its ambient (crs<n>_obj / crs<n>_buoy).
   tune's echo config eats 28K, ours should keep echo ~4-8K - minus
   ~8-12K for the SFX set. Instrument mode, no NNAs/filters/pattern
   loops, linear frequency, one sample per instrument.
-- assets/music/spikesfx.it is PVSnesLib EXAMPLE content - placeholder
-  SFX bank ONLY, replaced in phase 3 (jam rule: "no ripped musics").
+- MELODY INSTRUMENTS ARE SAMPLED (Sep 18): keys/bass/flute/sax/bell are
+  real FluidR3_GM samples (Frank Wen, MIT - credit in repo), extracted
+  by tools/sf2extract.py from the LOCAL-ONLY 148MB FluidR3_GM.sf2
+  (gitignored; download link in that file's header) to small COMMITTED
+  WAVs in assets/music/kit/ + kit.json (loop start, C5Speed per role);
+  midi2it's apply_sampled_kit() overrides those synth voices. Drums,
+  lead (Sunny's guitar), brass and pad stay SYNTHESISED. sf2extract
+  lessons: FluidR3 shdr root is a useless constant 60 (real note is in
+  the sample NAME); struck instruments (marimba/vibes/Rhodes) = one-shot
+  decay, NO loop (a short loop machine-guns the strike); sustained =
+  short attack + the author's UNTOUCHED loop region at NATIVE rate
+  (resampling nudges the seam and clicks - `bake` uses 22050 and accepts
+  a tiny click the DSP filter softens; `sf2extract <sf2> preview`
+  renders a phrase per candidate for the user to audition). Brass loop
+  is too big to sample (~30K) - kept synth. Per-song song.json "kit"
+  remaps a role, e.g. {"bass":"pbass"} for a rounder mellow bass.
+- SFX (tools/mksfx.py -> menusfx.it, soundbank's FIRST module = effect
+  sources/slots 0-3): tick/back/boom (menu) + splash. The CONTINUOUS
+  ENGINE HUM WAS DROPPED (SNESMod effect voices can't hold a loop - the
+  driver reclaims the voice on the sample-end flag, raised every wrap;
+  the re-fire workaround never sounded). The SPLASH stays and WORKS
+  (verified: FX voices 6/7 light up) - fired in main.c on every
+  air->water re-entry (!wasInWater), volume by impact speed, splCd
+  cooldown vs waterline chatter: the sploosh of bouncing. The boom was
+  trimmed 17K->5K to give the ARAM to sampled instruments. Effect slots
+  past 2 DO load (the engine's old 0% was engine-specific, never
+  slot-related).
+- The soundbank now spans 3 ROM/ARAM banks -> main.c externs
+  SOUNDBANK__0/1/2 and spcSetBank's all three in REVERSE order (add a
+  __3 when it grows again). ARAM worst case (Twilight + effects):
+  ~9.4K free - fits.
+- assets/music/spikesfx.it is GONE (was PVSnesLib example placeholder).
   Music is generated: tools/midi2it.py (run under toolchain/py311-audio)
   turns a song folder (Basic Pitch MIDIs in midi/ + the drum stem WAV)
   into a 6-channel SNESMod .it with a procedurally synthesised

@@ -586,3 +586,13 @@ Phases:
    placeholder bank; effects RELOAD after every spcLoad). Maybe: an
    engine hum pitched by speed via spcEffect (costs one SFX channel
    permanently - decide by ear).
+4. DONE (Sep 18) - SAMPLED MELODY INSTRUMENTS: keys/bass/flute/sax/bell
+   are FluidR3_GM samples (tools/sf2extract.py bakes assets/music/kit/
+   from the local .sf2); drums/lead/brass/pad stay synth. The engine
+   hum was dropped (unworkable on SNESMod), the confirm boom trimmed
+   17K->5K, and that ARAM went to the sampled kit. SFX now: menu
+   tick/back/boom + the water SPLASH (fires on every water re-entry,
+   volume by impact - verified sounding). All six tracks regenerated
+   with the sampled kit; soundbank spans 3 banks. Remaining sound work:
+   real drums (optional - user OK with synth), per-song bass choice
+   (slap vs picked), and any tone iteration on the sampled instruments.

@@ -275,6 +275,35 @@ def _norm(x, peak=0.85):
     return x * (peak / m) if m > 0 else x
 
 
+def apply_sampled_kit(kit, override=None):
+    """Replace the melodic synth voices with FluidR3_GM samples baked to
+    assets/music/kit/ (see tools/sf2extract.py). Drums, lead (guitar),
+    brass and pad stay synth. `override` (song.json "kit") remaps a
+    role to another baked instrument, e.g. {"bass": "pbass"} for the
+    mellow tracks. Missing kit -> silently keep synth (a fresh clone
+    without the local .sf2 still builds; re-bake to get the samples)."""
+    import json
+    import soundfile as sf
+    kdir = os.path.join(os.path.dirname(__file__), "..", "assets",
+                        "music", "kit")
+    man = os.path.join(kdir, "kit.json")
+    if not os.path.exists(man):
+        print("  (no sampled kit - keeping synth; run sf2extract bake)")
+        return
+    m = json.load(open(man))
+    roles = {"keys": "keys", "bass": "bass", "flute": "flute",
+             "sax": "sax", "bell": "bell"}
+    roles.update(override or {})
+    for role, src in roles.items():
+        if src not in m:
+            continue
+        data, _ = sf.read(os.path.join(kdir, src + ".wav"), dtype="float32")
+        if data.ndim > 1:
+            data = data.mean(axis=1)
+        kit[role] = (data, m[src]["loop"], m[src]["c5"])
+    print("  sampled kit: " + " ".join(sorted(roles)))
+
+
 def synth_kit(rng):
     """name -> (data float32, loop_begin or None, C5Speed). Pitched
     samples end in a 64-sample loop (multiple of 16 - SNESMod unrolls or
@@ -472,7 +501,7 @@ def sample_bytes(name, data, loop_begin, c5, data_ofs):
     b += name[:26].ljust(26, "\0").encode()
     b += bytes([1, 32])                   # Cvt=signed, DfP off
     b += struct.pack("<IIII", n, loop_begin or 0,
-                     n if loop_begin is not None else 0, c5)
+                     n if loop_begin is not None else 0, int(round(c5)))
     b += struct.pack("<III", 0, 0, data_ofs)
     b += bytes([0, 0, 0, 0])
     assert len(b) == 0x50
@@ -654,6 +683,7 @@ def main():
               % (bpm, total, sum(len(v) for v in ch.values())))
         rng = np.random.default_rng(0x5EA)
         kit = synth_kit(rng)
+        apply_sampled_kit(kit, cfg.get("kit"))
         name = cfg.get("name",
                        os.path.basename(d.rstrip("/\\")).upper())
         write_it(args.out, name, bpm, kit, KIT_ALL, ch, total,

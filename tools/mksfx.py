@@ -99,68 +99,37 @@ def bellnote(freq, dur, sparkle=0.5):
     return w
 
 
-total = int(0.72 * sr)
+# trimmed to ~5KB (was 17KB): the biddly-BUM figure kept, the long
+# reverb tail cut - ARAM now goes to sampled melody instruments, not a
+# luxury confirm tail.
+total = int(0.44 * sr)
 dry = np.zeros(total)
-dry[0:0] = 0
-b1 = bellnote(659.3, 0.30)                        # E5  "bid-"
-b2 = bellnote(880.0, 0.34)                        # A5  "-dly"
+b1 = bellnote(659.3, 0.22)                        # E5  "bid-"
+b2 = bellnote(880.0, 0.24)                        # A5  "-dly"
 dry[:len(b1)] += b1 * 0.62
-o = int(0.095 * sr)
+o = int(0.085 * sr)
 dry[o:o + len(b2)] += b2 * 0.72
 
-o = int(0.19 * sr)                                # "BUM"
+o = int(0.17 * sr)                                # "BUM"
 n = total - o
 t = np.arange(n) / sr
 f = 130 * np.exp(-t * 9) + 48
-sub = np.sin(2 * np.pi * np.cumsum(f) / sr) * env(n, 4.5)
+sub = np.sin(2 * np.pi * np.cumsum(f) / sr) * env(n, 5)
 gong = np.zeros(n)
-for ratio, g, dk in ((1.0, 0.9, 3.5), (2.756, 0.55, 5), (4.07, 0.4, 6.5),
-                     (5.42, 0.28, 8), (6.79, 0.18, 9.5), (8.21, 0.1, 11)):
+for ratio, g, dk in ((1.0, 0.9, 4), (2.756, 0.55, 6), (4.07, 0.4, 7.5),
+                     (5.42, 0.28, 9), (6.79, 0.18, 11)):
     gong += np.sin(2 * np.pi * 220 * ratio * t
                    + rng.uniform(0, 6.28)) * g * env(n, dk)
 imp = np.zeros(n)
 imp[:int(0.015 * sr)] = rng.standard_normal(int(0.015 * sr)) \
     * env(int(0.015 * sr), 4) * 0.9
 dry[o:] += sub * 1.05 + gong * 0.55 + lowpass(imp, 0.6)
-FX["boom"] = (norm(room(dry, sr, 12, 0.58, 0.38, 0.38), 0.95), sr)
+FX["boom"] = (norm(room(dry, sr, 8, 0.5, 0.35, 0.12), 0.95), sr)
 
-# ---- engine hum: wet (underwater load) + dry (airborne rev) ------------
-# NOT looped: SNESMod reclaims an effect voice on the sample-end flag,
-# which a looped sample raises every wrap (~30ms) - loops die instantly
-# (measured). Each engine sample is ~190ms of un-looped texture and the
-# game RE-FIRES it every tick before it drains; the retrigger granulation
-# reads as engine roughness. Three periods per flavour x the driver's
-# 4kHz pitch steps = the ~8-rung rev ladder printed below.
-def engine(period, wet):
-    cycles = 3072 // period
-    n = period * cycles
-    t = np.arange(n) / period
-    if wet:
-        harm = ((1, 1.0), (2, 0.62), (3, 0.34), (4, 0.18))
-        noise_g, wob_g, wob_n, dark = 0.22, 0.2, cycles // 2, 0.18
-    else:
-        harm = ((1, 0.85), (2, 0.7), (3, 0.55), (4, 0.4), (5, 0.28),
-                (6, 0.18))
-        noise_g, wob_g, wob_n, dark = 0.34, 0.0, 1, 0.45
-    w = np.zeros(n)
-    for k, g in harm:
-        w += g * np.sin(2 * np.pi * k * t + k * 1.7)
-    nz = lowpass(rng.standard_normal(n), dark)
-    wob = 1 + wob_g * np.sin(2 * np.pi * wob_n * np.arange(n) / n)
-    return norm((w + nz * noise_g) * wob, 0.85)
-
-
-for i, period in enumerate((128, 112, 96)):
-    FX["engw%d" % i] = (engine(period, True), 16000)
-    FX["engd%d" % i] = (engine(period, False), 16000)
-
-steps = []
-for si, period in enumerate((128, 112, 96)):
-    for p in (2, 3, 4, 5):
-        steps.append((4000 * p / period, si, p))
-steps.sort()
-print("rev ladder (Hz, sample, pitch):",
-      ["%.0f=(%d,%d)" % s for s in steps])
+# (the continuous engine hum was dropped - SNESMod effect voices can't
+# hold a loop, the re-fire workaround never sounded, and its ARAM is
+# better spent on sampled instruments. The SPLASH stays: the sploosh of
+# bouncing along the water, fired on every water re-entry - main.c.)
 
 # ---- splash: the air-to-water hit --------------------------------------
 sr = 16000
@@ -187,10 +156,7 @@ for name, (data, rate) in FX.items():
     print("%-6s %5.0fms at %dHz (%d samples)"
           % (name, 1000 * len(data) / rate, rate, len(data)))
 
-ORDER = ["tick", "back", "boom",           # sources 0-2 (menu)
-         "engw0", "engw1", "engw2",        # 3-5 wet engine
-         "engd0", "engd1", "engd2",        # 6-8 dry engine
-         "splash"]                         # 9
+ORDER = ["tick", "back", "boom", "splash"]   # sources/slots 0-3
 I = {nm: ORDER.index(nm) + 1 for nm in ORDER}
 ch = {0: [(i, 60, I[nm], 1, None) for i, nm in enumerate(ORDER)]}
 M.write_it(os.path.join(ROOT, "assets", "music", "menusfx.it"),
