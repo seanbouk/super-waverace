@@ -1531,7 +1531,8 @@ static void textScreen(char *name)
 // before the first courseLoad; courseLoad reloads them per its spcLoad.
 static void splashScreen(void)
 {
-    u8 t = 0, armed = 0, b;
+    u16 t = 0;
+    u8 armed = 0, b;
     REG_NMITIMEN = 0x81; // park the mode-switch timer IRQ -> full mode 1
     REG_HDMAEN = 0;
     setScreenOff();
@@ -1590,24 +1591,20 @@ static void splashScreen(void)
         WaitForVBlank();
         setBrightness(b);
     }
-    for (b = 0; b < 20; b++) // ...a beat, then the attribution follows
+    // one loop for the rest: the attribution fades in at t=90 (~1.5s
+    // after the quote), then it all holds until START/A or the timeout.
+    // START stays responsive through the long gap (unlike a fixed beat).
+    while (1)
     {
         spcProcess();
         WaitForVBlank();
-    }
-    for (b = 0; b <= 15; b++) // fade the attribution in (its own ink)
-    {
-        u8 g = (u8)(b * 17); // 0..255 grey ramp -> white
-        spcProcess();
-        WaitForVBlank();
-        setPaletteColor(33, RGB8(g, g, g));
-        setPaletteColor(34, RGB8(g, g, g));
-        setPaletteColor(35, RGB8(g, g, g));
-    }
-    while (1) // hold ~4s or until START/A (with the accept sound)
-    {
-        spcProcess();
-        WaitForVBlank();
+        if (t >= 90 && t <= 105) // attribution ink ramp, ~1.5s in
+        {
+            u8 g = (u8)((t - 90) * 17); // 0..255 grey -> white
+            setPaletteColor(33, RGB8(g, g, g));
+            setPaletteColor(34, RGB8(g, g, g));
+            setPaletteColor(35, RGB8(g, g, g));
+        }
         pad0 = padsCurrent(0);
         if (!(pad0 & (KEY_START | KEY_A)))
             armed = 1; // ignore a button already held from power-on
@@ -1616,8 +1613,8 @@ static void splashScreen(void)
             SFX_BOOM();
             break;
         }
-        if (++t > 240)
-            break; // ~4s timeout (this loop is one frame per iteration)
+        if (++t > 340)
+            break; // hold ~4s past the attribution, then time out
     }
     for (b = 15; b != 0xFF; b--) // fade to black (quick)
     {
