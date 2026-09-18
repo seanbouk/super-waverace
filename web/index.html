@@ -28,6 +28,14 @@
     border-radius: 8px;
     overflow: hidden;
   }
+  /* the game is 256px upscaled ~3.5x - keep it NEAREST-NEIGHBOUR so the
+     sky's 4px dither stays crisp instead of being bilinear-blurred into
+     a smooth gradient (the "lost dithering" - the ROM's dither is fine,
+     it was the browser's default smooth upscale) */
+  #game canvas {
+    image-rendering: pixelated;
+    image-rendering: crisp-edges;
+  }
   #footer { color: var(--dim); font-size: 12px; margin-top: 14px; text-align: center; }
   kbd {
     background: var(--panel);
