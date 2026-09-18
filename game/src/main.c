@@ -1556,14 +1556,53 @@ static void splashScreen(void)
     uiMenuRow(9, 4, "The Wave That Bears You");
     uiMenuRow(11, 9, "Is Brother To");
     uiMenuRow(13, 4, "The Wave That Breaks You");
-    uiMenuRow(16, 11, "- Poseidon");
+    // the attribution goes on PALETTE ROW 2 (0x0900 = font base 0x100 |
+    // row-2 bits 0x800) so its ink (CGRAM 33-35) can fade INDEPENDENTLY
+    // of the quote: master brightness fades the whole screen together,
+    // so a staggered line needs its own palette to ramp. (Row 2 is the
+    // sky band's, unused here - the map is wiped - and uiSkyBand reloads
+    // sky_pal2 afterward, restoring 33-35.)
+    {
+        char *s = "- Poseidon";
+        u8 x = 11;
+        // blanks = the row-1 solid blank (0x0500 -> colour 15 = CGRAM 31,
+        // black here); only the LETTERS go on row 2 (0x0900) so their ink
+        // (CGRAM 33-35) fades on its own. Row-2 blanks would show colour
+        // 15 = CGRAM 47 = a pale sky-blue bar.
+        for (bi = 0; bi < 32; bi++)
+            ttlBuf[bi] = 0x0500;
+        while (*s)
+        {
+            char c = *s++; // a space INSIDE the string is also the solid
+            ttlBuf[x++] = c == ' ' ? 0x0500 // blank -> keep it on row 1
+                                   : (u16)(0x0900 | (c - 32));
+        }
+        dmaCopyVram((u8 *)ttlBuf, (u16)(0x4000 + 16 * 32), 64);
+    }
+    setPaletteColor(33, 0); // attribution ink black = invisible for now
+    setPaletteColor(34, 0);
+    setPaletteColor(35, 0);
     setBrightness(0);
     setScreenOn(); // force-blank off, but brightness 0 = still black
-    for (b = 0; b <= 15; b++) // fade the text in (quick)
+    for (b = 0; b <= 15; b++) // fade the QUOTE in (master brightness)
     {
         spcProcess();
         WaitForVBlank();
         setBrightness(b);
+    }
+    for (b = 0; b < 20; b++) // ...a beat, then the attribution follows
+    {
+        spcProcess();
+        WaitForVBlank();
+    }
+    for (b = 0; b <= 15; b++) // fade the attribution in (its own ink)
+    {
+        u8 g = (u8)(b * 17); // 0..255 grey ramp -> white
+        spcProcess();
+        WaitForVBlank();
+        setPaletteColor(33, RGB8(g, g, g));
+        setPaletteColor(34, RGB8(g, g, g));
+        setPaletteColor(35, RGB8(g, g, g));
     }
     while (1) // hold ~4s or until START/A (with the accept sound)
     {

@@ -28,6 +28,10 @@ u16 uiMap[UI_COLS * UI_ROWS];
 void uiSkyBand(void)
 {
     u16 i, c;
+    // reload the band palette too (CGRAM 31 + anchors 32-47): the boot
+    // epigraph borrows row-2 ink (33-35) for its attribution fade, so
+    // restoring the map without this would leave the sky mis-coloured
+    dmaCopyCGram((u8 *)&sky_pal2, 31, 34);
     for (i = 0; i < WAVE_SKY_ROWS; i++)
     {
         for (c = 0; c < 32; c++)
