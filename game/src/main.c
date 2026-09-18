@@ -1523,6 +1523,74 @@ static void textScreen(char *name)
     mosaicSweep(0, 0); // pixelate away; the next state snaps mosaic clear
 }
 
+// boot epigraph: white text on black, shown ONCE before the title/
+// attract. Full mode 1 (timer IRQ parked, like courseSelect); black
+// backdrop + blank tile so the console font's light ink reads as white.
+// Fades in, holds ~4s or until START (accept sound), fades to black.
+// The effects are pre-loaded in main() so SFX_BOOM has its sample here,
+// before the first courseLoad; courseLoad reloads them per its spcLoad.
+static void splashScreen(void)
+{
+    u8 t = 0, armed = 0, b;
+    REG_NMITIMEN = 0x81; // park the mode-switch timer IRQ -> full mode 1
+    REG_HDMAEN = 0;
+    setScreenOff();
+    for (bi = 0; bi < TITLE_SPR + 10; bi++)
+        oamSetVisible(bi << 2, OBJ_HIDE);
+    REG_BG1HOFS = 0; // write-twice pairs (shared prev-latch)
+    REG_BG1HOFS = 0;
+    REG_BG1VOFS = 0;
+    REG_BG1VOFS = 0;
+    REG_COLDATA = 0xE0; // no colour-math add
+    REG_TM = 0x11;      // BG1 + OBJ only: NO BG3 (kills the cloud strip)
+    setPaletteColor(0, 0);  // black backdrop (glyph-transparent pixels)
+    setPaletteColor(31, 0); // black blank tile (empty cells)
+    uiClear();
+    uiFlush();
+    uiMenuClearRows();
+    for (bi = 0; bi < 28; bi++) // wipe the WHOLE BG1 map to blank: uiClear
+        uiMenuRow(bi, 0, "");   // only does the 4-row band, the boot sky
+                                // band + gradient tiles fill the rest
+    // three centred lines, the "bears you / breaks you" parallel on the
+    // outer two with the pivot between (32-col map, each x = (32-len)/2)
+    uiMenuRow(9, 4, "The Wave That Bears You");
+    uiMenuRow(11, 9, "Is Brother To");
+    uiMenuRow(13, 4, "The Wave That Breaks You");
+    uiMenuRow(16, 11, "- Poseidon");
+    setBrightness(0);
+    setScreenOn(); // force-blank off, but brightness 0 = still black
+    for (b = 0; b <= 15; b++) // fade the text in (quick)
+    {
+        spcProcess();
+        WaitForVBlank();
+        setBrightness(b);
+    }
+    while (1) // hold ~4s or until START/A (with the accept sound)
+    {
+        spcProcess();
+        WaitForVBlank();
+        pad0 = padsCurrent(0);
+        if (!(pad0 & (KEY_START | KEY_A)))
+            armed = 1; // ignore a button already held from power-on
+        else if (armed)
+        {
+            SFX_BOOM();
+            break;
+        }
+        if (++t > 240)
+            break; // ~4s timeout (this loop is one frame per iteration)
+    }
+    for (b = 15; b != 0xFF; b--) // fade to black (quick)
+    {
+        spcProcess();
+        WaitForVBlank();
+        setBrightness(b);
+    }
+    setScreenOff(); // leave black; the attract's courseLoad reveals next
+    for (bi = 0; bi < 28; bi++) // wipe the map: my rows 9/11 sit in the
+        uiMenuRow(bi, 0, "");   // race's sky band (4-11) and would burn in
+}
+
 // one 32x32 logo block; s16 x so the slide can start offscreen either
 // side (OAM x is 9-bit signed - beyond that the block is simply hidden)
 static void titleBlock(u16 oid, s16 x, u16 y, u16 gfx, u16 pal, u8 tall)
@@ -2210,6 +2278,8 @@ int main(void)
     spcSetBank(&SOUNDBANK__2); // reverse order, per the lib's example
     spcSetBank(&SOUNDBANK__1);
     spcSetBank(&SOUNDBANK__0);
+    for (bi = 0; bi < 4; bi++) // effects up front so the epigraph's
+        spcLoadEffect(bi);     // accept sound works before any courseLoad
     // per-course track table (music switches inside courseLoad; the
     // boot flow's first courseLoad starts the title/attract music).
     // 0xFF = course has no track yet = silence. RAM table, not const:
@@ -2237,6 +2307,10 @@ int main(void)
     layoutSet(); // the IRQ stage table + viewport parameters
     REG_NMITIMEN = 0xB1; // NMI + V=V,H=H timer IRQ + auto-joypad
     irqOn();             // camera.asm: cli
+
+#if !AUTOPILOT
+    splashScreen(); // the boot epigraph, once (harness builds skip it)
+#endif
 
     while (1) // game flow: TITLE/MENU (attract race behind) -> mode -> back
     {

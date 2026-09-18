@@ -693,7 +693,13 @@ move waypoint 0/1 in the painter to move the grid.
 ## State / not yet done
 
 - Game flow (reworked Sep 1, phase 1 of the menu plan - see PLAN.md "Game
-  flow"): boot -> TITLE = ATTRACT (a chaser-driven race on SUNNY ISLAND
+  flow"): boot -> EPIGRAPH (splashScreen(), once, !AUTOPILOT: white
+  console text on black, the Poseidon quote; full mode 1 with the timer
+  IRQ parked + BG3 off + the WHOLE BG1 map wiped to blank - my text
+  rows 9/11 sit in the race's sky band 4-11 and burn in otherwise;
+  setBrightness fades in/hold ~4s or START (SFX_BOOM - effects are
+  pre-loaded in main before the epigraph)/fade to black; the attract's
+  courseLoad reveals the title) -> TITLE = ATTRACT (a chaser-driven race on SUNNY ISLAND
   behind overlays: the title logo is TWO WORDS of 32x32 sprites that
   slide in from opposite edges (eased) and settle overlapped -
   assets/title-waveracer.png (up to 128x32, real alpha, OBJ palette 6 =
