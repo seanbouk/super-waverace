@@ -266,6 +266,7 @@ u16 bq, dly;
 u8 bi;
 // race progress (phase 1: player only) + waypoint-chaser steering
 u8 nextWp, lapCount;
+u8 wpFol;         // waypoint after nextWp (progress plane-cross scratch)
 u16 lapTicks, lastLap;
 s16 wpdx, wpdy, apc, apd, apu;
 // NPC racers (phase 2): kinematic waypoint followers, on the OAM sprites
@@ -3327,20 +3328,42 @@ int main(void)
         camPY += stepY;
 
 #if WAVE_MAX_PATH > 0
-        // ---- race progress: next waypoint reached within ~1.5 cells
-        // (Manhattan, world units; skiWX is one step stale — harmless) ----
+        // ---- race progress. Advance to the next waypoint when within
+        // ~1.5 cells (Manhattan, world units; skiWX is one step stale —
+        // harmless) OR once we have crossed its plane: the perpendicular to
+        // the outgoing segment, the same along-track test the start line and
+        // the buoy gates use. Rounding a waypoint WIDE - around a central
+        // sand island, or after the beach bounces you off the racing line -
+        // then still counts, so nextWp/pProg cannot stick. A stuck nextWp
+        // was the bug behind "dropped to last for no reason" (frozen pProg =
+        // every NPC counts as ahead) AND "buoys stopped registering" (gate
+        // arming keys off nextWp). In normal tight play the disc fires first,
+        // so the feel is unchanged; the plane only rescues off-line laps.
         wpdx = (s16)((pathX[nextWp] - skiWX) & 4095);
         if (wpdx > 2048)
             wpdx -= 4096;
-        if (wpdx < 0)
-            wpdx = -wpdx;
         wpdy = (s16)((pathY[nextWp] - skiWY) & 4095);
         if (wpdy > 2048)
             wpdy -= 4096;
-        if (wpdy < 0)
-            wpdy = -wpdy;
-        pDist = (u16)(wpdx + wpdy);
-        if (pDist < 200)
+        pDist = (u16)((wpdx < 0 ? -wpdx : wpdx) + (wpdy < 0 ? -wpdy : wpdy));
+        wpFol = nextWp + 1;
+        if (wpFol >= pathCount)
+            wpFol = 0;
+        apc = (s16)((pathX[wpFol] - pathX[nextWp]) & 4095);
+        if (apc > 2048)
+            apc -= 4096;
+        apd = (s16)((pathY[wpFol] - pathY[nextWp]) & 4095);
+        if (apd > 2048)
+            apd -= 4096;
+        // dot(ski - wp, segment) = -(wpdx*apc + wpdy*apd); >= 0 means we are
+        // on the far side of the waypoint's plane. Pre-shift >>5 so the
+        // s16*s16 products can never overflow (deltas reach +-2048). The
+        // plane-cross only forgives the HUMAN player (!attract): the chaser
+        // that drives attract/intro races steers AT nextWp, so advancing it
+        // early would make it cut corners onto the mid-course sand - it hugs
+        // the line and reaches the disc anyway, so it keeps the strict test.
+        apu = (s16)(((-wpdx) >> 5) * (apc >> 5) + ((-wpdy) >> 5) * (apd >> 5));
+        if (pDist < 200 || (!attract && apu >= 0))
         {
             nextWp++;
             if (nextWp >= pathCount)
