@@ -4,60 +4,385 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Super Waverace</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
-  :root { --bg: #12151c; --panel: #1b2028; --ink: #d8dee9; --dim: #7b8494; --accent: #58c4dd; }
+  :root {
+    --bg0: #0a0f1c;
+    --bg1: #0f1a2e;
+    --sea: #10273f;
+    --panel: #121c30;
+    --panel2: #16213a;
+    --line: #243352;
+    --ink: #e9eff8;
+    --dim: #8795ad;
+    --cyan: #5cc8e6;
+    --orange: #ff9e57;
+    --sun: #ffd166;
+    /* Super Famicom button colours */
+    --btn-a: #e24b4b;
+    --btn-b: #efc24a;
+    --btn-x: #4a90d9;
+    --btn-y: #4fb45c;
+    --grey: #39455f;
+    --grey-hi: #51607e;
+  }
   * { box-sizing: border-box; }
+  html, body { overflow-x: hidden; max-width: 100%; }
+  html { -webkit-text-size-adjust: 100%; }
+  h1, h2, h3 { overflow-wrap: break-word; }
   body {
     margin: 0;
-    background: var(--bg);
+    min-height: 100vh;
     color: var(--ink);
-    font: 14px/1.5 "Segoe UI", system-ui, sans-serif;
+    font: 15px/1.6 "Inter", system-ui, sans-serif;
+    background:
+      radial-gradient(1200px 500px at 50% -10%, rgba(255,158,87,0.10), transparent 60%),
+      radial-gradient(900px 600px at 50% 120%, rgba(92,200,230,0.08), transparent 60%),
+      linear-gradient(180deg, var(--bg0) 0%, var(--bg1) 45%, var(--sea) 100%);
+    background-attachment: fixed;
     display: flex;
     flex-direction: column;
     align-items: center;
-    min-height: 100vh;
-    padding: 16px;
+    padding: 28px 16px 40px;
   }
-  h1 { font-size: 20px; margin: 8px 0 2px; font-weight: 600; }
-  p.sub { color: var(--dim); margin: 0 0 16px; }
-  p.sub a { color: var(--accent); }
+  .wrap { width: 100%; max-width: 920px; }
+
+  /* ---- header ---- */
+  header { text-align: center; margin-bottom: 20px; }
+  .eyebrow {
+    font-family: "Press Start 2P", monospace;
+    font-size: 10px;
+    letter-spacing: 2px;
+    color: var(--cyan);
+    text-transform: uppercase;
+    margin-bottom: 14px;
+  }
+  h1 {
+    font-family: "Press Start 2P", monospace;
+    font-size: clamp(17px, 5.2vw, 32px);
+    line-height: 1.35;
+    margin: 0;
+    color: #fff;
+    text-shadow: 0 2px 0 #0a1526, 0 0 18px rgba(92,200,230,0.35),
+                 0 0 32px rgba(255,158,87,0.20);
+  }
+  .tags {
+    display: flex; flex-wrap: wrap; gap: 8px;
+    justify-content: center; margin-top: 16px;
+  }
+  .tag {
+    font-size: 11.5px; font-weight: 600; letter-spacing: .3px;
+    color: var(--dim);
+    background: rgba(255,255,255,0.04);
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 4px 11px;
+  }
+  .tag b { color: var(--ink); font-weight: 700; }
+
+  /* ---- game screen (CRT bezel) ---- */
+  .screen {
+    position: relative;
+    margin: 0 auto;
+    padding: 14px;
+    border-radius: 16px;
+    background: linear-gradient(180deg, #1b2740, #0c1322);
+    border: 1px solid var(--line);
+    box-shadow: 0 1px 0 rgba(255,255,255,0.05) inset,
+                0 24px 60px rgba(0,0,0,0.5),
+                0 0 0 1px rgba(0,0,0,0.4);
+  }
   #frame {
-    width: min(96vw, 900px);
+    width: 100%;
     aspect-ratio: 256 / 224;
     background: #000;
     border-radius: 8px;
     overflow: hidden;
+    box-shadow: 0 0 0 2px #05090f, 0 0 40px rgba(92,200,230,0.12) inset;
+  }
+  .screen::after {
+    /* a faint power LED */
+    content: "";
+    position: absolute; right: 16px; bottom: 8px;
+    width: 6px; height: 6px; border-radius: 50%;
+    background: var(--btn-y);
+    box-shadow: 0 0 8px var(--btn-y);
   }
   /* the game is 256px upscaled ~3.5x - keep it NEAREST-NEIGHBOUR so the
-     sky's 4px dither stays crisp instead of being bilinear-blurred into
-     a smooth gradient (the "lost dithering" - the ROM's dither is fine,
-     it was the browser's default smooth upscale) */
+     sky's 4px dither stays crisp instead of being bilinear-blurred into a
+     smooth gradient (the "lost dithering" was the browser's smooth upscale,
+     not the ROM). */
   #game canvas {
     image-rendering: pixelated;
     image-rendering: crisp-edges;
   }
-  #footer { color: var(--dim); font-size: 12px; margin-top: 14px; text-align: center; }
-  kbd {
-    background: var(--panel);
-    border: 1px solid #3d4658;
-    border-radius: 4px;
-    padding: 1px 6px;
-    font-family: inherit;
+
+  .cta { text-align: center; margin: 18px 0 6px; }
+  .btn-dl {
+    display: inline-flex; align-items: center; gap: 8px;
+    font-weight: 700; font-size: 14px; letter-spacing: .3px;
+    color: #06202a;
+    background: linear-gradient(180deg, #7fe0f6, var(--cyan));
+    border: none; border-radius: 10px;
+    padding: 10px 18px;
+    text-decoration: none;
+    box-shadow: 0 6px 18px rgba(92,200,230,0.28);
   }
+  .btn-dl:hover { filter: brightness(1.06); }
+  .btn-dl small { color: #0a2a36; font-weight: 600; opacity: .8; }
+
+  /* ---- controls panel ---- */
+  .panel {
+    margin-top: 26px;
+    background: linear-gradient(180deg, var(--panel), var(--panel2));
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 20px;
+  }
+  .panel h2 {
+    font-family: "Press Start 2P", monospace;
+    font-size: 12px; letter-spacing: 1px;
+    color: var(--sun);
+    margin: 2px 0 18px;
+    text-transform: uppercase;
+  }
+  .controls {
+    display: grid;
+    grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
+    gap: 24px;
+    align-items: center;
+  }
+  @media (max-width: 640px) {
+    .controls { grid-template-columns: 1fr; gap: 20px; }
+  }
+  .pad { width: 100%; max-width: 100%; height: auto; display: block; }
+  .pad .face-ring { transition: filter .15s, transform .15s; transform-box: fill-box; transform-origin: center; }
+  .pad g.hot .face-ring, .pad g.hot rect, .pad g.hot path { filter: brightness(1.35) drop-shadow(0 0 6px currentColor); }
+  .pad g.hot { transform: scale(1.06); transform-box: fill-box; transform-origin: center; }
+
+  .map { display: flex; flex-direction: column; gap: 16px; }
+  .map h3 {
+    font-size: 11px; text-transform: uppercase; letter-spacing: 1.5px;
+    color: var(--dim); margin: 0 0 8px; font-weight: 700;
+  }
+  .row {
+    display: flex; align-items: center; gap: 11px;
+    padding: 6px 8px; border-radius: 8px;
+    cursor: default;
+  }
+  .row:hover { background: rgba(255,255,255,0.045); }
+  .chip {
+    flex: none;
+    min-width: 30px; height: 26px; padding: 0 7px;
+    display: inline-flex; align-items: center; justify-content: center;
+    border-radius: 7px;
+    font-weight: 800; font-size: 12.5px; color: #10151f;
+    box-shadow: 0 2px 0 rgba(0,0,0,0.35), 0 0 0 1px rgba(0,0,0,0.25);
+  }
+  .chip.a { background: var(--btn-a); color:#fff; }
+  .chip.b { background: var(--btn-b); }
+  .chip.y { background: var(--btn-y); color:#06240d; }
+  .chip.x { background: var(--btn-x); color:#fff; }
+  .chip.grey { background: var(--grey-hi); color: var(--ink); font-size: 11px; }
+  .row .act { font-size: 14px; }
+  .row .act b { font-weight: 700; }
+  .row .act span { color: var(--dim); }
+
+  .keys {
+    margin-top: 18px; padding-top: 16px;
+    border-top: 1px dashed var(--line);
+    color: var(--dim); font-size: 12.5px; line-height: 1.9;
+  }
+  .keys kbd {
+    font-family: "Inter", sans-serif; font-size: 11.5px; font-weight: 600;
+    color: var(--ink);
+    background: #0c1424; border: 1px solid var(--line);
+    border-bottom-width: 2px; border-radius: 5px;
+    padding: 1px 6px; margin: 0 1px;
+  }
+
+  footer {
+    text-align: center; color: var(--dim); font-size: 12px;
+    margin-top: 26px; line-height: 1.8;
+  }
+  footer a { color: var(--cyan); text-decoration: none; }
+  footer a:hover { text-decoration: underline; }
 </style>
 </head>
 <body>
+<div class="wrap">
 
-<h1>Super Waverace</h1>
-<p class="sub">A Mode 7 SNES game in development &mdash; <a href="superwaverace.sfc" download>download the ROM</a></p>
+  <header>
+    <div class="eyebrow">Super Nintendo &middot; Mode 7</div>
+    <h1>SUPER WAVERACE</h1>
+    <div class="tags">
+      <span class="tag"><b>Status:</b> In development</span>
+      <span class="tag"><b>Platform:</b> SNES (LoROM)</span>
+      <span class="tag"><b>Author:</b> seanbouk</span>
+    </div>
+  </header>
 
-<div id="frame"><div id="game"></div></div>
+  <div class="screen">
+    <div id="frame"><div id="game"></div></div>
+  </div>
 
-<p id="footer">
-  Defaults: <kbd>&uarr;&darr;&larr;&rarr;</kbd> d-pad &middot; <kbd>Z</kbd>/<kbd>X</kbd>/<kbd>A</kbd>/<kbd>S</kbd> B/A/Y/X &middot;
-  <kbd>Enter</kbd> Start &middot; <kbd>Shift</kbd> Select &middot; gamepads supported<br>
-  Runs the latest ROM built from <code>main</code>. Emulation by EmulatorJS (snes9x core).
-</p>
+  <div class="cta">
+    <a class="btn-dl" href="superwaverace.sfc" download>
+      &#x2193;&nbsp;Download the ROM <small>.sfc</small>
+    </a>
+  </div>
+
+  <section class="panel">
+    <h2>Controls</h2>
+    <div class="controls">
+
+      <!-- SNES joypad (Super Famicom colours) -->
+      <svg class="pad" viewBox="0 0 560 300" role="img"
+           aria-label="SNES controller button map">
+        <defs>
+          <linearGradient id="body" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stop-color="#e9edf4"/>
+            <stop offset="1" stop-color="#b9c1d0"/>
+          </linearGradient>
+          <linearGradient id="bodyedge" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stop-color="#ffffff"/>
+            <stop offset="1" stop-color="#9aa3b4"/>
+          </linearGradient>
+        </defs>
+
+        <!-- shoulder buttons -->
+        <rect x="92"  y="54" width="96" height="30" rx="12" fill="#c8cedb"/>
+        <rect x="372" y="54" width="96" height="30" rx="12" fill="#c8cedb"/>
+        <text x="140" y="75" text-anchor="middle" font-family="Inter" font-weight="800"
+              font-size="15" fill="#55607a">L</text>
+        <text x="420" y="75" text-anchor="middle" font-family="Inter" font-weight="800"
+              font-size="15" fill="#55607a">R</text>
+
+        <!-- body -->
+        <rect x="40" y="70" width="480" height="168" rx="84"
+              fill="url(#bodyedge)"/>
+        <rect x="46" y="76" width="468" height="156" rx="78"
+              fill="url(#body)"/>
+
+        <!-- D-pad (left) -->
+        <g id="btn-dpad" style="color:#2b3345">
+          <rect x="112" y="135" width="86" height="30" rx="6" fill="#2b3345"/>
+          <rect x="140" y="107" width="30" height="86" rx="6" fill="#2b3345"/>
+          <circle cx="155" cy="150" r="10" fill="#222a39"/>
+        </g>
+
+        <!-- Start / Select -->
+        <g id="btn-select" style="color:#39455f">
+          <rect x="238" y="170" width="38" height="13" rx="6.5" fill="#39455f"
+                transform="rotate(-22 257 176)"/>
+        </g>
+        <g id="btn-start" style="color:#39455f">
+          <rect x="286" y="170" width="38" height="13" rx="6.5" fill="#39455f"
+                transform="rotate(-22 305 176)"/>
+        </g>
+        <text x="257" y="205" text-anchor="middle" font-family="Inter" font-weight="700"
+              font-size="10" fill="#7b8599">SELECT</text>
+        <text x="305" y="205" text-anchor="middle" font-family="Inter" font-weight="700"
+              font-size="10" fill="#7b8599">START</text>
+
+        <!-- face buttons (right): X top, Y left, A right, B bottom -->
+        <g id="btn-x" style="color:var(--btn-x)">
+          <circle class="face-ring" cx="430" cy="112" r="20" fill="#4a90d9"/>
+          <text x="430" y="117" text-anchor="middle" font-family="Inter"
+                font-weight="800" font-size="16" fill="#fff">X</text>
+        </g>
+        <g id="btn-y" style="color:var(--btn-y)">
+          <circle class="face-ring" cx="392" cy="150" r="20" fill="#4fb45c"/>
+          <text x="392" y="155" text-anchor="middle" font-family="Inter"
+                font-weight="800" font-size="16" fill="#06240d">Y</text>
+        </g>
+        <g id="btn-a" style="color:var(--btn-a)">
+          <circle class="face-ring" cx="468" cy="150" r="20" fill="#e24b4b"/>
+          <text x="468" y="155" text-anchor="middle" font-family="Inter"
+                font-weight="800" font-size="16" fill="#fff">A</text>
+        </g>
+        <g id="btn-b" style="color:var(--btn-b)">
+          <circle class="face-ring" cx="430" cy="188" r="20" fill="#efc24a"/>
+          <text x="430" y="193" text-anchor="middle" font-family="Inter"
+                font-weight="800" font-size="16" fill="#3a2c05">B</text>
+        </g>
+      </svg>
+
+      <!-- mapping -->
+      <div class="map">
+        <div>
+          <h3>Racing</h3>
+          <div class="row" data-btn="btn-dpad">
+            <span class="chip grey">&#9664;&#9654;</span>
+            <span class="act"><b>Steer</b></span>
+          </div>
+          <div class="row" data-btn="btn-b">
+            <span class="chip b">B</span>
+            <span class="act"><b>Accelerate</b></span>
+          </div>
+          <div class="row" data-btn="btn-y">
+            <span class="chip y">Y</span>
+            <span class="act"><b>Reverse</b></span>
+          </div>
+          <div class="row" data-btn="btn-start">
+            <span class="chip grey">START</span>
+            <span class="act"><b>Pause</b></span>
+          </div>
+        </div>
+        <div>
+          <h3>Menus</h3>
+          <div class="row" data-btn="btn-dpad">
+            <span class="chip grey">&#9650;&#9660;</span>
+            <span class="act"><b>Navigate</b></span>
+          </div>
+          <div class="row" data-btn="btn-a">
+            <span class="chip a">A</span>
+            <span class="act"><b>Confirm</b> <span>/ Start</span></span>
+          </div>
+          <div class="row" data-btn="btn-b">
+            <span class="chip b">B</span>
+            <span class="act"><b>Back</b></span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="keys">
+      <b style="color:var(--ink)">Keyboard</b> &nbsp;
+      <kbd>&larr;</kbd><kbd>&rarr;</kbd> steer &middot;
+      <kbd>Z</kbd> B &middot; <kbd>A</kbd> Y &middot; <kbd>X</kbd> A &middot; <kbd>S</kbd> X &middot;
+      <kbd>Enter</kbd> Start &middot; <kbd>Shift</kbd> Select &middot;
+      gamepads supported.
+    </div>
+  </section>
+
+  <footer>
+    A Mode 7 SNES jet-ski racer, in development &mdash; built from
+    <code>main</code>, emulated in-browser by EmulatorJS (snes9x core).
+  </footer>
+
+</div>
+
+<script>
+  // cross-highlight: hovering a mapping row lights up its pad button
+  (function () {
+    try {
+      var rows = document.querySelectorAll('.row[data-btn]');
+      rows.forEach(function (r) {
+        var g = document.getElementById(r.getAttribute('data-btn'));
+        if (!g) return;
+        var on = function () { g.classList.add('hot'); };
+        var off = function () { g.classList.remove('hot'); };
+        r.addEventListener('mouseenter', on);
+        r.addEventListener('mouseleave', off);
+        r.addEventListener('focus', on);
+        r.addEventListener('blur', off);
+      });
+    } catch (e) { /* decorative only */ }
+  })();
+</script>
 
 <script>
   window.EJS_player = "#game";
@@ -73,7 +398,7 @@
   window.EJS_gameUrl = "superwaverace.sfc?v=dev";
   window.EJS_disableDatabases = true;
   window.EJS_pathtodata = "https://cdn.emulatorjs.org/4.2.3/data/";
-  window.EJS_backgroundColor = "#12151c";
+  window.EJS_backgroundColor = "#000000";
 </script>
 <script src="https://cdn.emulatorjs.org/4.2.3/data/loader.js"></script>
 
