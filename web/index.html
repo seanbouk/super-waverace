@@ -1,400 +1,672 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Super Waverace</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=Silkscreen:wght@400;700&display=swap" rel="stylesheet" />
 <style>
   :root {
-    --bg0: #0a0f1c;
-    --bg1: #0f1a2e;
-    --sea: #10273f;
-    --panel: #121c30;
-    --panel2: #16213a;
-    --line: #243352;
-    --ink: #e9eff8;
-    --dim: #8795ad;
-    --cyan: #5cc8e6;
-    --orange: #ff9e57;
-    --sun: #ffd166;
-    /* Super Famicom button colours */
-    --btn-a: #e24b4b;
-    --btn-b: #efc24a;
-    --btn-x: #4a90d9;
-    --btn-y: #4fb45c;
-    --grey: #39455f;
-    --grey-hi: #51607e;
+    --bg: #0a0b0d;
+    --ink: #d4d8dc;
+    --ink-dim: #7c838b;
+    --ink-faint: #4b5159;
+    --hair: #1c2026;
+    --led-on: #43ff84;
+    --led-off: #0e2716;
+    --phos: #5fff9e;
+
+    /* function-trace colours (CRT phosphors) */
+    --fn-steer: #56d6c2;
+    --fn-accel: #5fff9e;
+    --fn-reverse: #9b8cff;
+    --fn-confirm: #ffc24d;
+    --fn-pause: #ff6f91;
+
+    --col: 900px;
+    --mon-w: 900px;
   }
+
   * { box-sizing: border-box; }
-  html, body { overflow-x: hidden; max-width: 100%; }
-  html { -webkit-text-size-adjust: 100%; }
-  h1, h2, h3 { overflow-wrap: break-word; }
+  html, body { margin: 0; padding: 0; overflow-x: hidden; }
+
   body {
-    margin: 0;
-    min-height: 100vh;
-    color: var(--ink);
-    font: 15px/1.6 "Inter", system-ui, sans-serif;
     background:
-      radial-gradient(1200px 500px at 50% -10%, rgba(255,158,87,0.10), transparent 60%),
-      radial-gradient(900px 600px at 50% 120%, rgba(92,200,230,0.08), transparent 60%),
-      linear-gradient(180deg, var(--bg0) 0%, var(--bg1) 45%, var(--sea) 100%);
-    background-attachment: fixed;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    padding: 28px 16px 40px;
+      radial-gradient(120% 80% at 50% -10%, #14171c 0%, var(--bg) 55%) fixed,
+      var(--bg);
+    color: var(--ink);
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 15px;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+    padding: 0 0 36px;
   }
-  .wrap { width: 100%; max-width: 920px; }
 
-  /* ---- header ---- */
-  header { text-align: center; margin-bottom: 20px; }
-  .eyebrow {
-    font-family: "Press Start 2P", monospace;
-    font-size: 10px;
-    letter-spacing: 2px;
-    color: var(--cyan);
-    text-transform: uppercase;
-    margin-bottom: 14px;
-  }
-  h1 {
-    font-family: "Press Start 2P", monospace;
-    font-size: clamp(17px, 5.2vw, 32px);
-    line-height: 1.35;
-    margin: 0;
-    color: #fff;
-    text-shadow: 0 2px 0 #0a1526, 0 0 18px rgba(92,200,230,0.35),
-                 0 0 32px rgba(255,158,87,0.20);
-  }
-  .tags {
-    display: flex; flex-wrap: wrap; gap: 8px;
-    justify-content: center; margin-top: 16px;
-  }
-  .tag {
-    font-size: 11.5px; font-weight: 600; letter-spacing: .3px;
-    color: var(--dim);
-    background: rgba(255,255,255,0.04);
-    border: 1px solid var(--line);
-    border-radius: 999px;
-    padding: 4px 11px;
-  }
-  .tag b { color: var(--ink); font-weight: 700; }
-
-  /* ---- game screen (CRT bezel) ---- */
-  .screen {
-    position: relative;
+  .col {
+    width: var(--col);
+    max-width: calc(100vw - 32px);
     margin: 0 auto;
-    padding: 14px;
-    border-radius: 16px;
-    background: linear-gradient(180deg, #1b2740, #0c1322);
-    border: 1px solid var(--line);
-    box-shadow: 0 1px 0 rgba(255,255,255,0.05) inset,
-                0 24px 60px rgba(0,0,0,0.5),
-                0 0 0 1px rgba(0,0,0,0.4);
   }
-  #frame {
-    width: 100%;
-    aspect-ratio: 256 / 224;
+
+  /* ---------- monitor band ---------- */
+  .monitor-band {
+    width: 100vw;
+    margin-left: calc(50% - 50vw);
+    display: flex;
+    justify-content: center;
+    padding: 26px 0 0;
+  }
+  .monitor {
+    width: var(--col);
+    max-width: 100vw;
+    aspect-ratio: 4 / 3;
+    position: relative;
+    filter: drop-shadow(0 24px 46px rgba(0,0,0,0.7));
+  }
+  .screen { position: absolute; inset: 0; }
+  /* picture tube — the game clipped to a squircle (thin black bezel, CRT shape) */
+  .tube {
+    position: absolute;
+    inset: 0;
     background: #000;
-    border-radius: 8px;
     overflow: hidden;
-    box-shadow: 0 0 0 2px #05090f, 0 0 40px rgba(92,200,230,0.12) inset;
+    clip-path: url(#crt-squircle);
+    box-shadow:
+      0 0 26px 10px rgba(0,0,0,0.45) inset,
+      0 0 0 2px rgba(0,0,0,0.5) inset;
   }
-  .screen::after {
-    /* a faint power LED */
-    content: "";
-    position: absolute; right: 16px; bottom: 8px;
-    width: 6px; height: 6px; border-radius: 50%;
-    background: var(--btn-y);
-    box-shadow: 0 0 8px var(--btn-y);
+  /* the EmulatorJS player mounts into #game; the PVM transforms scale it */
+  #game {
+    position: absolute; inset: 0;
+    width: 100%; height: 100%;
+    transform-origin: center center;
+    background: #000;
+    transition: transform 420ms cubic-bezier(0.16,0.9,0.3,1.2),
+                opacity 200ms ease-out, filter 340ms ease-out;
   }
-  /* the game is 256px upscaled ~3.5x - keep it NEAREST-NEIGHBOUR so the
-     sky's 4px dither stays crisp instead of being bilinear-blurred into a
-     smooth gradient (the "lost dithering" was the browser's smooth upscale,
-     not the ROM). */
+  /* keep the pixel dither crisp - never bilinear-blur the upscale */
   #game canvas {
     image-rendering: pixelated;
     image-rendering: crisp-edges;
   }
 
-  .cta { text-align: center; margin: 18px 0 6px; }
-  .btn-dl {
-    display: inline-flex; align-items: center; gap: 8px;
-    font-weight: 700; font-size: 14px; letter-spacing: .3px;
-    color: #06202a;
-    background: linear-gradient(180deg, #7fe0f6, var(--cyan));
-    border: none; border-radius: 10px;
-    padding: 10px 18px;
-    text-decoration: none;
-    box-shadow: 0 6px 18px rgba(92,200,230,0.28);
+  /* fullscreen "PROJECT" mode */
+  .monitor:fullscreen, .monitor:-webkit-full-screen {
+    width: 100vw; height: 100vh; max-width: none;
+    background: #000;
+    display: flex; align-items: center; justify-content: center;
+    aspect-ratio: auto;
   }
-  .btn-dl:hover { filter: brightness(1.06); }
-  .btn-dl small { color: #0a2a36; font-weight: 600; opacity: .8; }
+  .monitor:fullscreen .screen, .monitor:-webkit-full-screen .screen {
+    position: relative; inset: auto;
+    width: min(100vw, calc(100vh * 4 / 3));
+    height: auto; aspect-ratio: 4 / 3;
+  }
 
-  /* ---- controls panel ---- */
+  /* ---------- PVM control panel ---------- */
   .panel {
-    margin-top: 26px;
-    background: linear-gradient(180deg, var(--panel), var(--panel2));
-    border: 1px solid var(--line);
-    border-radius: 14px;
-    padding: 20px;
+    width: var(--mon-w);
+    max-width: calc(100vw - 32px);
+    margin: 16px auto 0;
+    background: linear-gradient(180deg, #2b2e33, #1a1c20);
+    border: 1px solid #000;
+    border-radius: 10px;
+    box-shadow: 0 1px 0 rgba(255,255,255,0.05) inset, 0 10px 30px -16px #000;
+    padding: 16px 22px 14px;
+    display: flex;
+    align-items: flex-start;
+    gap: 22px;
+    flex-wrap: wrap;
   }
-  .panel h2 {
-    font-family: "Press Start 2P", monospace;
-    font-size: 12px; letter-spacing: 1px;
-    color: var(--sun);
-    margin: 2px 0 18px;
-    text-transform: uppercase;
+  .pgroup { display: flex; flex-direction: column; gap: 10px; }
+  .pgroup > .glabel {
+    font-family: "Silkscreen", monospace;
+    font-size: 9px; letter-spacing: 2px; text-transform: uppercase;
+    color: var(--ink-dim);
   }
-  .controls {
+  .pbtns { display: flex; gap: 16px; }
+  .pdiv { width: 1px; align-self: stretch; background: #000; box-shadow: 1px 0 0 rgba(255,255,255,0.05); }
+
+  .pvm-btn {
+    appearance: none;
+    background: none; border: 0; padding: 0; margin: 0;
+    cursor: pointer; text-decoration: none;
+    display: flex; flex-direction: column; align-items: center; gap: 7px;
+    width: 52px;
+  }
+  .led {
+    width: 9px; height: 9px; border-radius: 50%;
+    background: var(--led-off);
+    box-shadow: inset 0 0 2px #000, 0 0 0 1px #000;
+    transition: background 160ms, box-shadow 160ms;
+  }
+  .pvm-btn[aria-pressed="true"] .led, .pvm-btn.on .led {
+    background: var(--led-on);
+    box-shadow: 0 0 7px var(--led-on), inset 0 0 2px #d6ffe6, 0 0 0 1px #0a3b1d;
+  }
+  .cap {
+    width: 38px; height: 28px; border-radius: 5px;
+    background: linear-gradient(180deg, #e2e2dc, #b4b4ac 70%, #9a9a92);
+    border: 1px solid #000;
+    box-shadow: 0 4px 0 #050505, 0 5px 6px -2px rgba(0,0,0,0.6);
+    transition: transform 120ms cubic-bezier(0.34,1.42,0.64,1), box-shadow 120ms, filter 120ms;
+    display: flex; align-items: center; justify-content: center;
+    color: #3a3a34;
+  }
+  .pvm-btn:hover .cap { filter: brightness(1.05); }
+  .pvm-btn:active .cap, .pvm-btn[aria-pressed="true"] .cap, .pvm-btn.on .cap {
+    transform: translateY(3px);
+    box-shadow: 0 1px 0 #050505, 0 2px 3px -1px rgba(0,0,0,0.6);
+    background: linear-gradient(180deg, #cfcfc8, #a6a69e 70%, #8e8e86);
+  }
+  .cap svg { width: 16px; height: 16px; display: block; }
+  .clabel {
+    font-family: "Silkscreen", monospace;
+    font-size: 8px; letter-spacing: 1px; text-transform: uppercase;
+    color: var(--ink-dim); text-align: center; line-height: 1.3;
+  }
+  .panel-readout {
+    margin-left: auto; align-self: center; text-align: right;
+    font-size: 11px; letter-spacing: 1px;
+    color: var(--ink-dim); text-transform: uppercase;
+  }
+  .panel-readout b { color: var(--phos); font-weight: 600; }
+
+  /* ---------- section heading ---------- */
+  .section { margin-top: 58px; }
+  .section > h2 {
+    font-family: "Silkscreen", monospace;
+    font-size: 15px; letter-spacing: 2px; text-transform: uppercase;
+    margin: 0 0 4px; color: var(--ink);
+  }
+  .section > .sub { color: var(--ink-dim); font-size: 13px; margin: 0 0 26px; }
+
+  /* ---------- controls diagram ---------- */
+  .diagram { position: relative; }
+  svg.wires {
+    position: absolute; inset: 0;
+    width: 100%; height: 100%;
+    pointer-events: none; z-index: 0; overflow: visible;
+  }
+  .diagram > * { position: relative; z-index: 1; }
+  .diagram > svg.wires { position: absolute; inset: 0; z-index: 0; }
+
+  .controller-wrap { display: flex; justify-content: center; }
+  .snespad { position: relative; width: 430px; max-width: 94%; }
+  .snespad img { display: block; width: 100%; height: auto;
+    filter: drop-shadow(0 16px 30px rgba(0,0,0,0.55)); }
+  .cpad-anchor {
+    position: absolute;
+    transform: translate(-50%, -50%);
+    aspect-ratio: 1 / 1;
+    border-radius: 50%;
+    border: 2.5px solid var(--c);
+    box-shadow: 0 0 9px -1px var(--c), inset 0 0 6px -2px var(--c);
+    opacity: 0.92;
+    pointer-events: none;
+  }
+
+  /* function nodes */
+  .functions {
     display: grid;
-    grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
-    gap: 24px;
-    align-items: center;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 14px;
+    margin: 58px 0;
   }
-  @media (max-width: 640px) {
-    .controls { grid-template-columns: 1fr; gap: 20px; }
+  @media (max-width: 720px) {
+    .functions { grid-template-columns: repeat(2, 1fr); }
   }
-  .pad { width: 100%; max-width: 100%; height: auto; display: block; }
-  .pad .face-ring { transition: filter .15s, transform .15s; transform-box: fill-box; transform-origin: center; }
-  .pad g.hot .face-ring, .pad g.hot rect, .pad g.hot path { filter: brightness(1.35) drop-shadow(0 0 6px currentColor); }
-  .pad g.hot { transform: scale(1.06); transform-box: fill-box; transform-origin: center; }
+  .fn {
+    --c: var(--ink);
+    background: linear-gradient(180deg, #181b20, #111317);
+    border: 1px solid var(--hair);
+    border-top: 2px solid var(--c);
+    border-radius: 8px;
+    padding: 14px 12px 12px;
+    text-align: center;
+    box-shadow: 0 6px 18px -12px #000;
+  }
+  .fn .fn-name {
+    font-family: "Silkscreen", monospace;
+    font-size: 10px; letter-spacing: 1px; text-transform: uppercase;
+    color: var(--c); margin-bottom: 7px;
+  }
+  .fn .fn-desc { font-size: 12px; color: var(--ink); line-height: 1.35; }
+  .fn .fn-desc b { color: var(--c); }
+  .fn .fn-keys {
+    margin-top: 9px; font-size: 11px; color: var(--ink-dim);
+    display: flex; gap: 5px; justify-content: center; flex-wrap: wrap;
+  }
+  .fn .fn-keys kbd {
+    font-family: "IBM Plex Mono", monospace;
+    background: #0c0e11; border: 1px solid #2a2f36; border-bottom-width: 2px;
+    border-radius: 4px; padding: 1px 6px; color: var(--ink); font-size: 11px;
+  }
 
-  .map { display: flex; flex-direction: column; gap: 16px; }
-  .map h3 {
-    font-size: 11px; text-transform: uppercase; letter-spacing: 1.5px;
-    color: var(--dim); margin: 0 0 8px; font-weight: 700;
+  /* keyboard */
+  .keyboard-wrap { display: flex; justify-content: center; overflow-x: auto; padding-bottom: 4px; }
+  .keyboard {
+    background: linear-gradient(180deg, #2a2d32, #16181c);
+    border: 1px solid #000;
+    border-radius: 12px;
+    padding: 14px;
+    box-shadow: 0 1px 0 rgba(255,255,255,0.05) inset, 0 18px 40px -22px #000;
+    display: flex; gap: 16px; align-items: flex-end;
   }
-  .row {
-    display: flex; align-items: center; gap: 11px;
-    padding: 6px 8px; border-radius: 8px;
-    cursor: default;
+  .kb-main { display: flex; flex-direction: column; gap: 6px; }
+  .krow { display: flex; gap: 6px; }
+  .key {
+    height: 34px; min-width: 34px;
+    border-radius: 5px;
+    background: linear-gradient(180deg, #3a3e44, #24272c);
+    border: 1px solid #000;
+    box-shadow: 0 2px 0 #000, 0 1px 0 rgba(255,255,255,0.06) inset;
+    color: var(--ink-dim); font-size: 11px;
+    display: flex; align-items: center; justify-content: center;
+    position: relative; padding: 0 7px; flex: 0 0 auto; white-space: nowrap;
   }
-  .row:hover { background: rgba(255,255,255,0.045); }
-  .chip {
-    flex: none;
-    min-width: 30px; height: 26px; padding: 0 7px;
-    display: inline-flex; align-items: center; justify-content: center;
-    border-radius: 7px;
-    font-weight: 800; font-size: 12.5px; color: #10151f;
-    box-shadow: 0 2px 0 rgba(0,0,0,0.35), 0 0 0 1px rgba(0,0,0,0.25);
+  .key.wide { min-width: 56px; }
+  .key.tab { min-width: 52px; }
+  .key.caps { min-width: 62px; }
+  .key.shift { min-width: 86px; }
+  .key.enter { min-width: 78px; }
+  .key.space { min-width: 240px; flex: 1; }
+  .key .sub { position: absolute; top: 3px; left: 6px; font-size: 9px; color: var(--ink-faint); }
+  .key.hl {
+    color: #0b0d10;
+    background: linear-gradient(180deg, var(--c), color-mix(in oklab, var(--c), #000 28%));
+    border-color: #000;
+    box-shadow: 0 0 12px -1px var(--c), 0 2px 0 #000;
+    font-weight: 700;
   }
-  .chip.a { background: var(--btn-a); color:#fff; }
-  .chip.b { background: var(--btn-b); }
-  .chip.y { background: var(--btn-y); color:#06240d; }
-  .chip.x { background: var(--btn-x); color:#fff; }
-  .chip.grey { background: var(--grey-hi); color: var(--ink); font-size: 11px; }
-  .row .act { font-size: 14px; }
-  .row .act b { font-weight: 700; }
-  .row .act span { color: var(--dim); }
+  .key.hl .sub { color: rgba(0,0,0,0.55); }
+  .kb-arrows { display: flex; flex-direction: column; gap: 6px; align-items: center; }
+  .kb-arrows .krow { justify-content: center; }
 
-  .keys {
-    margin-top: 18px; padding-top: 16px;
-    border-top: 1px dashed var(--line);
-    color: var(--dim); font-size: 12.5px; line-height: 1.9;
+  .legend {
+    display: flex; gap: 18px; flex-wrap: wrap; justify-content: center;
+    margin-top: 22px; font-size: 11px; color: var(--ink-dim);
+    text-transform: uppercase; letter-spacing: 1px;
   }
-  .keys kbd {
-    font-family: "Inter", sans-serif; font-size: 11.5px; font-weight: 600;
-    color: var(--ink);
-    background: #0c1424; border: 1px solid var(--line);
-    border-bottom-width: 2px; border-radius: 5px;
-    padding: 1px 6px; margin: 0 1px;
-  }
+  .legend span { display: inline-flex; align-items: center; gap: 7px; }
+  .legend i { width: 14px; height: 3px; border-radius: 2px; display: inline-block; }
 
   footer {
-    text-align: center; color: var(--dim); font-size: 12px;
-    margin-top: 26px; line-height: 1.8;
+    margin-top: 60px;
+    border-top: 1px solid var(--hair);
+    padding-top: 18px;
+    font-size: 11px; letter-spacing: 1px; text-transform: uppercase;
+    color: var(--ink-faint);
+    display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap;
   }
-  footer a { color: var(--cyan); text-decoration: none; }
-  footer a:hover { text-decoration: underline; }
+  footer a { color: var(--ink-dim); text-decoration: none; }
+  footer a:hover { color: var(--phos); }
 </style>
 </head>
 <body>
-<div class="wrap">
 
-  <header>
-    <div class="eyebrow">Super Nintendo &middot; Mode 7</div>
-    <h1>SUPER WAVERACE</h1>
-    <div class="tags">
-      <span class="tag"><b>Status:</b> In development</span>
-      <span class="tag"><b>Platform:</b> SNES (LoROM)</span>
-      <span class="tag"><b>Author:</b> seanbouk</span>
-    </div>
-  </header>
+  <!-- squircle clip for the CRT glass (objectBoundingBox = scales with the screen) -->
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <defs>
+      <clipPath id="crt-squircle" clipPathUnits="objectBoundingBox">
+        <path d="M 0.5,0 Q 0.82,0 0.95,0.015 Q 0.99,0.03 0.995,0.07 Q 1,0.18 1,0.5 Q 1,0.82 0.995,0.93 Q 0.99,0.97 0.95,0.985 Q 0.82,1 0.5,1 Q 0.18,1 0.05,0.985 Q 0.01,0.97 0.005,0.93 Q 0,0.82 0,0.5 Q 0,0.18 0.005,0.07 Q 0.01,0.03 0.05,0.015 Q 0.18,0 0.5,0 Z" />
+      </clipPath>
+    </defs>
+  </svg>
 
-  <div class="screen">
-    <div id="frame"><div id="game"></div></div>
-  </div>
-
-  <div class="cta">
-    <a class="btn-dl" href="superwaverace.sfc" download>
-      &#x2193;&nbsp;Download the ROM <small>.sfc</small>
-    </a>
-  </div>
-
-  <section class="panel">
-    <h2>Controls</h2>
-    <div class="controls">
-
-      <!-- SNES joypad (Super Famicom colours) -->
-      <svg class="pad" viewBox="0 0 560 300" role="img"
-           aria-label="SNES controller button map">
-        <defs>
-          <linearGradient id="body" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0" stop-color="#e9edf4"/>
-            <stop offset="1" stop-color="#b9c1d0"/>
-          </linearGradient>
-          <linearGradient id="bodyedge" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0" stop-color="#ffffff"/>
-            <stop offset="1" stop-color="#9aa3b4"/>
-          </linearGradient>
-        </defs>
-
-        <!-- shoulder buttons -->
-        <rect x="92"  y="54" width="96" height="30" rx="12" fill="#c8cedb"/>
-        <rect x="372" y="54" width="96" height="30" rx="12" fill="#c8cedb"/>
-        <text x="140" y="75" text-anchor="middle" font-family="Inter" font-weight="800"
-              font-size="15" fill="#55607a">L</text>
-        <text x="420" y="75" text-anchor="middle" font-family="Inter" font-weight="800"
-              font-size="15" fill="#55607a">R</text>
-
-        <!-- body -->
-        <rect x="40" y="70" width="480" height="168" rx="84"
-              fill="url(#bodyedge)"/>
-        <rect x="46" y="76" width="468" height="156" rx="78"
-              fill="url(#body)"/>
-
-        <!-- D-pad (left) -->
-        <g id="btn-dpad" style="color:#2b3345">
-          <rect x="112" y="135" width="86" height="30" rx="6" fill="#2b3345"/>
-          <rect x="140" y="107" width="30" height="86" rx="6" fill="#2b3345"/>
-          <circle cx="155" cy="150" r="10" fill="#222a39"/>
-        </g>
-
-        <!-- Start / Select -->
-        <g id="btn-select" style="color:#39455f">
-          <rect x="238" y="170" width="38" height="13" rx="6.5" fill="#39455f"
-                transform="rotate(-22 257 176)"/>
-        </g>
-        <g id="btn-start" style="color:#39455f">
-          <rect x="286" y="170" width="38" height="13" rx="6.5" fill="#39455f"
-                transform="rotate(-22 305 176)"/>
-        </g>
-        <text x="257" y="205" text-anchor="middle" font-family="Inter" font-weight="700"
-              font-size="10" fill="#7b8599">SELECT</text>
-        <text x="305" y="205" text-anchor="middle" font-family="Inter" font-weight="700"
-              font-size="10" fill="#7b8599">START</text>
-
-        <!-- face buttons (right): X top, Y left, A right, B bottom -->
-        <g id="btn-x" style="color:var(--btn-x)">
-          <circle class="face-ring" cx="430" cy="112" r="20" fill="#4a90d9"/>
-          <text x="430" y="117" text-anchor="middle" font-family="Inter"
-                font-weight="800" font-size="16" fill="#fff">X</text>
-        </g>
-        <g id="btn-y" style="color:var(--btn-y)">
-          <circle class="face-ring" cx="392" cy="150" r="20" fill="#4fb45c"/>
-          <text x="392" y="155" text-anchor="middle" font-family="Inter"
-                font-weight="800" font-size="16" fill="#06240d">Y</text>
-        </g>
-        <g id="btn-a" style="color:var(--btn-a)">
-          <circle class="face-ring" cx="468" cy="150" r="20" fill="#e24b4b"/>
-          <text x="468" y="155" text-anchor="middle" font-family="Inter"
-                font-weight="800" font-size="16" fill="#fff">A</text>
-        </g>
-        <g id="btn-b" style="color:var(--btn-b)">
-          <circle class="face-ring" cx="430" cy="188" r="20" fill="#efc24a"/>
-          <text x="430" y="193" text-anchor="middle" font-family="Inter"
-                font-weight="800" font-size="16" fill="#3a2c05">B</text>
-        </g>
-      </svg>
-
-      <!-- mapping -->
-      <div class="map">
-        <div>
-          <h3>Racing</h3>
-          <div class="row" data-btn="btn-dpad">
-            <span class="chip grey">&#9664;&#9654;</span>
-            <span class="act"><b>Steer</b></span>
-          </div>
-          <div class="row" data-btn="btn-b">
-            <span class="chip b">B</span>
-            <span class="act"><b>Accelerate</b></span>
-          </div>
-          <div class="row" data-btn="btn-y">
-            <span class="chip y">Y</span>
-            <span class="act"><b>Reverse</b></span>
-          </div>
-          <div class="row" data-btn="btn-start">
-            <span class="chip grey">START</span>
-            <span class="act"><b>Pause</b></span>
-          </div>
-        </div>
-        <div>
-          <h3>Menus</h3>
-          <div class="row" data-btn="btn-dpad">
-            <span class="chip grey">&#9650;&#9660;</span>
-            <span class="act"><b>Navigate</b></span>
-          </div>
-          <div class="row" data-btn="btn-a">
-            <span class="chip a">A</span>
-            <span class="act"><b>Confirm</b> <span>/ Start</span></span>
-          </div>
-          <div class="row" data-btn="btn-b">
-            <span class="chip b">B</span>
-            <span class="act"><b>Back</b></span>
-          </div>
+  <!-- ===================== MONITOR ===================== -->
+  <div class="monitor-band">
+    <div class="monitor" id="monitor">
+      <div class="screen">
+        <div class="tube">
+          <div id="game"></div>
         </div>
       </div>
     </div>
+  </div>
 
-    <div class="keys">
-      <b style="color:var(--ink)">Keyboard</b> &nbsp;
-      <kbd>&larr;</kbd><kbd>&rarr;</kbd> steer &middot;
-      <kbd>Z</kbd> B &middot; <kbd>A</kbd> Y &middot; <kbd>X</kbd> A &middot; <kbd>S</kbd> X &middot;
-      <kbd>Enter</kbd> Start &middot; <kbd>Shift</kbd> Select &middot;
-      gamepads supported.
+  <!-- ===================== CONTROL PANEL ===================== -->
+  <div class="panel" id="panel">
+    <div class="pgroup">
+      <span class="glabel">Output</span>
+      <div class="pbtns">
+        <button class="pvm-btn" id="project-btn" title="Fullscreen">
+          <span class="led"></span>
+          <span class="cap"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M2 6V2h4M14 6V2h-4M2 10v4h4M14 10v4h-4"/></svg></span>
+          <span class="clabel">Project</span>
+        </button>
+      </div>
     </div>
-  </section>
+
+    <div class="pdiv"></div>
+
+    <div class="pgroup">
+      <span class="glabel">Scan</span>
+      <div class="pbtns" id="scan-group">
+        <button class="pvm-btn" data-scan="under"><span class="led"></span><span class="cap"></span><span class="clabel">Under<br />Scan</span></button>
+        <button class="pvm-btn" data-scan="over"><span class="led"></span><span class="cap"></span><span class="clabel">Over<br />Scan</span></button>
+      </div>
+    </div>
+
+    <div class="pdiv"></div>
+
+    <div class="pgroup">
+      <span class="glabel">Geometry</span>
+      <div class="pbtns">
+        <button class="pvm-btn" id="hsize-btn"><span class="led"></span><span class="cap"></span><span class="clabel">H<br />Size</span></button>
+      </div>
+    </div>
+
+    <div class="pdiv"></div>
+
+    <div class="pgroup">
+      <span class="glabel">Media</span>
+      <div class="pbtns">
+        <a class="pvm-btn on" id="download-btn" href="superwaverace.sfc" download title="Download the ROM">
+          <span class="led"></span>
+          <span class="cap"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M8 2v8m0 0 3-3m-3 3L5 7M3 13h10"/></svg></span>
+          <span class="clabel">ROM</span>
+        </a>
+      </div>
+    </div>
+
+    <div class="pgroup" style="margin-left:auto;">
+      <span class="glabel">Power</span>
+      <div class="pbtns">
+        <button class="pvm-btn on" id="power-btn"><span class="led"></span><span class="cap"></span><span class="clabel">Power</span></button>
+      </div>
+    </div>
+
+    <div class="panel-readout">SNES &middot; <b>MODE 7</b><br />In development</div>
+  </div>
+
+  <!-- ===================== CONTROLS DIAGRAM ===================== -->
+  <div class="col section" style="margin-top:46px">
+    <h2>Controls</h2>
+    <p class="sub">Keyboard, or plug in a gamepad. Lines trace each pad button to its key.</p>
+
+    <div class="diagram" id="diagram">
+      <svg class="wires" id="wires" aria-hidden="true"></svg>
+
+      <!-- SNES CONTROLLER (photo) -->
+      <div class="controller-wrap">
+        <div class="snespad" id="snespad">
+          <img src="assets/snes-pad.png" alt="Super Nintendo controller" />
+          <span class="cpad-anchor" id="c-dpad"  style="--c:var(--fn-steer);   left:20.6%; top:52%;   width:20%;"></span>
+          <span class="cpad-anchor" id="c-y"     style="--c:var(--fn-reverse); left:69.2%; top:51.5%; width:9%;"></span>
+          <span class="cpad-anchor" id="c-a"     style="--c:var(--fn-confirm); left:88%;   top:52%;   width:9%;"></span>
+          <span class="cpad-anchor" id="c-b"     style="--c:var(--fn-accel);   left:76.2%; top:69%;   width:9%;"></span>
+          <span class="cpad-anchor" id="c-start" style="--c:var(--fn-pause);   left:51.3%; top:57.5%; width:7%;"></span>
+        </div>
+      </div>
+
+      <!-- FUNCTION NODES -->
+      <div class="functions" id="functions">
+        <div class="fn" id="f-steer" style="--c: var(--fn-steer)">
+          <div class="fn-name">Steer</div>
+          <div class="fn-desc"><b>D-pad</b> left / right. Also moves menu cursors.</div>
+          <div class="fn-keys"><kbd>&larr;</kbd><kbd>&rarr;</kbd></div>
+        </div>
+        <div class="fn" id="f-accel" style="--c: var(--fn-accel)">
+          <div class="fn-name">Accelerate</div>
+          <div class="fn-desc"><b>B</b> throttle. (Back, in menus.)</div>
+          <div class="fn-keys"><kbd>Z</kbd></div>
+        </div>
+        <div class="fn" id="f-reverse" style="--c: var(--fn-reverse)">
+          <div class="fn-name">Reverse</div>
+          <div class="fn-desc"><b>Y</b> reverses at half thrust.</div>
+          <div class="fn-keys"><kbd>A</kbd></div>
+        </div>
+        <div class="fn" id="f-confirm" style="--c: var(--fn-confirm)">
+          <div class="fn-name">Confirm</div>
+          <div class="fn-desc"><b>A</b> selects a menu choice.</div>
+          <div class="fn-keys"><kbd>X</kbd></div>
+        </div>
+        <div class="fn" id="f-pause" style="--c: var(--fn-pause)">
+          <div class="fn-name">Start / Pause</div>
+          <div class="fn-desc"><b>Start</b> races, pauses &amp; confirms.</div>
+          <div class="fn-keys"><kbd>Enter</kbd></div>
+        </div>
+      </div>
+
+      <!-- KEYBOARD (built by JS) -->
+      <div class="keyboard-wrap">
+        <div class="keyboard" id="keyboard"></div>
+      </div>
+    </div>
+
+    <div class="legend" id="legend">
+      <span><i style="background:var(--fn-steer)"></i>Steer</span>
+      <span><i style="background:var(--fn-accel)"></i>Accelerate</span>
+      <span><i style="background:var(--fn-reverse)"></i>Reverse</span>
+      <span><i style="background:var(--fn-confirm)"></i>Confirm</span>
+      <span><i style="background:var(--fn-pause)"></i>Start / Pause</span>
+    </div>
+  </div>
 
   <footer>
-    A Mode 7 SNES jet-ski racer, in development &mdash; built from
-    <code>main</code>, emulated in-browser by EmulatorJS (snes9x core).
+    <span>Super Waverace &middot; Mode 7 SNES</span>
+    <span>Emulation: EmulatorJS (snes9x) &middot; <a href="superwaverace.sfc" download>Download ROM</a></span>
   </footer>
 
-</div>
-
 <script>
-  // cross-highlight: hovering a mapping row lights up its pad button
-  (function () {
+/* ============================================================
+   Super Waverace — PVM panel + controller/keyboard wiring
+   (adapted from the Night Rider retro host)
+   ============================================================ */
+(function () {
+  "use strict";
+
+  var DEFAULTS = { scan: null, hsize: false, power: true };
+  var state = load();
+  function load() {
     try {
-      var rows = document.querySelectorAll('.row[data-btn]');
-      rows.forEach(function (r) {
-        var g = document.getElementById(r.getAttribute('data-btn'));
-        if (!g) return;
-        var on = function () { g.classList.add('hot'); };
-        var off = function () { g.classList.remove('hot'); };
-        r.addEventListener('mouseenter', on);
-        r.addEventListener('mouseleave', off);
-        r.addEventListener('focus', on);
-        r.addEventListener('blur', off);
+      var s = JSON.parse(localStorage.getItem("swr-crt-state"));
+      if (s && typeof s === "object") {
+        return {
+          scan: s.scan === "under" || s.scan === "over" ? s.scan : null,
+          hsize: !!s.hsize,
+          power: s.power !== false
+        };
+      }
+    } catch (e) {}
+    return Object.assign({}, DEFAULTS);
+  }
+  function save() { try { localStorage.setItem("swr-crt-state", JSON.stringify(state)); } catch (e) {} }
+
+  var UNDER = 0.90, OVER = 1.08, HSIZE = 1.18;
+  var game = document.getElementById("game");
+
+  function apply() {
+    var s = state.scan === "under" ? UNDER : state.scan === "over" ? OVER : 1;
+    var sx = s * (state.hsize ? HSIZE : 1);
+    var sy = s * (state.power ? 1 : 0.006);
+    game.style.transform = "scale(" + sx.toFixed(4) + ", " + sy.toFixed(4) + ")";
+    game.style.opacity = state.power ? "1" : "0";
+    game.style.filter = state.power ? "brightness(1)" : "brightness(1.9)";
+    document.getElementById("power-btn").classList.toggle("on", state.power);
+    document.querySelectorAll("#scan-group .pvm-btn").forEach(function (b) {
+      b.classList.toggle("on", b.dataset.scan === state.scan);
+    });
+    document.getElementById("hsize-btn").classList.toggle("on", state.hsize);
+    save();
+  }
+
+  document.getElementById("power-btn").addEventListener("click", function () { state.power = !state.power; apply(); });
+  document.getElementById("scan-group").addEventListener("click", function (e) {
+    var b = e.target.closest(".pvm-btn"); if (!b) return;
+    state.scan = state.scan === b.dataset.scan ? null : b.dataset.scan; apply();
+  });
+  document.getElementById("hsize-btn").addEventListener("click", function () { state.hsize = !state.hsize; apply(); });
+
+  var monitor = document.getElementById("monitor");
+  var projectBtn = document.getElementById("project-btn");
+  projectBtn.addEventListener("click", function () {
+    var fsEl = document.fullscreenElement || document.webkitFullscreenElement;
+    if (fsEl) { (document.exitFullscreen || document.webkitExitFullscreen).call(document); }
+    else { (monitor.requestFullscreen || monitor.webkitRequestFullscreen).call(monitor); }
+  });
+  function onFs() {
+    var fsEl = document.fullscreenElement || document.webkitFullscreenElement;
+    projectBtn.classList.toggle("on", fsEl === monitor);
+  }
+  document.addEventListener("fullscreenchange", onFs);
+  document.addEventListener("webkitfullscreenchange", onFs);
+
+  /* ---------- keyboard ---------- */
+  var FN_VAR = {
+    steer: "--fn-steer", accel: "--fn-accel", reverse: "--fn-reverse",
+    confirm: "--fn-confirm", pause: "--fn-pause"
+  };
+  var KEYMAP = {
+    "Z": { id: "k-Z", fn: "accel" },
+    "A": { id: "k-A", fn: "reverse" },
+    "X": { id: "k-X", fn: "confirm" },
+    "Enter": { id: "k-Enter", fn: "pause" }
+  };
+  var ROWS = [
+    ["`", "1", "2", "3", "4", "5", "6", "7", "8", "9", "0", "-", "=", { l: "⌫", cls: "wide" }],
+    [{ l: "Tab", cls: "tab" }, "Q", "W", "E", "R", "T", "Y", "U", "I", "O", "P", "[", "]", "\\"],
+    [{ l: "Caps", cls: "caps" }, "A", "S", "D", "F", "G", "H", "J", "K", "L", ";", "'", { l: "Enter", cls: "enter" }],
+    [{ l: "Shift", cls: "shift" }, "Z", "X", "C", "V", "B", "N", "M", ",", ".", "/", { l: "Shift", cls: "shift" }],
+    [{ l: "Ctrl", cls: "wide" }, { l: "Alt", cls: "wide" }, { l: "Space", cls: "space" }, { l: "Alt", cls: "wide" }, { l: "Ctrl", cls: "wide" }]
+  ];
+
+  function makeKey(spec) {
+    var label = typeof spec === "string" ? spec : spec.l;
+    var key = document.createElement("div");
+    key.className = "key" + (typeof spec === "object" && spec.cls ? " " + spec.cls : "");
+    var mapKey = label === "Enter" ? "Enter" : (KEYMAP[label] ? label : null);
+    var m = mapKey && KEYMAP[mapKey];
+    if (m) {
+      key.id = m.id;
+      key.classList.add("hl");
+      key.style.setProperty("--c", "var(" + FN_VAR[m.fn] + ")");
+    }
+    key.appendChild(document.createTextNode(label));
+    return key;
+  }
+  function makeArrow(glyph, id) {
+    var k = document.createElement("div");
+    k.className = "key hl"; k.id = id;
+    k.style.setProperty("--c", "var(--fn-steer)");
+    k.textContent = glyph;
+    return k;
+  }
+  function buildKeyboard() {
+    var kb = document.getElementById("keyboard");
+    kb.innerHTML = "";
+    var main = document.createElement("div");
+    main.className = "kb-main";
+    ROWS.forEach(function (row) {
+      var r = document.createElement("div"); r.className = "krow";
+      row.forEach(function (spec) { r.appendChild(makeKey(spec)); });
+      main.appendChild(r);
+    });
+    kb.appendChild(main);
+    var arrows = document.createElement("div");
+    arrows.className = "kb-arrows";
+    var up = document.createElement("div"); up.className = "krow";
+    up.appendChild(makeArrow("↑", "k-Up"));
+    var bottom = document.createElement("div"); bottom.className = "krow";
+    bottom.appendChild(makeArrow("←", "k-Left"));
+    bottom.appendChild(makeArrow("↓", "k-Down"));
+    bottom.appendChild(makeArrow("→", "k-Right"));
+    arrows.appendChild(up); arrows.appendChild(bottom);
+    kb.appendChild(arrows);
+  }
+
+  /* ---------- wires: controller -> function -> keyboard ---------- */
+  var CONNECTIONS = [
+    ["c-dpad", "f-steer", "--fn-steer"],
+    ["c-b", "f-accel", "--fn-accel"],
+    ["c-y", "f-reverse", "--fn-reverse"],
+    ["c-a", "f-confirm", "--fn-confirm"],
+    ["c-start", "f-pause", "--fn-pause"],
+    ["f-steer", "k-Left", "--fn-steer"],
+    ["f-steer", "k-Right", "--fn-steer"],
+    ["f-accel", "k-Z", "--fn-accel"],
+    ["f-reverse", "k-A", "--fn-reverse"],
+    ["f-confirm", "k-X", "--fn-confirm"],
+    ["f-pause", "k-Enter", "--fn-pause"]
+  ];
+  var SVGNS = "http://www.w3.org/2000/svg";
+  function centerBottom(el, cont) {
+    var r = el.getBoundingClientRect(), c = cont.getBoundingClientRect();
+    return { x: r.left - c.left + r.width / 2, y: r.bottom - c.top };
+  }
+  function centerTop(el, cont) {
+    var r = el.getBoundingClientRect(), c = cont.getBoundingClientRect();
+    return { x: r.left - c.left + r.width / 2, y: r.top - c.top };
+  }
+  function drawWires() {
+    var diagram = document.getElementById("diagram");
+    var svg = document.getElementById("wires");
+    if (!diagram || !svg) return;
+    var w = diagram.clientWidth, h = diagram.clientHeight;
+    svg.setAttribute("width", w); svg.setAttribute("height", h);
+    svg.setAttribute("viewBox", "0 0 " + w + " " + h);
+    while (svg.firstChild) svg.removeChild(svg.firstChild);
+    CONNECTIONS.forEach(function (conn) {
+      var from = document.getElementById(conn[0]), to = document.getElementById(conn[1]);
+      if (!from || !to) return;
+      var a = centerBottom(from, diagram), b = centerTop(to, diagram);
+      if (b.y <= a.y) { var t = a; a = b; b = t; }
+      var dy = Math.max(28, (b.y - a.y) * 0.42);
+      var d = "M " + a.x + " " + a.y + " C " + a.x + " " + (a.y + dy) +
+              " " + b.x + " " + (b.y - dy) + " " + b.x + " " + b.y;
+      var color = "var(" + conn[2] + ")";
+      var glow = document.createElementNS(SVGNS, "path");
+      glow.setAttribute("d", d); glow.setAttribute("fill", "none");
+      glow.setAttribute("stroke", color); glow.setAttribute("stroke-width", "5");
+      glow.setAttribute("stroke-linecap", "round"); glow.setAttribute("opacity", "0.16");
+      svg.appendChild(glow);
+      var path = document.createElementNS(SVGNS, "path");
+      path.setAttribute("d", d); path.setAttribute("fill", "none");
+      path.setAttribute("stroke", color); path.setAttribute("stroke-width", "1.6");
+      path.setAttribute("stroke-linecap", "round"); path.setAttribute("opacity", "0.85");
+      svg.appendChild(path);
+      [a, b].forEach(function (p) {
+        var dot = document.createElementNS(SVGNS, "circle");
+        dot.setAttribute("cx", p.x); dot.setAttribute("cy", p.y);
+        dot.setAttribute("r", "2.6"); dot.setAttribute("fill", color);
+        svg.appendChild(dot);
       });
-    } catch (e) { /* decorative only */ }
-  })();
+    });
+  }
+  function debounce(fn, ms) { var t; return function () { clearTimeout(t); t = setTimeout(fn, ms); }; }
+
+  function boot() {
+    game.style.transition = "none";
+    apply();
+    requestAnimationFrame(function () { requestAnimationFrame(function () { game.style.transition = ""; }); });
+    buildKeyboard();
+    drawWires();
+    window.addEventListener("resize", debounce(drawWires, 80));
+    if (window.ResizeObserver) { new ResizeObserver(debounce(drawWires, 60)).observe(document.getElementById("diagram")); }
+    if (document.fonts && document.fonts.ready) { document.fonts.ready.then(drawWires); }
+    var img = document.querySelector(".snespad img");
+    if (img && !img.complete) img.addEventListener("load", drawWires);
+    setTimeout(drawWires, 120);
+    setTimeout(drawWires, 500);
+  }
+  if (document.readyState === "loading") { document.addEventListener("DOMContentLoaded", boot); }
+  else { boot(); }
+})();
 </script>
 
 <script>
   window.EJS_player = "#game";
   window.EJS_core = "snes";
   window.EJS_gameName = "Super Waverace";
-  // ?v= is stamped with the commit SHA at deploy time so a fresh
-  // index.html always names a fresh ROM URL. IndexedDB caching is OFF
-  // outright (a 512K refetch is nothing): a stale index.html - GitHub
-  // Pages caches pages for 10 MINUTES - used to hand EmulatorJS an old
-  // ?v= key and serve a weeks-old ROM out of IndexedDB, which burned a
-  // whole debugging session. Testing within 10 min of a push can STILL
-  // show the previous build; hard-reload after the window passes.
+  // ?v= is stamped with the commit SHA at deploy time so a fresh index.html
+  // always names a fresh ROM URL. IndexedDB caching is OFF outright (a 512K
+  // refetch is nothing): a stale index.html - GitHub Pages caches pages for
+  // 10 MINUTES - used to hand EmulatorJS an old ?v= key and serve a weeks-old
+  // ROM out of IndexedDB. Testing within 10 min of a push can STILL show the
+  // previous build; hard-reload after the window passes.
   window.EJS_gameUrl = "superwaverace.sfc?v=dev";
   window.EJS_disableDatabases = true;
   window.EJS_pathtodata = "https://cdn.emulatorjs.org/4.2.3/data/";
