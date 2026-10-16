@@ -259,6 +259,11 @@ u16 pjPfA, pjPfV, pjPfLines; // projection-block profile (DEBUG_UI only)
 u16 collOfs;
 u8 collVal, collHere;
 u16 skiWX, skiWY;
+// swept-nose barrier check: the nose (collision point, 200 units ahead) can
+// swing across a one-cell rope while turning; pWX/pWY is last tick's nose so
+// we can walk its path and stop it threading. swNose/swLev/swA/swS are scratch.
+u16 pWX, pWY, swNoseX, swNoseY, swLevX, swLevY, swAX, swAY, swSX, swSY;
+s16 swDX, swDY;
 s16 stepX, stepY;
 // buoys
 u16 rdV, rdRow, rdD;
@@ -1163,6 +1168,8 @@ static void raceInit(void)
     camCosNeg = npcCos < 0 ? 1 : 0;
     camPX = (u16)(initX - ((WAVE_SKI_DIST * npcSin) >> 7)) & 4095;
     camPY = (u16)(initY - ((WAVE_SKI_DIST * npcCos) >> 7)) & 4095;
+    pWX = initX; // seed the swept-nose history at the ski's start (the nose)
+    pWY = initY;
     apFine = 0;  // BSS
     apStuck = 0;
     skiLean = 0; // BSS is not zero-initialised: garbage here reached
@@ -3326,6 +3333,53 @@ int main(void)
             }
         }
         camPY += stepY;
+
+        // ---- swept-nose barrier check: the per-axis probes above only test
+        // the nose's DESTINATION cell, so swinging the 200-unit nose across a
+        // one-cell-thick rope while turning threads it (rare, but anyone can
+        // line it up on most courses). Walk the nose's path since last tick
+        // in quarter steps; the moment it crosses a solid cell, snap the nose
+        // - and the camera with it - back to the last water cell and kill the
+        // drive. Human player only (!attract): the chaser/intro follow the
+        // racing line, and a false snap there would stall them.
+        if (!attract && !split)
+        {
+            swNoseX = (u16)(skiWX + stepX) & 4095; // nose after this tick's move
+            swNoseY = (u16)(skiWY + stepY) & 4095;
+            swLevX = (u16)(swNoseX - camPX) & 4095; // nose - camera (this tick)
+            swLevY = (u16)(swNoseY - camPY) & 4095;
+            swDX = (s16)((swNoseX - pWX) & 4095);  // nose travel since last tick
+            if (swDX > 2048)
+                swDX -= 4096;
+            swDY = (s16)((swNoseY - pWY) & 4095);
+            if (swDY > 2048)
+                swDY -= 4096;
+            swDX >>= 2; // quarter step - 4 samples span the whole (<=~34u) move
+            swDY >>= 2;
+            swAX = pWX;
+            swAY = pWY;
+            swSX = pWX; // last water sample
+            swSY = pWY;
+            for (bi = 0; bi < 4; bi++)
+            {
+                swAX = (u16)(swAX + swDX) & 4095;
+                swAY = (u16)(swAY + swDY) & 4095;
+                collOfs = ((swAY >> 5) & 127) * 128 + ((swAX >> 5) & 127);
+                collProbe();
+                if (collVal)
+                {
+                    camPX = (u16)(swSX - swLevX) & 4095; // nose -> last water cell
+                    camPY = (u16)(swSY - swLevY) & 4095;
+                    skiVX = 0;
+                    skiVY = 0;
+                    break;
+                }
+                swSX = swAX;
+                swSY = swAY;
+            }
+            pWX = (u16)(camPX + swLevX) & 4095; // final nose, for next tick
+            pWY = (u16)(camPY + swLevY) & 4095;
+        }
 
 #if WAVE_MAX_PATH > 0
         // ---- race progress. Advance to the next waypoint when within
