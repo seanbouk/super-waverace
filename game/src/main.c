@@ -3354,28 +3354,36 @@ int main(void)
             swDY = (s16)((swNoseY - pWY) & 4095);
             if (swDY > 2048)
                 swDY -= 4096;
-            swDX >>= 2; // quarter step - 4 samples span the whole (<=~34u) move
-            swDY >>= 2;
-            swAX = pWX;
-            swAY = pWY;
-            swSX = pWX; // last water sample
-            swSY = pWY;
-            for (bi = 0; bi < 4; bi++)
+            // ONLY sweep when the nose is moving fast enough to skip a 32-unit
+            // cell (which is what threads a thin rope): translation tops out
+            // ~24 and a turn adds ~10, so >=28 is the fast-and-turning regime.
+            // Below that the per-axis + embedded probes already block correctly
+            // AND let you reverse off a rope - the swept snap used to pin you.
+            if ((swDX < 0 ? -swDX : swDX) + (swDY < 0 ? -swDY : swDY) >= 28)
             {
-                swAX = (u16)(swAX + swDX) & 4095;
-                swAY = (u16)(swAY + swDY) & 4095;
-                collOfs = ((swAY >> 5) & 127) * 128 + ((swAX >> 5) & 127);
-                collProbe();
-                if (collVal)
+                swDX >>= 2; // quarter step - 4 samples span the whole (<=~34u) move
+                swDY >>= 2;
+                swAX = pWX;
+                swAY = pWY;
+                swSX = pWX; // last water sample
+                swSY = pWY;
+                for (bi = 0; bi < 4; bi++)
                 {
-                    camPX = (u16)(swSX - swLevX) & 4095; // nose -> last water cell
-                    camPY = (u16)(swSY - swLevY) & 4095;
-                    skiVX = 0;
-                    skiVY = 0;
-                    break;
+                    swAX = (u16)(swAX + swDX) & 4095;
+                    swAY = (u16)(swAY + swDY) & 4095;
+                    collOfs = ((swAY >> 5) & 127) * 128 + ((swAX >> 5) & 127);
+                    collProbe();
+                    if (collVal)
+                    {
+                        camPX = (u16)(swSX - swLevX) & 4095; // nose -> last water
+                        camPY = (u16)(swSY - swLevY) & 4095;
+                        skiVX = 0;
+                        skiVY = 0;
+                        break;
+                    }
+                    swSX = swAX;
+                    swSY = swAY;
                 }
-                swSX = swAX;
-                swSY = swAY;
             }
             pWX = (u16)(camPX + swLevX) & 4095; // final nose, for next tick
             pWY = (u16)(camPY + swLevY) & 4095;
