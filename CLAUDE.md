@@ -67,10 +67,9 @@ Machines: `seanb` (original) and `Sean` (Aug-28 clone, `C:\Users\Sean\Downloads\
    tools/mesen/tickshot.lua` (with the env vars from its header) proves
    the harness works. The conversation history does not travel: this
    file + docs/PLAN.md "Multi-course" + "Game flow" ARE the state.
-   Multi-course phases 1-4 done, phase 5 (content) is in progress: SIX
-   courses build, all geometric clones of course 1 with distinct
-   palettes/skies/wave profiles (see the State section) - real layouts
-   are the remaining authoring work. The game-flow plan is COMPLETE
+   Multi-course phases 1-5 done: SIX courses build, each with its OWN
+   authored layout (Oct 2026 - no longer geometric clones), plus distinct
+   palettes/skies/wave profiles (see the State section). The game-flow plan is COMPLETE
    through phase 3 (title/attract, menu, rider + course select, time
    trials, arcade, championship with flyover intros and the in-race
    results table) AND the 2P split screen (ARCADE, in the jam, 12 Hz
@@ -838,11 +837,12 @@ move waypoint 0/1 in the painter to move the grid.
   water via its own sea_pattern.png, lawn-green sand, "flat" profile amp
   0.6), 04_deep_blue (deeper blue water with a hint of red, grey sand,
   "gentle" amp 1.5), 05_dawn_coast (pink zenith + pink ambient, pale sand,
-  calm). All are geometric clones of course 1 - layouts are the open
-  authoring work. Per-course water colour = a recoloured copy of the
-  shared pattern (same indices, new PLTE) dropped in the course folder.
-  06_twilight_sky (navy zenith over a sodium-amber horizon, amber ambient,
-  black sand). Menu names may be up to 20 chars (MENU_NAME_MAX; menuBuf
+  calm), 06_twilight_sky (navy zenith over a sodium-amber horizon, amber
+  ambient, black sand). EACH NOW HAS ITS OWN AUTHORED LAYOUT (Oct 2026,
+  painted in tools/course-painter and validated with tools/validate_course.py
+  - no longer geometric clones; Sunny Island is the original). Per-course
+  water colour = a recoloured copy of the shared pattern (same indices, new
+  PLTE) dropped in the course folder. Menu names may be up to 20 chars (MENU_NAME_MAX; menuBuf
   24). **The Mars experiment (Aug 29, REMOVED by git revert - do not
   re-add blind):** a 7th course with per-course gravity + a takeoff
   "bounce" kick. Findings worth keeping: (1) gravity alone is INVISIBLE -

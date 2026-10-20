@@ -30,9 +30,10 @@ table floats in the sky over the finish-line scene: finishers with a flag
 glide over the line and park ahead of you; PRESS START after 5s. Dithered
 clouds drift through the sky with a heading-linked parallax; the racers are
 double-height arcade sprites authored in Photoshop with four full rider
-palettes; START pauses (B quits to the title). Six courses build today, all
-geometric clones of the first with their own skies, water colours, ambient
-light and wave profiles — real layouts are the remaining authoring work.
+palettes; START pauses (B quits to the title). Six courses build today, each
+with its own authored layout, sky, water colour, ambient light and wave
+profile — SUNNY ISLAND, SUNSET COVE, GREY LAKE, DEEP BLUE, DAWN COAST and
+TWILIGHT SKY, painted in the in-repo course editor (`tools/course-painter`).
 Verified on real hardware up to the Aug-21 build (race, power, gradient HUD,
 start tree, clouds); pending a CRT pass: the tall racers / second OBJ table,
 the scanline-IRQ mode switch (now two-stage) + sand distance fade, the
