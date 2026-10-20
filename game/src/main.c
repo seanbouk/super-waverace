@@ -259,10 +259,11 @@ u16 pjPfA, pjPfV, pjPfLines; // projection-block profile (DEBUG_UI only)
 u16 collOfs;
 u8 collVal, collHere;
 u16 skiWX, skiWY;
-// swept-nose barrier check: the nose (collision point, 200 units ahead) can
-// swing across a one-cell rope while turning; pWX/pWY is last tick's nose so
-// we can walk its path and stop it threading. swNose/swLev/swA/swS are scratch.
-u16 pWX, pWY, swNoseX, swNoseY, swLevX, swLevY, swAX, swAY, swSX, swSY;
+// rope-embed recovery: pWX/pWY is the last water cell the nose sat on, so when
+// the nose grinds INTO a one-cell rope we can shove it back the way it came
+// instead of letting the nearest-neighbour nudge pick the far side (which was
+// how you got behind a rope). swDX/swDY are scratch for that delta.
+u16 pWX, pWY;
 s16 swDX, swDY;
 s16 stepX, stepY;
 // buoys
@@ -3273,31 +3274,55 @@ int main(void)
         collOfs = ((skiWY >> 5) & 127) * 128 + ((skiWX >> 5) & 127);
         collProbe();
         collHere = collVal;
-        if (collHere)
+        if (!collHere)
+        {
+            pWX = skiWX; // the nose is on water: remember it as the approach side
+            pWY = skiWY; // the rope recovery below backs out toward it
+        }
+        else
         {
             // embedded (rounding creep while grinding a wall while turning):
-            // push toward the nearest water neighbour and damp the drive -
-            // recovers in a few loops instead of roaming the land
+            // push back out and damp the drive - recovers in a few loops.
             skiVX -= skiVX >> 1;
             skiVY -= skiVY >> 1;
-            collOfs = (((u16)(skiWY - 32) >> 5) & 127) * 128 + ((skiWX >> 5) & 127);
-            collProbe();
-            if (!collVal)
-                camPY -= 4;
+            if (collHere == 2)
+            {
+                // a THIN rope has water on BOTH sides, so a nearest-neighbour
+                // nudge can pick the FAR side and shove the nose through (THAT
+                // was "getting behind a rope" - grind the nose in while turning
+                // and the recovery pushes you across). Back toward the last
+                // water the nose came from instead, so it can never cross.
+                swDX = (s16)((pWX - skiWX) & 4095);
+                if (swDX > 2048)
+                    swDX -= 4096;
+                swDY = (s16)((pWY - skiWY) & 4095);
+                if (swDY > 2048)
+                    swDY -= 4096;
+                camPX += swDX < 0 ? -4 : swDX > 0 ? 4 : 0;
+                camPY += swDY < 0 ? -4 : swDY > 0 ? 4 : 0;
+            }
             else
             {
-                collOfs = (((u16)(skiWY + 32) >> 5) & 127) * 128 + ((skiWX >> 5) & 127);
+                // sand: slide toward the nearest water neighbour (shore feel)
+                collOfs = (((u16)(skiWY - 32) >> 5) & 127) * 128 + ((skiWX >> 5) & 127);
                 collProbe();
                 if (!collVal)
-                    camPY += 4;
+                    camPY -= 4;
                 else
                 {
-                    collOfs = ((skiWY >> 5) & 127) * 128 + (((u16)(skiWX - 32) >> 5) & 127);
+                    collOfs = (((u16)(skiWY + 32) >> 5) & 127) * 128 + ((skiWX >> 5) & 127);
                     collProbe();
                     if (!collVal)
-                        camPX -= 4;
+                        camPY += 4;
                     else
-                        camPX += 4; // east, or keep pushing until a gap opens
+                    {
+                        collOfs = ((skiWY >> 5) & 127) * 128 + (((u16)(skiWX - 32) >> 5) & 127);
+                        collProbe();
+                        if (!collVal)
+                            camPX -= 4;
+                        else
+                            camPX += 4; // east, or keep pushing until a gap opens
+                    }
                 }
             }
         }
@@ -3333,61 +3358,6 @@ int main(void)
             }
         }
         camPY += stepY;
-
-        // ---- swept-nose barrier check: the per-axis probes above only test
-        // the nose's DESTINATION cell, so swinging the 200-unit nose across a
-        // one-cell-thick rope while turning threads it (rare, but anyone can
-        // line it up on most courses). Walk the nose's path since last tick
-        // in quarter steps; the moment it crosses a solid cell, snap the nose
-        // - and the camera with it - back to the last water cell and kill the
-        // drive. Human player only (!attract): the chaser/intro follow the
-        // racing line, and a false snap there would stall them.
-        if (!attract && !split)
-        {
-            swNoseX = (u16)(skiWX + stepX) & 4095; // nose after this tick's move
-            swNoseY = (u16)(skiWY + stepY) & 4095;
-            swLevX = (u16)(swNoseX - camPX) & 4095; // nose - camera (this tick)
-            swLevY = (u16)(swNoseY - camPY) & 4095;
-            swDX = (s16)((swNoseX - pWX) & 4095);  // nose travel since last tick
-            if (swDX > 2048)
-                swDX -= 4096;
-            swDY = (s16)((swNoseY - pWY) & 4095);
-            if (swDY > 2048)
-                swDY -= 4096;
-            // ONLY sweep when the nose is moving fast enough to skip a 32-unit
-            // cell (which is what threads a thin rope): translation tops out
-            // ~24 and a turn adds ~10, so >=28 is the fast-and-turning regime.
-            // Below that the per-axis + embedded probes already block correctly
-            // AND let you reverse off a rope - the swept snap used to pin you.
-            if ((swDX < 0 ? -swDX : swDX) + (swDY < 0 ? -swDY : swDY) >= 28)
-            {
-                swDX >>= 2; // quarter step - 4 samples span the whole (<=~34u) move
-                swDY >>= 2;
-                swAX = pWX;
-                swAY = pWY;
-                swSX = pWX; // last water sample
-                swSY = pWY;
-                for (bi = 0; bi < 4; bi++)
-                {
-                    swAX = (u16)(swAX + swDX) & 4095;
-                    swAY = (u16)(swAY + swDY) & 4095;
-                    collOfs = ((swAY >> 5) & 127) * 128 + ((swAX >> 5) & 127);
-                    collProbe();
-                    if (collVal)
-                    {
-                        camPX = (u16)(swSX - swLevX) & 4095; // nose -> last water
-                        camPY = (u16)(swSY - swLevY) & 4095;
-                        skiVX = 0;
-                        skiVY = 0;
-                        break;
-                    }
-                    swSX = swAX;
-                    swSY = swAY;
-                }
-            }
-            pWX = (u16)(camPX + swLevX) & 4095; // final nose, for next tick
-            pWY = (u16)(camPY + swLevY) & 4095;
-        }
 
 #if WAVE_MAX_PATH > 0
         // ---- race progress. Advance to the next waypoint when within
