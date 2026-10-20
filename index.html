@@ -188,10 +188,12 @@
   svg.wires {
     position: absolute; inset: 0;
     width: 100%; height: 100%;
-    pointer-events: none; z-index: 0; overflow: visible;
+    pointer-events: none; z-index: 5; overflow: visible;
   }
   .diagram > * { position: relative; z-index: 1; }
-  .diagram > svg.wires { position: absolute; inset: 0; z-index: 0; }
+  /* wires draw OVER the pad/cards so each trace visibly runs from the button
+     to its key (pointer-events:none keeps them click-through) */
+  .diagram > svg.wires { position: absolute; inset: 0; z-index: 5; }
 
   .controller-wrap { display: flex; justify-content: center; }
   .snespad { position: relative; width: 430px; max-width: 94%; }
@@ -665,7 +667,7 @@
   // 10 MINUTES - used to hand EmulatorJS an old ?v= key and serve a weeks-old
   // ROM out of IndexedDB. Testing within 10 min of a push can STILL show the
   // previous build; hard-reload after the window passes.
-  window.EJS_gameUrl = "superwaverace.sfc?v=21ef7e18b91010ceba5063f4ae9825dcac9e5353";
+  window.EJS_gameUrl = "superwaverace.sfc?v=e771eccb7bdf5124447770f87b25cc5d480b712b";
   window.EJS_disableDatabases = true;
   window.EJS_pathtodata = "https://cdn.emulatorjs.org/4.2.3/data/";
   window.EJS_backgroundColor = "#000000";
