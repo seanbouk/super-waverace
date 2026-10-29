@@ -58,17 +58,29 @@ The Sunset "orange→blue at the very top" looks like a *specific* corrupted
 entry; the Deep-Blue "three shades" looks like a *uniform tint*. There may be
 two mechanisms inside this family — don't assume one fix clears all of it.
 
-### Family B — horizon seam saturation / paleness
+### Family B — horizon seam saturation / paleness  *(ADDRESSED Oct 29)*
 
 - Grey Lake horizon slightly oversaturated; Deep Blue horizon slightly pale.
 
-The seam between the band's bottom anchor and the mode-7 safe strip is
-`backdrop 0 + COLDATA a15`; the bake already WARNs when a `sky_horizon`
-channel is below `a15` (today 14/31 → needs ≥112/255), because then the strip
-can't reproduce the band's bottom colour. These two courses are probably near
-that threshold, so the match that's exact in-emulator drifts on hardware.
-**Cheapest future tweak (pure data, re-bake only):** nudge those courses'
-`sky_horizon` channels up a notch. Not done — deferred with the rest.
+Root cause: both courses shipped `sky_horizon: None`, so the bake auto-derived
+the horizon as `zenith + a15` in **every** channel (the seam rule forces each
+horizon channel ≥ `a15` = 14/31 = 112/255, or the mode-7 safe strip can't
+reproduce the band's bottom colour). That forced-brightening is exactly the
+symptom: Deep Blue's deep navy had red/green shoved up to ~120 → washed pale;
+Grey Lake's muted teal-grey got a cool blue bias → oversaturated.
+
+**Fix (data only, no code):** authored explicit `sky_horizon` per course,
+kept seam-legal (every channel ≥ 112 → no bake warning):
+- Grey Lake `#d8d8e0` (5-bit 27,27,28) — neutral grey, kills the cool-teal
+  bias; backdrop-behind-text goes neutral too (bd5 13,13,14).
+- Deep Blue `#7078f0` (5-bit 14,15,30) — green dropped to cut the cyan
+  paleness, blue kept deep (bd5 0,1,16, a deeper blue behind text).
+
+Verified: validate_course clean, rebake clean (no seam warning, ROM at cap),
+and the emulator baselines now read overcast-grey / deep-blue as intended
+(race shots, autopilot courses 2 & 3). The **hardware** improvement still
+needs the user's CRT to confirm — this tunes the baseline toward the safe
+region, it doesn't prove the hardware delta is gone.
 
 ### Possibly distinct (user-flagged)
 
@@ -78,8 +90,8 @@ that threshold, so the match that's exact in-emulator drifts on hardware.
 ## If/when a CRT pass happens
 
 Order of attack, cheapest first:
-1. Family B horizon nudges — data-only, zero risk, might also calm Family A's
-   "slightly pale" edge.
+1. ~~Family B horizon nudges~~ — DONE Oct 29 (authored `sky_horizon` for Grey
+   Lake + Deep Blue). Confirm on the CRT next time the flashcart is out.
 2. Instrument the sand-fade CGRAM HDMA on hardware (is CGRAM 31/zenith intact
    mid-frame?) to confirm or clear suspect 1.
 3. Only then weigh a COLDATA/colour-math change — that one *is* a "major
