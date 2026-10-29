@@ -924,4 +924,11 @@ move waypoint 0/1 in the painter to move the grid.
   the teal shore rework, and everything from Sep 2: the two-stage IRQ's
   mid-frame BG3HOFS write (active line 32), BG3 enabled in the band's TM,
   the 2bpp sky font (results table + intro card).
+- **CRT pass Oct 29 2026 (NTSC Trinitron, release e771ecc):** confirmed a
+  cluster of sky/backdrop colour artifacts - top-of-sky and text-backing
+  cells read blue-teal instead of the course zenith, emulators clean. Full
+  list + triage + leading suspects (sand-fade CGRAM HDMA / COLDATA colour
+  math / late CGRAM writes) in docs/HARDWARE.md. User judged all P3/P4 and
+  DEFERRED - no major changes before the jam. Cheapest future win noted
+  there: nudge Grey Lake / Deep Blue sky_horizon channels up (data-only).
 - CPU: ~45% of the 2-frame loop free; ROM ~58% free; CGRAM map in README.
