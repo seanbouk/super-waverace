@@ -58,6 +58,40 @@ The Sunset "orange→blue at the very top" looks like a *specific* corrupted
 entry; the Deep-Blue "three shades" looks like a *uniform tint*. There may be
 two mechanisms inside this family — don't assume one fix clears all of it.
 
+**Investigation Oct 29 (what the emulator CAN prove):**
+
+- **The ROM palette is correct.** Live CGRAM dump during attract (Sunny
+  Island) via `scratchpad/cgdump.lua` on the release ROM:
+  `C0`(backdrop)=(2,7,17), `C29`(cloud white)=(31,31,31),
+  `C30`(cloud shade)=(25,27,30), `C31`(zenith/HUD backing)=(2,7,18),
+  `C40/C47`(sky anchors)=(9,14,24)/(16,21,31), `C79/95/111`(csZen)=(2,7,18).
+  Every entry the blue appears on is the authored colour. **So Family A is a
+  hardware-side rendering effect, not a baked bug** — nothing to fix in the
+  palette/bake.
+- **It is not additive colour math and not the sub-screen.** `CGADSUB=0x21`
+  (add, BG1+backdrop), `CGWSEL=0x00` (fixed colour, sub-screen ignored). An
+  *additive* COLDATA can't turn white (31,31,31) into blue, and the clouds
+  are **BG3**, which isn't in colour math at all — so "white clouds / white
+  FINISH text → blue" cannot be colour-math or sub-screen bleed. That kills
+  suspect 2 for the white-goes-blue symptom and suspect 3's sub-screen angle.
+- Most likely residue: a true analog / PPU-readback skew of the lightest sky
+  colours on this console+CRT, which no emulator models. Not confidently
+  ROM-fixable. The one part with a ROM-side hook is the "slightly **pale**"
+  top (suspect 2's COLDATA half) — see the experiment below.
+
+**Experiment shipped (unverified — needs the CRT):** `vblTop` (the per-frame
+NMI frame-top restore) now also writes `REG_COLDATA = 0xE0` (add-zero),
+alongside its existing mode / BG3HOFS resets. Rationale: if the ch2 COLDATA
+HDMA's first transfer lags the first visible line on hardware, the top band
+would inherit the previous frame's sea crest-glow add (→ pale/tint); forcing
+$2132 to add-zero in vblank closes that window. It is a **no-op on emulators**
+(verified: attract renders identically) and across all states (menus/results
+already set COLDATA=0xE0 themselves), so it is zero-risk and one line to wind
+back. **May be inert** (hardware's HDMA init often covers line 0) and does
+**not** target the white-clouds-blue symptom (that looks analog). Flash it on
+the next cart; if the top band is no cleaner, revert the vblTop line — we've
+then learned the stale-COLDATA theory is wrong and Family A is analog-only.
+
 ### Family B — horizon seam saturation / paleness  *(ADDRESSED Oct 29)*
 
 - Grey Lake horizon slightly oversaturated; Deep Blue horizon slightly pale.

@@ -754,6 +754,13 @@ static void waveHdma(u16 ph, u16 bufOff)
 static void vblTop(void)
 {
     REG_BGMODE = 0x09;
+    // frame-top hardening (like the mode/BG3HOFS resets above): force the
+    // fixed-colour add to zero before the ch2 COLDATA HDMA takes over, so a
+    // stale crest-glow level left in $2132 by the previous frame's sea lines
+    // can't tint/pale the top band on real hardware if its first HDMA
+    // transfer lags the first visible line (emulators re-latch cleanly, so
+    // this is a no-op there - a hardware-only CRT-pass experiment, Family A).
+    REG_COLDATA = 0xE0;
     REG_BG3HOFS = 0; // the band's BG3 (intro text) sits still; the
     REG_BG3HOFS = 0; // line-31 IRQ scrolls the cloud rows below it
     irqStage = 0;
