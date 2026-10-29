@@ -79,18 +79,43 @@ two mechanisms inside this family — don't assume one fix clears all of it.
   ROM-fixable. The one part with a ROM-side hook is the "slightly **pale**"
   top (suspect 2's COLDATA half) — see the experiment below.
 
-**Experiment shipped (unverified — needs the CRT):** `vblTop` (the per-frame
-NMI frame-top restore) now also writes `REG_COLDATA = 0xE0` (add-zero),
-alongside its existing mode / BG3HOFS resets. Rationale: if the ch2 COLDATA
-HDMA's first transfer lags the first visible line on hardware, the top band
-would inherit the previous frame's sea crest-glow add (→ pale/tint); forcing
-$2132 to add-zero in vblank closes that window. It is a **no-op on emulators**
-(verified: attract renders identically) and across all states (menus/results
-already set COLDATA=0xE0 themselves), so it is zero-risk and one line to wind
-back. **May be inert** (hardware's HDMA init often covers line 0) and does
-**not** target the white-clouds-blue symptom (that looks analog). Flash it on
-the next cart; if the top band is no cleaner, revert the vblTop line — we've
-then learned the stale-COLDATA theory is wrong and Family A is analog-only.
+**Experiment 1 — COLDATA=0xE0 in vblTop — TRIED AND REVERTED (Oct 29).**
+Added `REG_COLDATA = 0xE0` to the per-frame frame-top restore, on the theory
+a stale crest-glow add bled onto the top band. Shipped in `209f35d`, flashed
+to the NTSC Trinitron. **Result: no change** — the top was still blue on the
+results screen. Reverted in the following commit. (It only ever targeted the
+"pale top during live racing/pause", which that arcade run didn't exercise,
+so the pale-top theory is neither confirmed nor refuted — but the results
+blue is a *different* symptom, see below.)
+
+**Sharpened by the second hardware run (Oct 29, arcade on Sunset Cove):**
+the whole **race rendered with correct colours**; the blue appeared **only
+when the results screen came up**, and only **at the very top and just above
+the horizon** — the two scanline-boundary regions, not the middle of the
+gradient. That is decisive:
+
+- It is **results-state-specific**, not a global palette/analog skew (the
+  same course's live race was clean).
+- "Just above the horizon" is the **mode-1→mode-7 switch / safe-strip seam**;
+  "very top" is the band start. Blue at the seam = a line or two of **sea**
+  showing where sky should, i.e. the switch/backdrop landing a hair off on
+  hardware — the **same class as the documented web-player bug** ("the
+  mid-frame mode switch lands a few lines late and drew sea over the HUD").
+- The only sky-region deltas at `raceState==2` vs a live race are
+  `skyUp=1` + `cloudHofs=0` (BG3 holds the results table and stops scrolling)
+  and the static, stopped camera. So the suspect is the **scroll / mode-switch
+  timing at the seam when the scene is static and BG3 is the table**, not any
+  colour register.
+
+**Status: NOT a quick ROM tweak.** Palette is proven correct, colour math is
+proven innocent, and the remaining cause is a hardware mode-switch/seam timing
+effect with no emulator to verify a fix against. It shows up only on the
+*static results screen* — the actual racing (where players spend ~all their
+time) is clean on hardware. **Recommendation: accept + document for the jam.**
+If revisited post-jam, the targeted move is to give the results/finish screen
+its own clean full-mode-1 sky instead of leaving the live mode-7 seam on
+screen under the table — that is a real change, not a one-liner, and still
+needs CRT iteration.
 
 ### Family B — horizon seam saturation / paleness  *(ADDRESSED Oct 29)*
 
